@@ -5,6 +5,8 @@ services:
     name: fantasy-trade-desk
     runtime: node
     plan: free
+    # Yahoo Fantasy Sports is US-only and its API refuses non-US addresses; keep the service in a US region.
+    region: oregon
     buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /healthz
