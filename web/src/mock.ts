@@ -16,12 +16,14 @@ const ROWS: Row[] = [
   ["Kenneth Walker III", "RB", "SEA", 12.1, 8, 0, "Q"],
   ["Tony Pollard", "RB", "TEN", 9.8, 10, 0],
   ["Rhamondre Stevenson", "RB", "NE", 8.4, 14, 0],
-  ["Justin Jefferson", "WR", "MIN", 17.5, 6, 0],
+  ["Chase Brown", "RB", "CIN", 13.4, 10, 0],
+  ["Ja'Marr Chase", "WR", "CIN", 20.1, 10, 0],
   ["Garrett Wilson", "WR", "NYJ", 13.2, 9, 0],
   ["DK Metcalf", "WR", "PIT", 11.0, 5, 0],
   ["Jakobi Meyers", "WR", "LV", 10.2, 8, 0],
   ["Rashee Rice", "WR", "KC", 12.5, 10, 0, "Out|Knee"],
   ["Evan Engram", "TE", "DEN", 8.1, 12, 0],
+  ["Kyle Pitts", "TE", "ATL", 7.6, 5, 0],
   ["Brandon Aubrey", "K", "DAL", 9.0, 10, 0],
   ["Steelers D/ST", "DEF", "PIT", 7.8, 5, 0],
   // Team 2
@@ -30,7 +32,7 @@ const ROWS: Row[] = [
   ["James Cook", "RB", "BUF", 14.2, 7, 1],
   ["Chuba Hubbard", "RB", "CAR", 11.3, 14, 1],
   ["Tyjae Spears", "RB", "TEN", 7.1, 10, 1],
-  ["Ja'Marr Chase", "WR", "CIN", 20.1, 10, 1],
+  ["Justin Jefferson", "WR", "MIN", 17.5, 6, 1],
   ["Nico Collins", "WR", "HOU", 14.8, 6, 1],
   ["Terry McLaurin", "WR", "WAS", 11.8, 12, 1],
   ["Courtland Sutton", "WR", "DEN", 10.9, 12, 1],
@@ -135,7 +137,8 @@ const PLAYERS: VP[] = ROWS.map(([name, pos, team, ppg, bye, , inj], i) => {
 const BY_ID = new Map(PLAYERS.map((p) => [p.id, p]));
 
 // Replacement level + value per the spec (4-team league, 1 FLEX).
-const REPL_RANK: Record<Position, number> = { QB: 6, RB: 12, WR: 12, TE: 6, K: 6, DEF: 6 };
+// Deeper than the 4-team formula so bench players keep some value in the fixtures.
+const REPL_RANK: Record<Position, number> = { QB: 7, RB: 20, WR: 20, TE: 8, K: 6, DEF: 6 };
 const replacement: Record<string, number> = {};
 for (const pos of Object.keys(REPL_RANK) as Position[]) {
   const sorted = PLAYERS.filter((p) => p.pos === pos).sort((a, b) => b.ppg - a.ppg);
