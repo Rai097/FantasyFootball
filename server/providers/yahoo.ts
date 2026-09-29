@@ -189,6 +189,7 @@ async function tokenRequest(params: Record<string, string>): Promise<Tokens> {
     throw new YahooError(`Yahoo token response had no access_token. Raw (first 500 chars): ${text.slice(0, 500)}`, 502, undefined, text.slice(0, 2000), TOKEN_URL);
   }
   const expiresIn = Number(j.expires_in ?? 3600);
+  console.log(`[yahoo] token issued; scope=${typeof j.scope === "string" ? j.scope : "(not reported)"} guid=${typeof j.xoauth_yahoo_guid === "string" ? "yes" : "no"}`);
   return {
     access_token: j.access_token,
     refresh_token: typeof j.refresh_token === "string" ? j.refresh_token : "",
@@ -435,6 +436,33 @@ async function fetchFreeAgentsRaw(key: string): Promise<YahooPlayerEntry[]> {
 // provider
 // ---------------------------------------------------------------------------
 
+/**
+ * A 403 on user data can mean (a) the token was issued without the Fantasy
+ * Sports scope, (b) the Yahoo app has no Fantasy Sports permission, or (c) a
+ * transient Yahoo problem. Probe a public endpoint and a minimal user endpoint
+ * to tell them apart and produce a precise hint.
+ */
+async function diagnose403(original: YahooError): Promise<YahooError> {
+  const probe = async (path: string): Promise<string> => {
+    try {
+      await yget(path, () => true);
+      return "ok";
+    } catch (e) {
+      return e instanceof YahooError ? `HTTP ${e.status}` : "error";
+    }
+  };
+  const pub = await probe("/game/nfl");
+  const user = await probe("/users;use_login=1/games");
+  console.warn(`[yahoo] 403 diagnostics: /game/nfl=${pub} /users;use_login=1/games=${user}`);
+  let hint: string;
+  if (pub === "ok" && user !== "ok")
+    hint = "Your login token works for public data but not for your account, so it lacks the Fantasy Sports permission. Open https://developer.yahoo.com/apps/, click your app, confirm 'Fantasy Sports - Read' is ticked under API Permissions (re-tick and save if not), then in this app click Disconnect and Connect Yahoo again. On Yahoo's approval page, the text must mention Fantasy Sports.";
+  else if (pub !== "ok" && user !== "ok")
+    hint = "Yahoo rejects every Fantasy Sports call with this token, which points at the app registration itself: the app must have 'Fantasy Sports - Read' under API Permissions at https://developer.yahoo.com/apps/. If it is ticked, delete and recreate the app, update YAHOO_CLIENT_ID/SECRET, then Disconnect and Connect again.";
+  else hint = "Yahoo allowed a basic account call but denied the leagues listing. Click Retry once; if it persists, paste this message into the Claude session.";
+  return new YahooError(`${original.message} [diagnostics: /game/nfl=${pub}, /users;use_login=1/games=${user}]`, 403, hint, original.yahooBody, original.endpoint);
+}
+
 export const yahoo: YahooProvider = {
   isConfigured: () => Boolean(config.yahooClientId && config.yahooClientSecret),
 
@@ -473,9 +501,14 @@ export const yahoo: YahooProvider = {
     try {
       res = await yget("/users;use_login=1/games;game_keys=nfl/leagues/teams", parseUserGames);
     } catch (err) {
-      if (!(err instanceof YahooError) || ![400, 404, 502].includes(err.status)) throw err;
+      if (!(err instanceof YahooError) || ![400, 403, 404, 502].includes(err.status)) throw err;
       console.warn(`[yahoo] leagues/teams call failed (${err.message.slice(0, 200)}); falling back to separate calls`);
-      res = await yget("/users;use_login=1/games;game_keys=nfl/leagues", parseUserGames);
+      try {
+        res = await yget("/users;use_login=1/games;game_keys=nfl/leagues", parseUserGames);
+      } catch (err2) {
+        if (err2 instanceof YahooError && err2.status === 403) throw await diagnose403(err2);
+        throw err2;
+      }
     }
     if (res.leagues.some((l) => !l.myTeamKey)) {
       try {
