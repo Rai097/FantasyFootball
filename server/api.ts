@@ -207,7 +207,7 @@ apiRouter.get(
     const team = teamParam(req, l.league);
     const players: Record<string, ValuedPlayer> = {};
     for (const p of relevantPlayers(l)) players[p.id] = p;
-    res.json({ league: l.league, players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team });
+    res.json({ league: l.league, players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes });
   }),
 );
 

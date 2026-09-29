@@ -1,6 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { acceptanceOf, evaluateTrade, fairnessOf, findTrades, partnerWouldConsider, type TradeContext } from "./trades.js";
+import {
+  MAX_REPEAT,
+  acceptanceOf,
+  corePlayers,
+  evaluateTrade,
+  fairnessOf,
+  findTrades,
+  partnerRefusalReason,
+  partnerWouldConsider,
+  verdictFor,
+  type TradeContext,
+} from "./trades.js";
 import { analyzeTeams } from "./analysis.js";
 import { league, team, vp } from "./testkit.js";
 import type { League, ValuedPlayer } from "./types.js";
@@ -63,6 +74,8 @@ test("a lopsided trade is rejected by the finder and declined by the evaluator",
   const ev = evaluateTrade(ctx, "me", "them", ["mWR2"], ["tWR1"]);
   assert.ok(ev.fairness < 0.85);
   assert.match(ev.why, /unlikely to accept/);
+  // Great for me, but never "Accept" when they would refuse.
+  assert.match(ev.verdict, /^They won't accept \(value to them 0\.\d+ < 0\.85\)$/);
   // My stud RB for their scrub RB: bad for me.
   const bad = evaluateTrade(ctx, "me", "them", ["mRB1"], ["tRB2"]);
   assert.equal(bad.verdict, "Decline");
@@ -81,4 +94,45 @@ test("evaluator agrees with the finder on a suggested trade", () => {
   const ev = evaluateTrade(ctx, "me", "them", t.me.gives.map((p) => p.id), t.them.gives.map((p) => p.id));
   assert.equal(ev.verdict, "Accept", ev.why);
   assert.equal(ev.me.lineupDelta, t.me.lineupDelta);
+});
+
+test("verdict never says Accept when the partner would refuse", () => {
+  assert.equal(verdictFor(2, 1.5, 0), "Accept");
+  assert.equal(verdictFor(2, 1.5, 0, partnerRefusalReason(0.5, 0)), "They won't accept (value to them 0.50 < 0.85)");
+  assert.equal(verdictFor(-3, 0.3, 0, "x"), "Decline"); // bad for me anyway
+  assert.equal(partnerRefusalReason(0.9, 0), "");
+  assert.match(partnerRefusalReason(1.2, -2), /their lineup −2\.0 ppg/);
+});
+
+test("low-value throw-ins only when they start for the receiver", () => {
+  // mBN / mWR2 (value ≤ 0.5) never start for the WR-rich partner; tBN / tRB2 never start for me.
+  const trades = findTrades(ctx, "me", { limit: 1000 });
+  assert.ok(trades.length > 0);
+  for (const t of trades) {
+    for (const p of t.me.gives) assert.ok(!["mBN", "mWR2"].includes(p.id), `padding ${p.id} in ${t.key}`);
+    for (const p of t.them.gives) assert.ok(!["tBN", "tRB2", "tRB1"].includes(p.id), `padding ${p.id} in ${t.key}`);
+  }
+});
+
+test("core players and diversity caps", () => {
+  const star = vp("s", "WR", 20, 60);
+  const mid = vp("m", "WR", 10, 4); // < 5 and < 10% of 64
+  const half = vp("h", "WR", 10, 4);
+  assert.deepEqual(corePlayers([star, mid]).map((p) => p.id), ["s"]);
+  assert.deepEqual(corePlayers([mid, half]).map((p) => p.id), ["m", "h"]); // each ≥ 10% of 8
+  // Rich league: many near-duplicate packages exist; each core player ≤ MAX_REPEAT per side, core keys unique.
+  const trades = findTrades(ctx, "me", { limit: 1000 });
+  const gives = new Map<string, number>();
+  const gets = new Map<string, number>();
+  const keys = new Set<string>();
+  for (const t of trades) {
+    const cg = corePlayers(t.me.gives).map((p) => p.id).sort();
+    const ct = corePlayers(t.them.gives).map((p) => p.id).sort();
+    const k = `${cg}>${ct}`;
+    assert.ok(!keys.has(k), `duplicate core key ${k}`);
+    keys.add(k);
+    for (const id of cg) gives.set(id, (gives.get(id) ?? 0) + 1);
+    for (const id of ct) gets.set(id, (gets.get(id) ?? 0) + 1);
+  }
+  for (const [id, n] of [...gives, ...gets]) assert.ok(n <= MAX_REPEAT, `${id} appears ${n}×`);
 });

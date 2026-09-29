@@ -25,8 +25,11 @@ export const eligible = (slot: SlotKind, pos: Position) => SLOT_ELIGIBILITY[slot
 
 /** Player can contribute this season (not out for the year, has a projection). */
 export const usable = (p: ValuedPlayer) => p.remainingGames > 0 && p.ppg > 0;
-/** ppg that counts toward starterPpg (0 for players who cannot play). */
-export const effPpg = (p: ValuedPlayer | null) => (p && usable(p) ? p.ppg : 0);
+/**
+ * Availability-adjusted ppg that counts toward starterPpg and drives lineup selection:
+ * ValuedPlayer.effPpg (ppg × remainingGames / weeksLeft), falling back to ppg; 0 for players who cannot play.
+ */
+export const effPpg = (p: ValuedPlayer | null) => (p && usable(p) ? (p.effPpg ?? p.ppg) : 0);
 
 export interface LineupResult {
   lineup: LineupSlot[];
@@ -35,7 +38,7 @@ export interface LineupResult {
 }
 
 const byStrength = (a: ValuedPlayer, b: ValuedPlayer) =>
-  Number(usable(b)) - Number(usable(a)) || b.ppg - a.ppg || b.value - a.value || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  Number(usable(b)) - Number(usable(a)) || effPpg(b) - effPpg(a) || b.ppg - a.ppg || b.value - a.value || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
  * Greedy optimal lineup. Exact slots take the best eligible players first, then

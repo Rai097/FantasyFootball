@@ -6,7 +6,15 @@ import { recFormat, score } from "./scoring.js";
 export const POSITIONS: Position[] = ["QB", "RB", "WR", "TE", "K", "DEF"];
 
 /** Blend weights (before renormalisation over available components). */
-export const WEIGHTS = { ecr: 0.5, current: 0.35, prior: 0.15 };
+export const WEIGHTS = { ecr: 0.65, current: 0.22, prior: 0.13 };
+/** Games at which the current-season component reaches its full weight. */
+export const CURRENT_FULL_GAMES = 5;
+/** Min games for a player to feed the current-season rank→points curve. */
+export const CURVE_MIN_GAMES = 3;
+/** Cap on the current-season curve relative to the prior-season curve at the same rank. */
+export const CURVE_CURRENT_CAP = 1.15;
+/** Games deducted for Out / Doubtful / Yahoo "designated to return" players. */
+export const INJURY_CUT = { out: 2, doubtful: 0.7, return: 4 } as const;
 /** Kicker / defense ppg straight from ECR positional rank. */
 export const KDEF_CURVE: Record<"K" | "DEF", { base: number; slope: number }> = {
   K: { base: 9, slope: 0.1 },
@@ -23,7 +31,8 @@ export const FLEX_SHARE: Partial<Record<SlotKind, Partial<Record<Position, numbe
 export const BENCH_DEPTH: Record<Position, number> = { QB: 2, RB: 6, WR: 6, TE: 3, K: 0, DEF: 0 };
 export const PLAYOFF_WEIGHT = 1.25;
 const CONVEXITY = 1.15;
-const LONG_TERM_RE = /ACL|Achilles|season|\bIR\b/i;
+const LONG_TERM_RE = /ACL|Achilles|season|\bIR\b|^NA\b/i;
+const RETURN_RE = /return designation/i;
 
 export interface Valuation {
   players: Map<string, ValuedPlayer>;
@@ -52,16 +61,26 @@ export function curveAt(curve: number[], rank: number): number {
   return curve[lo] + (curve[hi] - curve[lo]) * (idx >= curve.length - 1 ? 0 : f);
 }
 
-/** Classify an injury status (nflverse report or Yahoo code). */
-export function injuryKind(inj: Player["injury"]): "long" | "out" | "doubtful" | null {
+/**
+ * Classify an injury status (nflverse report or Yahoo code).
+ *  - long: IR / PUP / NFI / Yahoo NA, or Out/Doubtful with an ACL/Achilles/season/IR/NA detail → 0 games
+ *  - return: Yahoo "-R" designation (IR-R etc., detail "return designation", not IR) → Out, −4 games
+ *  - out / doubtful: −2 / −0.7 games
+ */
+export type InjuryKind = "long" | "return" | "out" | "doubtful";
+export function injuryKind(inj: Player["injury"]): InjuryKind | null {
   if (!inj) return null;
   const st = inj.status.trim().toUpperCase();
-  if (st === "IR" || st.startsWith("PUP") || st === "NFI" || LONG_TERM_RE.test(inj.detail ?? "")) {
-    // Detail-based long-term only applies when the player is actually out/doubtful/IR.
-    if (st === "IR" || st.startsWith("PUP") || st === "NFI" || st === "OUT" || st === "O" || st === "DOUBTFUL" || st === "D") return "long";
-  }
-  if (st === "OUT" || st === "O" || st === "SUSP") return "out";
-  if (st === "DOUBTFUL" || st === "D") return "doubtful";
+  const detail = (inj.detail ?? "").trim();
+  const isOut = st === "OUT" || st === "O";
+  const isDoubtful = st === "DOUBTFUL" || st === "D";
+  if (/^(IR|PUP|NFI)-R$/.test(st)) return "return";
+  if (st === "IR" || st.startsWith("PUP") || st === "NFI" || st === "NA") return "long";
+  // Detail-based classification only applies when the player is actually out/doubtful.
+  if ((isOut || isDoubtful) && RETURN_RE.test(detail) && !/\bIR\b/.test(detail)) return "return";
+  if ((isOut || isDoubtful) && LONG_TERM_RE.test(detail)) return "long";
+  if (isOut || st === "SUSP") return "out";
+  if (isDoubtful) return "doubtful";
   return null;
 }
 
@@ -79,6 +98,8 @@ interface Base {
   ecrUnranked: boolean;
   ppg: number;
   remainingGames: number;
+  /** Game weeks left ignoring injuries (bye removed): denominator of effPpg. */
+  weeksLeft: number;
   weightedGames: number;
   gameNotes: string[];
   wEcr: number;
@@ -134,11 +155,13 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
     for (const p of all) {
       if (p.pos !== pos) continue;
       const s = raw.get(p.id)!;
-      if (s.games >= 2) a.push(0.6 * s.ppgExp26 + 0.4 * s.ppg26);
+      if (s.games >= CURVE_MIN_GAMES) a.push(0.6 * s.ppgExp26 + 0.4 * s.ppg26);
       if (s.priorGames >= 8) b.push(s.ppg25);
     }
     a.sort((x, y) => y - x);
     b.sort((x, y) => y - x);
+    // Early-season outliers: the current-season curve may not exceed the prior curve by >15% at a rank.
+    for (let i = 0; i < Math.min(a.length, b.length); i++) a[i] = Math.min(a[i], CURVE_CURRENT_CAP * b[i]);
     const n = Math.max(a.length, b.length);
     const combined: number[] = [];
     for (let i = 0; i < n; i++) {
@@ -179,17 +202,18 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
       weighted += w >= playoffStart ? PLAYOFF_WEIGHT : 1;
     }
     if (byeInWindow) gameNotes.push(`bye wk ${p.bye}`);
+    const weeksLeft = remaining;
     if (p.team === "FA" && p.pos !== "DEF") {
       remaining = weighted = 0;
       gameNotes.push("no NFL team");
     } else if (injKind === "long") {
       remaining = weighted = 0;
       gameNotes.push(`${p.injury!.status}${p.injury!.detail ? ` (${p.injury!.detail})` : ""}: long-term, 0 games counted`);
-    } else if (injKind === "out" || injKind === "doubtful") {
-      const cut = injKind === "out" ? 2 : 0.7;
+    } else if (injKind === "out" || injKind === "doubtful" || injKind === "return") {
+      const cut = INJURY_CUT[injKind];
       remaining = Math.max(0, remaining - cut);
       weighted = Math.max(0, weighted - cut);
-      gameNotes.push(`${p.injury!.status} −${cut}`);
+      gameNotes.push(`${p.injury!.status}${injKind === "return" ? " (designated to return)" : ""} −${cut}`);
     }
 
     let ppg = 0;
@@ -219,7 +243,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
         comps.push({ v: ecrPts, w: wEcr });
       }
       if (s.games > 0) {
-        wCur = (WEIGHTS.current * Math.min(s.games, 3)) / 3;
+        wCur = (WEIGHTS.current * Math.min(s.games, CURRENT_FULL_GAMES)) / CURRENT_FULL_GAMES;
         comps.push({ v: 0.6 * s.ppgExp26 + 0.4 * s.ppg26, w: wCur });
       }
       if (s.hasPrior) {
@@ -247,6 +271,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
       ecrUnranked,
       ppg: Math.max(0, ppg),
       remainingGames: remaining,
+      weeksLeft,
       weightedGames: weighted,
       gameNotes,
       wEcr,
@@ -295,10 +320,12 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
     const rv = rawValue(b);
     const value = maxRaw > 0 && rv > 0 ? r1(100 * Math.pow(rv / maxRaw, CONVEXITY)) : 0;
     const weekProj = p.weekProjByFormat?.[fmt] ?? p.weekProj;
+    const effPpg = effPpgOf(b);
     return {
       ...p,
       weekProj,
       ppg: r2(b.ppg),
+      effPpg: r2(effPpg),
       ppg26: r2(b.ppg26),
       ppgExp26: r2(b.ppgExp26),
       ppg25: r2(b.ppg25),
@@ -308,7 +335,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
       posRank,
       remainingGames: r1(b.remainingGames),
       trend: r2(b.trend),
-      why: explain(b, replacement[p.pos], vorp, value, fmt),
+      why: explain(b, replacement[p.pos], vorp, value),
     };
   };
 
@@ -329,7 +356,23 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
   };
 }
 
-function explain(b: Base, repl: number, vorp: number, value: number, fmt: string): string {
+/** Note shown once per analysis response (instead of in every why string). */
+export function valuationNotes(league: League): string[] {
+  const notes: string[] = [];
+  if (recFormat(league.settings.scoring) !== "ppr") notes.push("ECR ranks are PPR; points use league scoring.");
+  return notes;
+}
+
+/**
+ * Availability-adjusted ppg used for lineups: ppg × remainingGames / weeksLeft, where
+ * weeksLeft = weeks currentWeek..finalWeek minus the bye. Healthy players: effPpg = ppg.
+ */
+function effPpgOf(b: Pick<Base, "ppg" | "remainingGames" | "weeksLeft">): number {
+  if (b.weeksLeft <= 0) return 0;
+  return Math.max(0, b.ppg) * Math.min(1, b.remainingGames / b.weeksLeft);
+}
+
+function explain(b: Base, repl: number, vorp: number, value: number): string {
   const p = b.p;
   const f1 = (x: number) => x.toFixed(1);
   const parts: string[] = [];
@@ -351,7 +394,10 @@ function explain(b: Base, repl: number, vorp: number, value: number, fmt: string
   s += ` ${p.pos} replacement ${f1(repl)} → +${f1(vorp)}/g × ${Math.round(games * 10) / 10} games`;
   if (b.gameNotes.length) s += ` (${b.gameNotes.join("; ")})`;
   s += ` → value ${f1(value)}.`;
+  const eff = effPpgOf(b);
+  if (b.remainingGames > 0 && b.remainingGames < b.weeksLeft) {
+    s += ` Lineup ppg ${f1(eff)} = ${f1(b.ppg)} × ${Math.round(b.remainingGames * 10) / 10}/${b.weeksLeft} games (availability-adjusted).`;
+  }
   if (b.injKind === "long" && p.pos !== "K" && p.pos !== "DEF") s += " Long-term injury: ECR weight halved so ppg reads as a healthy rate; games carry the penalty.";
-  if (p.pos !== "K" && p.pos !== "DEF" && b.ecrPts !== undefined && fmt !== "ppr") s += " ECR ranks are PPR; points use league scoring.";
   return s;
 }

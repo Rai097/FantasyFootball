@@ -79,6 +79,12 @@ export interface Player {
 /** Player + league-specific numbers. */
 export interface ValuedPlayer extends Player {
   ppg: number; // projected points per game rest-of-season, league scoring
+  /**
+   * Availability-adjusted ppg used for lineups: ppg × remainingGames / weeksLeft
+   * (weeksLeft = weeks to finalWeek minus the bye). Equals ppg for healthy players.
+   * Always set by the server; optional only so hand-made fixtures stay valid.
+   */
+  effPpg?: number;
   ppg26: number; // actual PPG this season under league scoring
   ppgExp26: number; // expected PPG this season (opportunity-based)
   ppg25: number; // prior season PPG

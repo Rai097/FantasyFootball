@@ -69,3 +69,35 @@ test("snap trend = last week minus earlier average", () => {
   assert.equal(snapTrendOf({ snapShare: { 1: 0.5, 2: 0.6, 3: 0.8 } }), 0.25);
   assert.equal(snapTrendOf({ snapShare: { 1: 0.5 } }), 0);
 });
+
+test("claim/optional rows first; value-0 ties broken on vorp, not raw ppg", () => {
+  const ctx = { ...ctxFor([...mine, ...other]), replacement: REPL };
+  const zeroQb = vp("FA_QB0", "QB", 14, 0); // 14 ppg but QB repl 15 → vorp −1
+  const zeroTe = vp("FA_TE0", "TE", 5.5, 0); // repl 6 → vorp −0.5
+  const good = vp("FA_RB_ok", "RB", 9.5, 5); // bench upgrade → optional
+  const r = rankWaivers(ctx, "me", [zeroQb, zeroTe, good].map((p) => ({ player: p, onWaivers: true })), { myPriority: 6 });
+  assert.deepEqual(r.freeAgents.map((t) => t.recommendation), ["optional", "pass", "pass"]);
+  assert.deepEqual(r.freeAgents.map((t) => t.id), ["FA_RB_ok", "FA_TE0", "FA_QB0"]);
+});
+
+test("wait rule compares ppg when the 5th-best FA has value 0", () => {
+  const ctx = ctxFor([...mine, ...other]);
+  // Six value-0 WRs that each start over my 3-ppg WR2 (gain 1.0–1.5, below the 1.8 claim threshold).
+  const rbs = [4.5, 4.4, 4.3, 4.2, 4.1, 4.0].map((ppg, i) => vp(`R${i}`, "WR", ppg, 0, { vorp: 0 }));
+  const r = rankWaivers(ctx, "me", rbs.map((p) => ({ player: p, onWaivers: true })), { myPriority: 6 });
+  const rec = (id: string) => r.freeAgents.find((t) => t.id === id)!;
+  assert.equal(rec("R5").recommendation, "wait", rec("R5").why);
+  assert.match(rec("R5").why, /4\.1 ppg/);
+  assert.notEqual(rec("R0").recommendation, "wait");
+});
+
+test("K / DEF never consume waiver priority", () => {
+  const ctx = ctxFor([...mine, ...other]);
+  const bigK = vp("FA_K", "K", 13, 10); // +5 ppg over my kicker: would be a claim for a skill player
+  const onW = rankWaivers(ctx, "me", [{ player: bigK, onWaivers: true }], { myPriority: 1 }).freeAgents[0];
+  assert.equal(onW.recommendation, "pass", onW.why);
+  const free = rankWaivers(ctx, "me", [{ player: bigK, onWaivers: false }], { myPriority: 1 }).freeAgents[0];
+  assert.equal(free.recommendation, "optional", free.why);
+  const worse = rankWaivers(ctx, "me", [{ player: vp("FA_K2", "K", 7, 0), onWaivers: false }]).freeAgents[0];
+  assert.equal(worse.recommendation, "pass");
+});

@@ -1,12 +1,14 @@
 // Trade finder + evaluator. See docs/DESIGN.md "Trade finder" (+ architect amendments).
 import type { League, Team, TeamAnalysis, Trade, TradeSide, ValuedPlayer } from "./types.js";
-import { eligible, optimalLineup, slotLabels, usable, type LineupResult } from "./lineup.js";
+import { effPpg, eligible, optimalLineup, slotLabels, type LineupResult } from "./lineup.js";
 import { rosterOf } from "./analysis.js";
 
 export interface TradeContext {
   league: League;
   players: Map<string, ValuedPlayer>;
   teams: TeamAnalysis[];
+  /** Replacement ppg per position (used by waivers for vorp tie-breaks); optional. */
+  replacement?: Partial<Record<ValuedPlayer["pos"], number>>;
 }
 
 export interface TradeOptions {
@@ -22,8 +24,13 @@ export interface TradeOptions {
 export const MIN_MY_DELTA = 0.75;
 export const FAIRNESS_CUSHION = 5;
 export const MAX_MY_VALUE_DROP = 0.2;
-/** Max times one exact outgoing (or incoming) package may appear in the results. */
+/** Max times one core player may appear in my gives (and, separately, in my gets) across the results. */
 export const MAX_REPEAT = 3;
+/** A traded player below this value must start for his new team, or the package is padding. */
+export const MIN_PIECE_VALUE = 3;
+/** Core players of a package: value ≥ CORE_VALUE or ≥ CORE_SHARE of the package value. */
+export const CORE_VALUE = 5;
+export const CORE_SHARE = 0.1;
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -44,6 +51,26 @@ export function acceptanceOf(fairness: number, themDelta: number): number {
 /** Partner-acceptance filter (architect amendment #3). */
 export function partnerWouldConsider(fairness: number, themDelta: number): boolean {
   return (themDelta >= -0.25 && fairness >= 0.85) || (fairness >= 1.1 && themDelta >= -1.0);
+}
+
+/** Why the partner would refuse (empty string when partnerWouldConsider is true). */
+export function partnerRefusalReason(fairness: number, themDelta: number): string {
+  if (partnerWouldConsider(fairness, themDelta)) return "";
+  if (fairness < 0.85) return `value to them ${fairness.toFixed(2)} < 0.85`;
+  if (themDelta < -1.0) return `their lineup ${fmtSigned(themDelta)} ppg`;
+  return `their lineup ${fmtSigned(themDelta)} ppg without a value premium (fairness ${fairness.toFixed(2)} < 1.10)`;
+}
+
+/** Players carrying a package: value ≥ 5 or ≥ 10% of the package value. */
+export function corePlayers(pkg: ValuedPlayer[]): ValuedPlayer[] {
+  const total = sum(pkg);
+  return pkg.filter((p) => p.value >= CORE_VALUE || p.value >= CORE_SHARE * total);
+}
+
+/** Every low-value piece (< MIN_PIECE_VALUE) must start for the team receiving him. */
+export function piecesJustified(pkg: ValuedPlayer[], receiverLineup: LineupResult): boolean {
+  const starters = new Set(receiverLineup.lineup.map((l) => l.player?.id).filter(Boolean));
+  return pkg.every((p) => p.value >= MIN_PIECE_VALUE || starters.has(p.id));
 }
 
 /** Roster after a trade, dropping lowest-value bench players (never incoming or IR) to keep size. */
@@ -76,7 +103,7 @@ function lineupChanges(before: LineupResult, after: LineupResult): string[] {
     const a = after.lineup[i]?.player ?? null;
     const b = l.player;
     if ((a?.id ?? null) === (b?.id ?? null)) return;
-    const fmt = (p: ValuedPlayer | null) => (p ? `${p.name} ${(usable(p) ? p.ppg : 0).toFixed(1)}` : "empty");
+    const fmt = (p: ValuedPlayer | null) => (p ? `${p.name} ${effPpg(p).toFixed(1)}` : "empty");
     out.push(`${labels[i]}: ${fmt(b)} → ${fmt(a)}`);
   });
   return out;
@@ -89,6 +116,8 @@ interface Sim {
   myFairness: number;
   myTotalBefore: number;
   myTotalAfter: number;
+  myLineupAfter: LineupResult;
+  theirLineupAfter: LineupResult;
 }
 
 function simulate(
@@ -127,6 +156,8 @@ function simulate(
     myFairness: fairnessOf(iReceiveNet, valueGivenByMe),
     myTotalBefore,
     myTotalAfter: myTotalBefore - valueGivenByMe + iReceiveNet,
+    myLineupAfter: meAfter.lineup,
+    theirLineupAfter: themAfter.lineup,
   };
 }
 
@@ -238,6 +269,8 @@ export function findTrades(ctx: TradeContext, myTeamId: string, opts: TradeOptio
         if (sim.me.lineupDelta < MIN_MY_DELTA) continue;
         if (sim.myTotalAfter < (1 - MAX_MY_VALUE_DROP) * sim.myTotalBefore) continue;
         if (!partnerWouldConsider(sim.fairness, sim.them.lineupDelta)) continue;
+        // No padding: a sub-3-value piece must start for whoever receives him.
+        if (!piecesJustified(get, sim.myLineupAfter) || !piecesJustified(give, sim.theirLineupAfter)) continue;
         const trade = buildTrade(ctx, sim, myAnalysis, partner);
         if (seen.has(trade.key)) continue;
         seen.add(trade.key);
@@ -246,16 +279,21 @@ export function findTrades(ctx: TradeContext, myTeamId: string, opts: TradeOptio
     }
   }
   out.sort((a, b) => b.score - a.score || b.acceptance - a.acceptance || a.key.localeCompare(b.key));
-  // Diversity: the same outgoing package (or incoming package) appears at most MAX_REPEAT times.
+  // Diversity: one trade per core-player key (partner + core gives > core gets), and each
+  // core player appears at most MAX_REPEAT times in my gives and MAX_REPEAT times in my gets.
+  const coreSeen = new Set<string>();
   const giveSeen = new Map<string, number>();
   const getSeen = new Map<string, number>();
   const picked: Trade[] = [];
   for (const t of out) {
-    const gk = t.me.gives.map((p) => p.id).sort().join(",");
-    const tk = t.them.gives.map((p) => p.id).sort().join(",");
-    if ((giveSeen.get(gk) ?? 0) >= MAX_REPEAT || (getSeen.get(tk) ?? 0) >= MAX_REPEAT) continue;
-    giveSeen.set(gk, (giveSeen.get(gk) ?? 0) + 1);
-    getSeen.set(tk, (getSeen.get(tk) ?? 0) + 1);
+    const coreGive = corePlayers(t.me.gives);
+    const coreGet = corePlayers(t.them.gives);
+    const ck = `${t.them.teamId}:${coreGive.map((p) => p.id).sort().join(",")}>${coreGet.map((p) => p.id).sort().join(",")}`;
+    if (coreSeen.has(ck)) continue;
+    if (coreGive.some((p) => (giveSeen.get(p.id) ?? 0) >= MAX_REPEAT) || coreGet.some((p) => (getSeen.get(p.id) ?? 0) >= MAX_REPEAT)) continue;
+    coreSeen.add(ck);
+    for (const p of coreGive) giveSeen.set(p.id, (giveSeen.get(p.id) ?? 0) + 1);
+    for (const p of coreGet) getSeen.set(p.id, (getSeen.get(p.id) ?? 0) + 1);
     picked.push(t);
     if (picked.length >= limit) break;
   }
@@ -268,7 +306,14 @@ export function findTrades(ctx: TradeContext, myTeamId: string, opts: TradeOptio
  * some value (VORP-based value understates players who replace sub-replacement
  * starters), mirroring the finder's rule that my total value may fall ≤ 20%.
  */
-export function verdictFor(myDelta: number, myFairness: number, myValueDrop = 0): string {
+export function verdictFor(myDelta: number, myFairness: number, myValueDrop = 0, partnerRefusal = ""): string {
+  const mine = myVerdict(myDelta, myFairness, myValueDrop);
+  // Never tell me to accept something the partner would not plausibly consider.
+  if (partnerRefusal && mine !== "Decline") return `They won't accept (${partnerRefusal})`;
+  return mine;
+}
+
+function myVerdict(myDelta: number, myFairness: number, myValueDrop: number): string {
   if (myValueDrop <= MAX_MY_VALUE_DROP && ((myDelta >= MIN_MY_DELTA && myFairness >= 0.5) || (myDelta >= 0 && myFairness >= 1.15))) return "Accept";
   if ((myDelta >= 0.25 && myFairness >= 0.5) || (myDelta >= -0.25 && myFairness >= 1.0)) return "Fair, lean accept";
   return "Decline";
@@ -296,11 +341,12 @@ export function evaluateTrade(
   const sim = simulate(ctx, my, their, give, get);
   const trade = buildTrade(ctx, sim, ctx.teams.find((t) => t.team.id === myTeamId), their.team);
   const valueDrop = sim.myTotalBefore > 0 ? 1 - sim.myTotalAfter / sim.myTotalBefore : 0;
-  const verdict = verdictFor(sim.me.lineupDelta, sim.myFairness, valueDrop);
+  const refusal = partnerRefusalReason(sim.fairness, sim.them.lineupDelta);
+  const verdict = verdictFor(sim.me.lineupDelta, sim.myFairness, valueDrop, refusal);
   const notes: string[] = [];
   notes.push(`Verdict "${verdict}": your lineup ${fmtSigned(sim.me.lineupDelta)} ppg, value to you ${sim.myFairness.toFixed(2)} (what you get vs give, +5 cushion).`);
   if (valueDrop > MAX_MY_VALUE_DROP) notes.push(`Warning: your total roster value falls ${Math.round(valueDrop * 100)}%.`);
-  if (!partnerWouldConsider(sim.fairness, sim.them.lineupDelta)) notes.push(`${their.team.name} is unlikely to accept.`);
+  if (refusal) notes.push(`${their.team.name} is unlikely to accept: ${refusal}.`);
   if (tradeDeadlinePassed(ctx.league)) notes.push("The trade deadline has passed.");
   return { ...trade, why: `${notes.join(" ")} ${trade.why}`, verdict };
 }

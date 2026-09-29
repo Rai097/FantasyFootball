@@ -160,6 +160,8 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.equal(status, 200);
     for (const k of ["league", "players", "teams", "replacement", "myTeamId"]) assert.ok(k in json, `analysis.${k}`);
     assertClean(json, "analysis");
+    assert.deepEqual(json.notes, ["ECR ranks are PPR; points use league scoring."]);
+    assert.ok(Object.values(json.players).every((p: any) => !/ECR ranks are PPR/.test(p.why)), "PPR note only in analysis.notes");
     const starting = json.league.settings.slots.filter((s: string) => s !== "BN" && s !== "IR");
     assert.equal(json.teams.length, 12);
     const ranks = new Set<number>();

@@ -38,6 +38,8 @@ export function snapTrendOf(p: { snapShare: Record<number, number> }): number {
   return r2(last - earlier.reduce((a, b) => a + b, 0) / earlier.length);
 }
 
+export const REC_ORDER: Record<WaiverTarget["recommendation"], number> = { claim: 0, optional: 1, wait: 2, pass: 3 };
+
 /** Drop-order comparator: lowest value, then lowest ppg, then worst ECR. */
 const dropOrder = (a: ValuedPlayer, b: ValuedPlayer) =>
   a.value - b.value || a.ppg - b.ppg || (b.ecrOverall ?? 9999) - (a.ecrOverall ?? 9999) || a.id.localeCompare(b.id);
@@ -110,7 +112,22 @@ export function rankWaivers(
 
     let recommendation: WaiverTarget["recommendation"];
     const reasons: string[] = [];
-    if (gain >= threshold) {
+    const isKDef = fa.pos === "K" || fa.pos === "DEF";
+    // 5th-best comparison on value; when that is 0 (everyone below replacement), compare ppg instead.
+    const belowFifth = !!fifth && (fifth.value === 0 ? fa.ppg < fifth.ppg : fa.value < fifth.value);
+    if (isKDef) {
+      // Kickers / defenses are streamed: never spend rolling-list priority on them.
+      if (gain <= 0.05 && benchGain <= 0) {
+        recommendation = "pass";
+        reasons.push("not an upgrade on your current " + fa.pos);
+      } else if (!onWaivers) {
+        recommendation = "optional";
+        reasons.push(`streaming ${fa.pos} upgrade (${fmtSigned(gain)} ppg), free to add`);
+      } else {
+        recommendation = "pass";
+        reasons.push(`${fa.pos} on waivers: not worth priority, stream one from free agents after waivers clear`);
+      }
+    } else if (gain >= threshold) {
       recommendation = "claim";
       reasons.push(`lineup gain ${fmtSigned(gain)} ≥ ${threshold.toFixed(1)} threshold`);
     } else if (valueJump && top3AtNeed) {
@@ -119,9 +136,10 @@ export function rankWaivers(
     } else if (gain <= 0.05 && benchGain <= 0) {
       recommendation = "pass";
       reasons.push("not an upgrade on your lineup or your worst bench player");
-    } else if (onWaivers && fifth && fa.value < fifth.value) {
+    } else if (onWaivers && fifth && belowFifth) {
       recommendation = "wait";
-      reasons.push(`below the 5th-best FA ${fa.pos} (${fifth.name}, ${fifth.value.toFixed(1)}): similar players will clear waivers`);
+      const cmp = fifth.value === 0 ? `${fifth.ppg.toFixed(1)} ppg` : fifth.value.toFixed(1);
+      reasons.push(`below the 5th-best FA ${fa.pos} (${fifth!.name}, ${cmp}): similar players will clear waivers`);
     } else {
       recommendation = "optional";
       reasons.push(`modest upgrade (gain ${fmtSigned(gain)} < ${threshold.toFixed(1)})`);
@@ -156,7 +174,22 @@ export function rankWaivers(
     };
   });
 
-  targets.sort((a, b) => b.rankScore - a.rankScore || b.gain - a.gain || b.value - a.value || b.ppg - a.ppg || a.id.localeCompare(b.id));
+  // Actionable rows first (claim > optional > wait > pass), then score; ties on vorp
+  // (ppg above replacement, may be negative) then value, so 0-value QBs don't float up on raw ppg.
+  const vorpOf = (p: ValuedPlayer) => {
+    const repl = ctx.replacement?.[p.pos];
+    return repl === undefined ? p.vorp : p.ppg - repl;
+  };
+  targets.sort(
+    (a, b) =>
+      REC_ORDER[a.recommendation] - REC_ORDER[b.recommendation] ||
+      b.rankScore - a.rankScore ||
+      b.gain - a.gain ||
+      vorpOf(b) - vorpOf(a) ||
+      b.value - a.value ||
+      b.ppg - a.ppg ||
+      a.id.localeCompare(b.id),
+  );
   const limited = targets.slice(0, opts.limit ?? 60);
   const claims = limited.filter((t) => t.recommendation === "claim");
   const needList = [...needs].join(", ") || "none";

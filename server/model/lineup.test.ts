@@ -48,3 +48,14 @@ test("players with no games left only start when nothing else is eligible", () =
   const empty = optimalLineup(["TE"], [vp("x", "RB", 5, 1)]);
   assert.equal(empty.lineup[0].player, null);
 });
+
+test("lineup selection and starterPpg use availability-adjusted effPpg", () => {
+  // Out QB: 20 ppg healthy rate but only 11 of 13 games left → 16.9 effective; healthy 18 ppg QB starts.
+  const outQb = vp("qbOut", "QB", 20, 30, { remainingGames: 11, effPpg: (20 * 11) / 13 });
+  const r = optimalLineup(["QB"], [outQb, vp("qbOk", "QB", 18, 20, { effPpg: 18 })]);
+  assert.equal(r.lineup[0].player?.id, "qbOk");
+  assert.equal(r.starterPpg, 18);
+  const only = optimalLineup(["QB"], [outQb]);
+  assert.equal(only.starterPpg, Math.round(((20 * 11) / 13) * 100) / 100);
+  assert.equal(outQb.ppg, 20, "ppg unchanged");
+});

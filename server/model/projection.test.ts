@@ -25,16 +25,40 @@ test("smooth / curveAt helpers", () => {
   assert.equal(curveAt([10, 8, 6], 99), 6);
 });
 
-test("ppg blends ECR 50 / current 35 (scaled by games) / prior 15 and renormalises", () => {
+test("ppg blends ECR 65 / current 22 (scaled by games/5) / prior 13 and renormalises", () => {
   // x: 1 game at 20, prior (5 games) at 10, ECR RB5 → curve value at rank 5 = 26.
   const x = steadyRb("x", 20, 1, 0, { ecrPos: 5, prior: { games: 5, line: line({ rushYd: 10 * 10 * 5 }) } });
   const v = valuePlayers(L, [...field, x]);
   const px = v.players.get("x")!;
-  const wCur = (WEIGHTS.current * 1) / 3;
-  const expected = (0.5 * 26 + wCur * 20 + 0.15 * 10) / (0.5 + wCur + 0.15);
+  assert.deepEqual(WEIGHTS, { ecr: 0.65, current: 0.22, prior: 0.13 });
+  const wCur = (WEIGHTS.current * 1) / 5;
+  const expected = (0.65 * 26 + wCur * 20 + 0.13 * 10) / (0.65 + wCur + 0.13);
   assert.ok(Math.abs(px.ppg - expected) < 0.01, `ppg ${px.ppg} vs ${expected}`);
   assert.match(px.why, /ECR RB5/);
   assert.match(px.why, /2026 exp 20\.0 \/ act 20\.0 in 1 g/);
+  assert.doesNotMatch(px.why, /ECR ranks are PPR/); // shown once via analysis notes instead
+});
+
+test("current-season weight reaches full strength at 5 games", () => {
+  const mk = (id: string, g: number) => steadyRb(id, 20, g, 0, { ecrPos: 5 });
+  const v = valuePlayers(L, [...field, mk("g3", 3), mk("g5", 5), mk("g7", 7)]);
+  // ECR RB5 → 26, current 20: more games → more current weight → lower ppg, flat after 5.
+  const ppg = (id: string) => v.players.get(id)!.ppg;
+  const exp = (g: number) => (0.65 * 26 + 0.22 * (Math.min(g, 5) / 5) * 20) / (0.65 + 0.22 * (Math.min(g, 5) / 5));
+  assert.ok(Math.abs(ppg("g3") - exp(3)) < 0.01);
+  assert.ok(Math.abs(ppg("g5") - exp(5)) < 0.01);
+  assert.equal(ppg("g5"), ppg("g7"));
+});
+
+test("rank curve: current season needs 3+ games and is capped at 1.15x the prior curve", () => {
+  // 2025: everyone 10 ppg. 2026: rb hot scoring 30 in 3 games, cold ones 10; a 2-game player at 50 is ignored.
+  const flat = Array.from({ length: 10 }, (_, i) => steadyRb(`f${i}`, 10, 3, 17));
+  const hot = steadyRb("hot", 30, 3, 0);
+  const tiny = steadyRb("tiny", 50, 2, 0);
+  const probe = rawPlayer("probe", "RB", { ecrPos: 1 });
+  const v = valuePlayers(L, [...flat, hot, tiny, probe]);
+  // Rank 1: current curve min(30, 1.15·10)=11.5 blended 50/50 with prior 10 → 10.75, smoothed with rank 2 (10) → 10.375.
+  assert.ok(Math.abs(v.players.get("probe")!.ppg - 10.375) < 0.01, `probe ${v.players.get("probe")!.ppg}`);
 });
 
 test("player with no ECR, no games and no prior projects to 0", () => {
@@ -78,6 +102,34 @@ test("injuries and byes reduce remaining games", () => {
   assert.equal(v.players.get("ir")!.remainingGames, 0);
   assert.equal(v.players.get("bye")!.remainingGames, 13);
   assert.equal(injuryKind({ status: "Questionable", detail: "ACL", week: 3 }), null);
+});
+
+test("Yahoo NA is long-term; return designations cost 4 games", () => {
+  assert.equal(injuryKind({ status: "Out", detail: "NA", week: 3 }), "long");
+  assert.equal(injuryKind({ status: "Out", detail: "NA (not with team)", week: 3 }), "long");
+  assert.equal(injuryKind({ status: "NA", week: 3 }), "long");
+  assert.equal(injuryKind({ status: "Out", detail: "return designation", week: 3 }), "return");
+  assert.equal(injuryKind({ status: "IR-R", week: 3 }), "return");
+  assert.equal(injuryKind({ status: "Out", detail: "IR (return designation)", week: 3 }), "long");
+  assert.equal(injuryKind({ status: "Out", detail: "Hamstring", week: 3 }), "out");
+  const na = steadyRb("na", 25, 3, 17, { injury: { status: "Out", detail: "NA", week: 3 } });
+  const ret = steadyRb("ret", 25, 3, 17, { injury: { status: "Out", detail: "return designation", week: 3 } });
+  const v = valuePlayers(L, [...field, na, ret]);
+  assert.equal(v.players.get("na")!.remainingGames, 0);
+  assert.equal(v.players.get("ret")!.remainingGames, 10);
+});
+
+test("effPpg = ppg × remainingGames / weeksLeft (bye excluded), explained in why", () => {
+  const out = steadyRb("out", 25, 3, 17, { injury: { status: "Out", detail: "Hamstring", week: 3 }, bye: 9 });
+  const healthy = steadyRb("ok", 25, 3, 17, { bye: 9 });
+  const v = valuePlayers(L, [...field, out, healthy]);
+  const o = v.players.get("out")!;
+  const h = v.players.get("ok")!;
+  assert.equal(h.effPpg, h.ppg);
+  assert.equal(o.remainingGames, 11);
+  assert.ok(Math.abs(o.effPpg! - (o.ppg * 11) / 13) < 0.01, `${o.effPpg} vs ${o.ppg}`);
+  assert.equal(o.ppg, h.ppg, "ppg itself stays a healthy rate");
+  assert.match(o.why, /× 11\/13 games/);
 });
 
 test("K and DEF use the ECR rank line", () => {

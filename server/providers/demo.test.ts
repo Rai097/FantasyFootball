@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildDemoLeague, demoFreeAgents, draftBoard, prng, DEMO_SLOTS } from "./demo.js";
+import { buildDemoLeague, demoFreeAgents, draftBoard, prng, undraftedPicks, DEMO_SLOTS } from "./demo.js";
 import { analyzeLeague } from "../model/analysis.js";
 import { rawPlayer } from "../model/testkit.js";
 import type { Player, Position } from "../model/types.js";
@@ -93,4 +93,22 @@ test("every demo team gets a full valued lineup", () => {
   const L = buildDemoLeague(input, 42);
   const ctx = analyzeLeague(L, players);
   for (const t of ctx.teams) assert.ok(t.lineup.every((l) => l.player), `team ${t.team.id} has an empty slot`);
+});
+
+test("about 10% of the ECR top-150 stays undrafted, deterministic per seed", () => {
+  const top = draftBoard(players).slice(0, 150);
+  for (const seed of [42, 7]) {
+    const L = buildDemoLeague(input, seed);
+    const rostered = new Set(L.teams.flatMap((t) => t.playerIds));
+    const undrafted = top.filter((p) => !rostered.has(p.id));
+    const skipped = undraftedPicks(draftBoard(players), seed);
+    assert.equal(skipped.size, 15, `seed ${seed}`);
+    const ids = new Set(undrafted.map((p) => p.id));
+    for (const id of skipped) {
+      assert.ok(ids.has(id), `${id} should be undrafted`);
+      const p = top.find((x) => x.id === id)!;
+      assert.ok(p.pos !== "K" && p.pos !== "DEF" && p.ecrOverall! > 30);
+    }
+  }
+  assert.notDeepEqual(undraftedPicks(draftBoard(players), 42), undraftedPicks(draftBoard(players), 7));
 });

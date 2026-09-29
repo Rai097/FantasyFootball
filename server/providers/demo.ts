@@ -20,6 +20,26 @@ export const DEMO_TEAMS: { name: string; owner: string }[] = [
 ];
 const PICK_WEIGHTS = [0.55, 0.25, 0.12, 0.08];
 const CAPS: Record<Position, number> = { QB: 2, RB: 7, WR: 7, TE: 2, K: 1, DEF: 1 };
+/** Share of the ECR top-150 left undrafted (in-season risers), picked from board ranks 31–150. */
+export const UNDRAFTED_TOP = 150;
+export const UNDRAFTED_FROM = 31;
+export const UNDRAFTED_SHARE = 0.1;
+
+/**
+ * Skill players from the ECR top-150 who go undrafted in this seed's league, so the
+ * demo waiver wire has real targets. Deterministic per seed (own PRNG stream).
+ */
+export function undraftedPicks(board: Player[], seed: number): Set<string> {
+  const rng = prng((seed ^ 0x5bd1e995) >>> 0);
+  const top = board.slice(0, UNDRAFTED_TOP);
+  const count = Math.round(UNDRAFTED_SHARE * top.length);
+  const window = top.slice(UNDRAFTED_FROM - 1).filter((p) => p.pos !== "K" && p.pos !== "DEF");
+  for (let i = window.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [window[i], window[j]] = [window[j], window[i]];
+  }
+  return new Set(window.slice(0, count).map((p) => p.id));
+}
 
 /** mulberry32 seeded PRNG → [0, 1). */
 export function prng(seed: number): () => number {
@@ -69,7 +89,8 @@ export function buildDemoLeague(input: DemoInput, seed = 42): League {
   const numTeams = DEMO_TEAMS.length;
   const rounds = DEMO_SLOTS.filter((s) => s !== "IR").length;
   const board = draftBoard(input.players);
-  const taken = new Set<string>();
+  // Taken up front, never rostered: ~10% of the top-150 stays on the waiver wire.
+  const taken = undraftedPicks(board, seed);
   const rosters: Player[][] = DEMO_TEAMS.map(() => []);
 
   for (let round = 0; round < rounds; round++) {

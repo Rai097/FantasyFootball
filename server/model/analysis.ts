@@ -1,7 +1,7 @@
 // Team analysis for every team in a league. See docs/DESIGN.md "Team analysis".
 import type { League, Player, Position, SlotKind, Team, TeamAnalysis, ValuedPlayer } from "./types.js";
 import { FLEX_SLOTS, effPpg, optimalLineup, usable } from "./lineup.js";
-import { valuePlayers, type Valuation } from "./projection.js";
+import { valuationNotes, valuePlayers, type Valuation } from "./projection.js";
 
 export interface LeagueContext {
   league: League;
@@ -9,6 +9,8 @@ export interface LeagueContext {
   players: Map<string, ValuedPlayer>;
   teams: TeamAnalysis[];
   replacement: Record<Position, number>;
+  /** League-wide caveats shown once in the UI (e.g. "ECR ranks are PPR; points use league scoring."). */
+  notes: string[];
 }
 
 export const GROUPS = ["QB", "RB", "WR", "TE", "FLEX", "K", "DEF"] as const;
@@ -33,7 +35,7 @@ export function analyzeLeague(league: League, pool: Iterable<Player>): LeagueCon
   const poolArr = [...pool];
   const valuation = valuePlayers(league, poolArr);
   const teams = analyzeTeams(league, valuation.players, valuation.replacement);
-  return { league, valuation, players: valuation.players, teams, replacement: valuation.replacement };
+  return { league, valuation, players: valuation.players, teams, replacement: valuation.replacement, notes: valuationNotes(league) };
 }
 
 export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>, replacement: Record<Position, number>): TeamAnalysis[] {
@@ -93,7 +95,10 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
       const empty = starters.some((p) => !p || !usable(p));
       const best = starters.reduce<ValuedPlayer | null>((m, p) => (p && (!m || p.ppg > m.ppg) ? p : m), null);
       const belowRepl = !best || best.ppg < replacement[best.pos];
-      if (gr.rank > needRank || belowRepl || empty) needs.push(g);
+      // K / DEF are streamed: only a need when the slot is empty (or its starter cannot play).
+      if (g === "K" || g === "DEF") {
+        if (empty) needs.push(g);
+      } else if (gr.rank > needRank || belowRepl || empty) needs.push(g);
     }
     const surplus: string[] = [];
     for (const pos of ["QB", "RB", "WR", "TE"] as Position[]) {
