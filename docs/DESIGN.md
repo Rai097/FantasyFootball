@@ -248,3 +248,34 @@ bars are divs. Keep every number to 1 decimal.
 `npm run typecheck`, `npm test`, `npm run build` all green; `npm run dev` serves
 a working demo league; README + docs/YAHOO_SETUP.md explain the Yahoo flow; the
 architect's final review passes.
+
+## Amendments after advisor review (these override the sections above)
+
+**Value model**
+* Replacement bench term is position-specific (12-team basis, scale by numTeams/12): RB +6, WR +6, QB +2, TE +3, K/DEF +0. In a 1-QB league QB replacement ≈ QB14.
+* ECR rank→points curve = 0.5·curve(blend26, games ≥ 2) + 0.5·curve(ppg25, prior.games ≥ 8), then smoothed (window 3).
+* Injury: Out → remainingGames −2; Doubtful → −0.7; ACL/Achilles/season/IR or Yahoo IR status → remainingGames 0. Long-term Out players get ECR weight halved so ppg is a healthy rate and games carry the penalty.
+* Playoff weeks (15–17) weighted 1.25 in remaining games.
+
+**Trade finder**
+* fairness = (valueReceivedByThem + 5) / (valueGivenByThem + 5).
+* Keep a trade only if (them.lineupDelta ≥ −0.25 AND fairness ≥ 0.85) OR (fairness ≥ 1.10 AND them.lineupDelta ≥ −1.0); reject if my totalValue drops > 20%.
+* After `tradeDeadlineWeek` the finder returns [] and the UI shows a banner.
+
+**Waivers**
+* Rolling list: claimThreshold = 1.0 + 1.5·(N−w)/(N−1) ppg of lineup gain (priority #1 needs 2.5, last needs 1.0). FAAB leagues (`usesFaab`) get bid guidance instead of priority cost.
+* Drop candidate tie-break: value, then ppg, then ECR; never IR-slot players or the only K/DEF.
+
+**Power rank** = 0.7·starterPpg + 0.3·(sum of top-3 bench vorp).
+
+**LeagueSettings** gains optional `usesFaab`, `faabBudget`, `tradeDeadlineWeek`.
+
+**Yahoo API shapes (corrected)**
+* Refresh body must include `redirect_uri`.
+* `team`/`player`/`league` are arrays whose element 0 is itself an array of single-key meta objects; `selected_position` and `percent_owned` are arrays; `managers[].manager.is_current_login == "1"` identifies my team.
+* `roster_positions: [{roster_position:{position,position_type,count,is_starting_position}}]`, `stat_modifiers: {stats:[{stat:{stat_id,value}}]}`; `current_week/start_week/end_week/num_teams` in `league[0]`; playoff/waiver/keeper/trade_end_date fields in `league[1].settings[0]`.
+* Standings: `league[1].standings[0].teams["i"].team = [[meta], {team_points}, {team_standings}]`; `waiver_priority`, `faab_balance` in meta.
+* Errors may be XML or HTML (999); parse text defensively.
+* Yahoo requires https redirect URIs, so the default is the `oob` paste-a-code flow ("Installed Application").
+* Free agents: `status=A;out=ownership,percent_owned;sort=OR`, `ownership.ownership_type ∈ {freeagents, waivers}`.
+* One call `/users;use_login=1/games;game_keys=nfl/leagues/teams` lists leagues with my team; `/game/nfl` gives the game id to build `{gid}.l.{leagueId}`.
