@@ -176,16 +176,13 @@ function YahooSection({ state, reloadState, active, onChoose }: { state: AppStat
             disabled={busy}
             onClick={() =>
               run(async () => {
-                // Open the tab synchronously so pop-up blockers allow it, then point it at Yahoo.
-                const win = window.open("about:blank", "_blank");
-                try {
-                  const { url } = await api.yahooStart();
-                  if (win) win.location.href = url;
-                  else window.open(url, "_blank", "noopener");
-                } catch (e) {
-                  win?.close();
-                  throw e;
+                const { url, mode } = await api.yahooStart();
+                if (mode === "redirect") {
+                  // Yahoo sends the browser back to /auth/yahoo/callback, so stay in this tab.
+                  window.location.assign(url);
+                  return;
                 }
+                window.open(url, "_blank", "noopener");
                 setAwaitingCode(true);
               })
             }

@@ -125,7 +125,7 @@ export const api = {
   state: () => request<AppState>("GET", "/api/state"),
   searchPlayers: (q: string) => request<PlayerLite[]>("GET", `/api/players/search${qs({ q })}`),
 
-  yahooStart: () => request<{ url: string }>("GET", "/auth/yahoo/start"),
+  yahooStart: () => request<{ url: string; mode?: "oob" | "redirect" }>("GET", "/auth/yahoo/start"),
   yahooCode: (code: string) => request<{ ok: true }>("POST", "/auth/yahoo/code", { code }),
   yahooDisconnect: () => request<{ ok: true }>("POST", "/auth/yahoo/disconnect"),
   yahooLeagues: () => request<YahooLeague[]>("GET", "/api/yahoo/leagues"),
