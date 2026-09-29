@@ -5,9 +5,9 @@ services:
     name: fantasy-trade-desk
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
-    healthCheckPath: /api/state
+    healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
         value: production

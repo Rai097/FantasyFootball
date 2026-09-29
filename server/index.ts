@@ -8,6 +8,7 @@ import { getPlayerDb } from "./data/players.js";
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
+app.get("/healthz", (_req, res) => res.send("ok"));
 
 // Optional password gate for hosted deployments: set APP_PASSWORD to require
 // HTTP Basic auth (any username) on every route.
