@@ -23,7 +23,7 @@ import {
   STAT_MAP,
   type PlayerFinder,
 } from "./yahoo-parse.js";
-import { describeYahooBody } from "./yahoo.js";
+import { describeYahooBody, normalizeLeagueKey } from "./yahoo.js";
 import { normName, normTeam } from "../data/names.js";
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -194,7 +194,10 @@ test("roster → entries → player ids (yahoo id first, name+pos+team fallback,
   assert.deepEqual(entries[2], {
     yahooId: "31883", name: "Deebo Samuel", pos: "WR", team: "WAS", status: undefined, injuryNote: undefined,
     selectedPosition: "W/R/T", percentOwned: undefined, ownershipType: undefined, waiverDate: undefined,
+    bye: 7, eligible: ["WR", "RB"],
   });
+  assert.equal(entries[1].bye, 5);
+  assert.deepEqual(entries[3].eligible, ["WR"]); // IR slot eligibility is not a fantasy position
   assert.equal(entries[4].pos, "DEF");
   assert.equal(entries[4].team, "JAX");
 
@@ -219,7 +222,9 @@ test("roster → entries → player ids (yahoo id first, name+pos+team fallback,
   assert.deepEqual(overrides["00-bijan"].injury, { status: "Questionable", detail: "Hamstring", week: 4 });
   assert.deepEqual(overrides["00-kirk"].injury, { status: "Out", detail: "IR (Groin)", week: 4 });
   assert.deepEqual(overrides["00-ghost"].injury, { status: "Out", detail: "IR (Knee)", week: 4 });
-  assert.equal(overrides["00-allen"], undefined);
+  // bye + eligible positions carried on the copy; no Yahoo status keeps the db injury
+  assert.deepEqual([overrides["00-allen"].bye, overrides["00-allen"].eligible, overrides["00-allen"].injury], [7, ["QB"], undefined]);
+  assert.deepEqual(overrides["00-deebo"].eligible, ["WR", "RB"]);
   assert.notEqual(overrides["00-kirk"], kirkShared);
   assert.deepEqual(kirkShared.injury, { status: "Questionable", week: 3 }, "shared PlayerDb entry must not be mutated");
 });
@@ -253,9 +258,16 @@ test("yahoo status → injury mapping", () => {
   assert.deepEqual(yahooInjury("Q", undefined, 4), { status: "Questionable", week: 4 });
   assert.deepEqual(yahooInjury("D", "Ankle", 4), { status: "Doubtful", detail: "Ankle", week: 4 });
   assert.deepEqual(yahooInjury("O", "Knee", 4), { status: "Out", detail: "Knee", week: 4 });
-  assert.deepEqual(yahooInjury("IR-R", undefined, 4), { status: "Out", detail: "IR", week: 4 });
-  assert.deepEqual(yahooInjury("PUP-R", undefined, 4), { status: "Out", detail: "IR", week: 4 });
+  // designated to return: short-term, never "IR"
+  assert.deepEqual(yahooInjury("IR-R", undefined, 4), { status: "Out", detail: "return designation", week: 4 });
+  assert.deepEqual(yahooInjury("PUP-R", "Knee", 4), { status: "Out", detail: "Knee", week: 4 });
+  assert.deepEqual(yahooInjury("NFI-R", undefined, 4, "IR"), { status: "Out", detail: "return designation", week: 4 });
+  // long-term
+  assert.deepEqual(yahooInjury("IR", "ACL", 4), { status: "Out", detail: "IR (ACL)", week: 4 });
+  assert.deepEqual(yahooInjury("IR-LT", undefined, 4), { status: "Out", detail: "IR", week: 4 });
+  assert.deepEqual(yahooInjury("PUP-P", undefined, 4), { status: "Out", detail: "IR", week: 4 });
   assert.deepEqual(yahooInjury("NA", undefined, 4), { status: "Out", detail: "NA", week: 4 });
+  assert.deepEqual(yahooInjury("SUSP", undefined, 4), { status: "Out", detail: "Suspended", week: 4 });
   assert.deepEqual(yahooInjury("O", undefined, 4, "IR"), { status: "Out", detail: "IR", week: 4 });
   assert.equal(yahooInjury("", undefined, 4), undefined);
   assert.equal(yahooInjury(undefined, "x", 4), undefined);
@@ -274,4 +286,10 @@ test("misc: team abbreviations, trade deadline week, error bodies", () => {
   assert.equal(describeYahooBody('{"error":{"description":"League not found"}}'), "League not found");
   assert.equal(describeYahooBody('{"error":"invalid_grant","error_description":"Invalid authorization code"}'), "Invalid authorization code");
   assert.equal(describeYahooBody("<html><body><h1>Request denied</h1></body></html>"), "Request denied");
+});
+
+test("league key normalisation strips a team suffix", async () => {
+  assert.equal(await normalizeLeagueKey("461.l.1405188.t.3"), "461.l.1405188");
+  assert.equal(await normalizeLeagueKey(" 461.l.1405188 "), "461.l.1405188");
+  await assert.rejects(normalizeLeagueKey("not-a-key"), /Not a Yahoo league key/);
 });

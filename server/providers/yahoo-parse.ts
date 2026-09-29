@@ -2,7 +2,7 @@
 // Yahoo's numeric-key / array-of-single-key-object encoding, and parsers that
 // turn flattened responses into our League model. Unit-tested against the
 // hand-written fixtures in ./fixtures (server/providers/yahoo.test.ts).
-import type { LeagueSettings, Player, Scoring, SlotKind, Team } from "../model/types.js";
+import type { LeagueSettings, Player, Position, Scoring, SlotKind, Team } from "../model/types.js";
 import type { PlayerDb } from "../data/players.js";
 import { normPos, normTeam } from "../data/names.js";
 
@@ -272,6 +272,8 @@ export interface YahooPlayerEntry {
   percentOwned?: number;
   ownershipType?: string; // freeagents | waivers | team
   waiverDate?: string;
+  bye?: number;
+  eligible?: Position[]; // fantasy positions only (QB/RB/WR/TE/K/DEF), no flex/BN/IR
 }
 
 export interface YahooTeamRaw {
@@ -328,6 +330,8 @@ export function parseStandings(json: unknown): YahooTeamRaw[] {
 // players
 // ---------------------------------------------------------------------------
 
+const FANTASY_POS: Position[] = ["QB", "RB", "WR", "TE", "K", "DEF"];
+
 function firstPosition(x: unknown): string | undefined {
   if (Array.isArray(x)) return firstPosition(x[x.length - 1]);
   if (isPlainObj(x)) return str(x.position);
@@ -344,6 +348,15 @@ export function parsePlayerRecord(p: Obj): YahooPlayerEntry {
   const pctRaw = isPlainObj(po) ? po.value : po;
   const pct = numOr(pctRaw, NaN);
   const own = isPlainObj(p.ownership) ? p.ownership : undefined;
+  const byeRaw = isPlainObj(p.bye_weeks) ? p.bye_weeks.week : Array.isArray(p.bye_weeks) ? p.bye_weeks[0] : p.bye_weeks;
+  const bye = numOr(byeRaw, NaN);
+  const eligible = [
+    ...new Set(
+      asArray(p.eligible_positions)
+        .map((x) => normPos(isPlainObj(x) ? str(x.position) : str(x)))
+        .filter((x): x is Position => (FANTASY_POS as string[]).includes(x)),
+    ),
+  ];
   return {
     yahooId,
     name: name || `Yahoo player ${yahooId}`,
@@ -355,6 +368,8 @@ export function parsePlayerRecord(p: Obj): YahooPlayerEntry {
     percentOwned: Number.isFinite(pct) ? pct : undefined,
     ownershipType: str(own?.ownership_type),
     waiverDate: str(own?.waiver_date),
+    ...(Number.isFinite(bye) && bye > 0 ? { bye } : {}),
+    ...(eligible.length ? { eligible } : {}),
   };
 }
 
@@ -437,26 +452,28 @@ export function parseGameKey(json: unknown): string {
 // resolution against our PlayerDb
 // ---------------------------------------------------------------------------
 
-/** Map a Yahoo status to our Player.injury. Undefined when healthy / unknown-empty. */
+/**
+ * Map a Yahoo status to our Player.injury. Undefined when healthy / empty.
+ *  - Q / D / O / P → Questionable / Doubtful / Out / Probable (detail = injury note)
+ *  - "-R" designations (IR-R, PUP-R, NFI-R: designated to return) → Out, detail = note or "return designation" (short-term)
+ *  - IR, IR-LT, PUP(-P), NFI(-A) and "O" parked in an IR slot → Out, detail "IR…" (long-term)
+ *  - NA (not on an active NFL roster) → Out, detail "NA…" (long-term, same as IR)
+ *  - SUSP → Out, detail "Suspended…"
+ */
 export function yahooInjury(status: string | undefined, note: string | undefined, week: number, selectedPosition?: string): Player["injury"] | undefined {
   const s = (status ?? "").toUpperCase().trim();
+  if (!s) return undefined;
   const withNote = (tag: string) => (note ? `${tag} (${note})` : tag);
-  let inj: Player["injury"] | undefined;
-  if (!s) inj = undefined;
-  else if (s === "Q") inj = { status: "Questionable", detail: note, week };
-  else if (s === "D") inj = { status: "Doubtful", detail: note, week };
-  else if (s === "O") inj = { status: "Out", detail: note, week };
-  else if (s === "P") inj = { status: "Probable", detail: note, week };
-  else if (/^(IR|PUP|NFI)/.test(s)) inj = { status: "Out", detail: withNote("IR"), week };
-  else if (s === "NA") inj = { status: "Out", detail: withNote("NA"), week };
-  else if (s === "SUSP") inj = { status: "Out", detail: withNote("Suspended"), week };
-  else inj = { status: s, detail: note, week };
-  // Status "O" parked in an IR slot → season-ish absence.
-  if (inj && inj.status === "Out" && selectedPosition?.toUpperCase() === "IR" && !/\bIR\b/.test(inj.detail ?? "")) {
-    inj = { ...inj, detail: withNote("IR") };
-  }
-  if (inj && inj.detail === undefined) delete inj.detail;
-  return inj;
+  const mk = (st: string, detail?: string): Player["injury"] => (detail ? { status: st, detail, week } : { status: st, week });
+  if (s === "Q") return mk("Questionable", note);
+  if (s === "D") return mk("Doubtful", note);
+  if (s === "P") return mk("Probable", note);
+  if (s === "O") return selectedPosition?.toUpperCase() === "IR" || selectedPosition?.toUpperCase() === "IL" ? mk("Out", withNote("IR")) : mk("Out", note);
+  if (/^(IR|PUP|NFI)-R$/.test(s)) return mk("Out", note ?? "return designation");
+  if (/^(IR|PUP|NFI)\b/.test(s)) return mk("Out", withNote("IR"));
+  if (s === "NA") return mk("Out", withNote("NA"));
+  if (s === "SUSP") return mk("Out", withNote("Suspended"));
+  return mk(s, note);
 }
 
 /** Minimal PlayerDb surface we use (lets tests pass a fake). */
@@ -470,11 +487,22 @@ export function findPlayer(db: PlayerFinder, e: YahooPlayerEntry): Player | unde
   return db.find({ yahoo: e.yahooId, name: e.name, pos: e.pos, team: e.team });
 }
 
-/** Copy of `p` with Yahoo's injury status applied (never mutates the shared db entry). */
+/**
+ * Copy of `p` with Yahoo's injury status, bye week and eligible positions applied
+ * (never mutates the shared db entry). Undefined when Yahoo adds nothing new.
+ * With no Yahoo status the PlayerDb (nflverse) injury is kept.
+ */
 export function withYahooStatus(p: Player, e: YahooPlayerEntry, week: number): Player | undefined {
   const inj = yahooInjury(e.status, e.injuryNote, week, e.selectedPosition);
-  if (!inj) return undefined;
-  return { ...p, injury: inj };
+  const byeChanged = e.bye !== undefined && e.bye !== p.bye;
+  const eligChanged = e.eligible !== undefined && e.eligible.join(",") !== (p.eligible ?? []).join(",");
+  if (!inj && !byeChanged && !eligChanged) return undefined;
+  return {
+    ...p,
+    ...(inj ? { injury: inj } : {}),
+    ...(byeChanged ? { bye: e.bye } : {}),
+    ...(eligChanged ? { eligible: e.eligible } : {}),
+  };
 }
 
 export function resolveTeam(db: PlayerFinder, raw: YahooTeamRaw, week: number, opts: { usesFaab?: boolean } = {}): { team: Team; overrides: Record<string, Player> } {

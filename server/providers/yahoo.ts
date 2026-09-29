@@ -120,7 +120,7 @@ function hintFor(status: number, body: string): string | undefined {
     return "Yahoo rejected the login. Click Connect Yahoo again (Connect tab) to re-authorize.";
   if (status === 999) return "Yahoo is rate-limiting this app (error 999). Wait 5–15 minutes, then retry; avoid repeated ?refresh=1.";
   if (status === 403) return "Yahoo denied access. Make sure the connected Yahoo account is a member of this league and the app has Fantasy Sports Read permission.";
-  if (status === 404) return "Yahoo could not find that league/team. Check the league key (e.g. 461.l.1405188) and that it belongs to the current NFL season.";
+  if (status === 404) return "Yahoo could not find that league/team. Check the league key (the league id like 1405188, or a full key like 4xx.l.1405188) and that it belongs to the current NFL season.";
   if (status === 400) return "Yahoo rejected the request. If this persists, paste the error text into an issue.";
   if (status >= 500) return "Yahoo had a server error; try again in a minute.";
   return undefined;
@@ -320,12 +320,12 @@ function getNflGameKey(): Promise<string> {
   return nflGameKey;
 }
 
-/** Accept "1405188", "nfl.l.1405188" or "461.l.1405188"; return "{gameKey}.l.{id}". */
-async function normalizeLeagueKey(key: string): Promise<string> {
-  const k = key.trim();
+/** Accept "1405188", "nfl.l.1405188", "{gid}.l.1405188" (optionally with a ".t.N" team suffix); return "{gameKey}.l.{id}". */
+export async function normalizeLeagueKey(key: string): Promise<string> {
+  const k = key.trim().replace(/\.t\.\d+$/i, "");
   const bare = /^\d+$/.exec(k)?.[0] ?? /^nfl\.l\.(\d+)$/i.exec(k)?.[1];
   if (bare) return `${await getNflGameKey()}.l.${bare}`;
-  if (!/^\d+\.l\.\d+$/.test(k)) throw new YahooError(`Not a Yahoo league key: ${key}`, 400, "Use the league id (e.g. 1405188) or full key (e.g. 461.l.1405188).");
+  if (!/^\d+\.l\.\d+$/.test(k)) throw new YahooError(`Not a Yahoo league key: ${key}`, 400, "Use the league id (e.g. 1405188) or the full key shown in the league list (e.g. 4xx.l.1405188).");
   return k;
 }
 
@@ -449,6 +449,9 @@ export const yahoo: YahooProvider = {
   authUrl() {
     requireConfigured();
     const q = new URLSearchParams({ client_id: config.yahooClientId, redirect_uri: redirectUri(), response_type: "code", language: "en-us" });
+    // Optional explicit scope (e.g. "fspt-r" = Fantasy Sports read) for apps where Yahoo reports a permissions error.
+    const scope = (process.env.YAHOO_SCOPE ?? "").trim();
+    if (scope) q.set("scope", scope);
     return `${AUTH_URL}?${q.toString()}`;
   },
 

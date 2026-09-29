@@ -56,6 +56,8 @@ export interface Player {
   age?: number;
   ids: PlayerIds;
   bye?: number;
+  /** Fantasy-eligible positions from the league provider (e.g. Yahoo "WR,RB"), when known. */
+  eligible?: Position[];
   injury?: { status: string; detail?: string; week: number };
   /** Rest-of-season expert consensus rank (FantasyPros, PPR overall). */
   ecrOverall?: number;
