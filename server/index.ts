@@ -9,6 +9,23 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 
+// Optional password gate for hosted deployments: set APP_PASSWORD to require
+// HTTP Basic auth (any username) on every route.
+if (process.env.APP_PASSWORD) {
+  const expected = process.env.APP_PASSWORD;
+  app.use((req, res, next) => {
+    const header = req.headers.authorization ?? "";
+    const [scheme, encoded] = header.split(" ");
+    if (scheme === "Basic" && encoded) {
+      const decoded = Buffer.from(encoded, "base64").toString("utf8");
+      const pass = decoded.slice(decoded.indexOf(":") + 1);
+      if (pass === expected) return next();
+    }
+    res.set("WWW-Authenticate", 'Basic realm="Trade Desk"');
+    res.status(401).send("Password required");
+  });
+}
+
 async function start() {
   // The Yahoo auth router lives in ./auth.ts (owned by the Yahoo provider); mount it when present.
   const authModule = "./auth.js";

@@ -2,6 +2,7 @@
   "name": "fantasy-trade-desk",
   "version": "0.1.0",
   "private": true,
+  "engines": { "node": ">=22" },
   "type": "module",
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",

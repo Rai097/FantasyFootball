@@ -1,0 +1,21 @@
+# Render.com blueprint: deploys the app as one web service straight from GitHub.
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: fantasy-trade-desk
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/state
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: YAHOO_CLIENT_ID
+        sync: false
+      - key: YAHOO_CLIENT_SECRET
+        sync: false
+      - key: YAHOO_REDIRECT_URI
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
