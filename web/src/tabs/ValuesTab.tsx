@@ -110,7 +110,7 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
                     {r.pos}
                     {r.posRank}
                   </td>
-                  <td className="num hide-sm">{r.ecrOverall ?? "–"}</td>
+                  <td className="num hide-sm">{r.ecrOverall != null ? String(Math.round(r.ecrOverall * 10) / 10) : "–"}</td>
                   <td className={r.ownerTeamId ? "owner" : "owner fa"}>{owner(r)}</td>
                 </tr>
               ))}

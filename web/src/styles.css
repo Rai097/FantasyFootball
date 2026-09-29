@@ -314,15 +314,17 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 
 /* ---------- layout fixes from screenshot review ---------- */
 .stack-sm > .btn { align-self: flex-start; }
-.side-player { flex-wrap: wrap; row-gap: 2px; }
+.side-player { flex-direction: column; align-items: flex-start; row-gap: 2px; }
 .side-player .chip { min-width: 0; max-width: 100%; }
 .side-meta { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
 .player-cell .strong { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
 @media (max-width: 700px) {
   .table.lineup .chip-team { display: none; }
-  .table.lineup .chip-name { max-width: 150px; }
   .table.lineup td:first-child { width: 44px; }
+  .table.lineup th, .table.lineup td { padding-left: 4px; padding-right: 4px; }
+  .table.lineup .chip-name { max-width: 108px; }
+  .table th, .table th.num { white-space: normal; }
   .table.values .owner { max-width: 84px; }
   .table.values .player-cell .strong { max-width: 130px; }
   .bench-list .chip-team { display: none; }
@@ -332,6 +334,7 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
   .table.waivers, .table.waivers tbody, .table.waivers tr, .table.waivers td { display: block; }
   .table.waivers tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
   .table.waivers td { border: none; padding: 0; text-align: left; }
+  .table.waivers td.num { white-space: normal; }
   .table.waivers td.hide-sm { display: none; }
   .table.waivers .player-td, .table.waivers .call-td { grid-column: 1 / -1; }
   .table.waivers .call-td { display: flex; align-items: center; }
