@@ -449,8 +449,8 @@ export const yahoo: YahooProvider = {
   authUrl() {
     requireConfigured();
     const q = new URLSearchParams({ client_id: config.yahooClientId, redirect_uri: redirectUri(), response_type: "code", language: "en-us" });
-    // Optional explicit scope (e.g. "fspt-r" = Fantasy Sports read) for apps where Yahoo reports a permissions error.
-    const scope = (process.env.YAHOO_SCOPE ?? "").trim();
+    // Scope defaults to "fspt-r" (Fantasy Sports read); without it Yahoo issues a token that gets 403 on the API. Set YAHOO_SCOPE to override (empty string disables).
+    const scope = (process.env.YAHOO_SCOPE ?? "fspt-r").trim();
     if (scope) q.set("scope", scope);
     return `${AUTH_URL}?${q.toString()}`;
   },
