@@ -62,6 +62,8 @@ export interface Player {
   ecrPos?: number;
   /** This week's FantasyPros consensus projected points (PPR). */
   weekProj?: number;
+  /** This week's projected points per scoring format, when the source has them. */
+  weekProjByFormat?: { std?: number; half?: number; ppr?: number };
   weekOpponent?: string;
   /** Offensive snap share by week, current season. */
   snapShare: Record<number, number>;
@@ -83,6 +85,10 @@ export interface ValuedPlayer extends Player {
   value: number; // trade value, 0-100 scale
   posRank: number; // by projected ppg within position
   remainingGames: number;
+  /** One-sentence explanation of how ppg and value were derived. */
+  why: string;
+  /** Expected pts/game over the last 2 weeks minus season expected pts/game. */
+  trend: number;
 }
 
 export type SlotKind = "QB" | "RB" | "WR" | "TE" | "K" | "DEF" | "FLEX" | "SFLEX" | "RFLEX" | "WRRB" | "BN" | "IR";
@@ -99,6 +105,11 @@ export interface LeagueSettings {
   slots: SlotKind[]; // starting slots + BN/IR
   scoring: Scoring;
   isDynasty: boolean;
+  /** Last week in which trades are allowed (trade finder returns [] afterwards). */
+  tradeDeadlineWeek?: number;
+  /** Free-agent budget waivers instead of a rolling priority list. */
+  usesFaab?: boolean;
+  faabBudget?: number;
 }
 
 export interface Team {
@@ -108,6 +119,10 @@ export interface Team {
   playerIds: string[]; // internal player ids
   unmatched: string[]; // names we could not map to our player db
   record?: { wins: number; losses: number; ties: number; pointsFor?: number };
+  /** Players currently parked in an IR/IL slot (never suggested as drops). */
+  irPlayerIds?: string[];
+  /** Remaining FAAB budget, when the league uses FAAB. */
+  faabRemaining?: number;
 }
 
 export interface League {
@@ -136,6 +151,12 @@ export interface TeamAnalysis {
   needs: string[];
   surplus: string[];
   powerRank: number;
+  /** Power-rank score: 0.7*starterPpg + 0.3*(sum of top-3 bench vorp). */
+  powerScore: number;
+  /** Remaining week -> number of current starters on bye. */
+  byeExposure: Record<number, number>;
+  /** Human-readable injury notes for rostered players. */
+  injuryFlags: string[];
 }
 
 export interface TradeSide {
@@ -144,6 +165,8 @@ export interface TradeSide {
   valueGiven: number;
   lineupDelta: number; // starter ppg change for this team
   lineupChanges: string[]; // human-readable slot changes
+  /** Players this side must release to stay at roster size (lowest-value bench). */
+  drops?: ValuedPlayer[];
 }
 
 export interface Trade {
@@ -155,4 +178,21 @@ export interface Trade {
   score: number;
   summary: string;
   tags: string[];
+  /** Explanation of deltas, fairness and acceptance. */
+  why: string;
+}
+
+export interface WaiverTarget extends ValuedPlayer {
+  gain: number; // starter ppg gain if added (and `drop` released)
+  benchGain: number; // value - dropped value
+  drop: ValuedPlayer | null;
+  trend: number;
+  /** Last-week snap share minus average of earlier weeks (0..1 scale). */
+  snapTrend: number;
+  recommendation: "claim" | "wait" | "optional" | "pass";
+  why: string;
+  onWaivers: boolean;
+  percentOwned?: number;
+  /** Ranking score: max(gain*3, benchGain/10). */
+  rankScore: number;
 }

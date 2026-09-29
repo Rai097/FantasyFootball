@@ -180,19 +180,32 @@ async function buildPlayerDb(): Promise<PlayerDb> {
       p.ids.fantasypros = r.id;
       byFp.set(r.id, p.id);
     }
+    if (!p.ids.yahoo && opt(r.yahoo_id)) {
+      p.ids.yahoo = r.yahoo_id;
+      byYahoo.set(r.yahoo_id, p.id);
+    }
     if (r.page_type === "redraft-overall") p.ecrOverall = num(r.ecr);
     else p.ecrPos = num(r.ecr);
     if (opt(r.bye) && !p.bye) p.bye = num(r.bye);
   }
 
   // 4. This week's consensus projections.
+  // Pages: "qb", "k", "dst" (format-agnostic) and "{ppr-,half-point-ppr-,}{rb,wr,te}"
+  // (the mirror currently only carries the ppr-* family; all three are handled).
   for (const r of parseCsv(weeklyCsv)) {
     const pos = normPos(r.pos);
     if (!VALID.includes(pos as Position)) continue;
-    if (!/^(ppr-|qb|k|dst)/.test(r.page)) continue;
+    const m = /^(ppr-|half-point-ppr-|half-ppr-|standard-|)(qb|rb|wr|te|k|dst|flex)$/.exec(r.page);
+    if (!m) continue;
     const p = findByFpOrName(opt(r.fantasypros_id), r.player_name, pos, r.team);
     if (!p) continue;
-    p.weekProj = num(r.r2p_pts);
+    const pts = num(r.r2p_pts);
+    const fmts = p.weekProjByFormat ?? (p.weekProjByFormat = {});
+    if (m[1] === "ppr-") fmts.ppr = pts;
+    else if (m[1].startsWith("half")) fmts.half = pts;
+    else if (m[1] === "standard-") fmts.std = pts;
+    else fmts.std = fmts.half = fmts.ppr = pts; // QB / K / DST pages are format-independent
+    p.weekProj = fmts.ppr ?? fmts.half ?? fmts.std;
     p.weekOpponent = opt(r.player_opponent);
   }
 
@@ -203,6 +216,8 @@ async function buildPlayerDb(): Promise<PlayerDb> {
     for (const r of parseCsv(csv)) {
       const p = players.get(r.player_id);
       if (!p) continue;
+      // Prior-season totals are regular season only (the file also carries playoff weeks 19-22).
+      if (isPrior && (r.season_type ? r.season_type !== "REG" : num(r.week) > 18)) continue;
       const line: WeekLine = { season: num(r.season), week: num(r.week), team: normTeam(r.posteam), actual: lineFrom(r, ""), expected: lineFrom(r, "_exp") };
       if (isPrior) {
         const agg = priorAgg.get(p.id) ?? { games: 0, line: emptyLine() };

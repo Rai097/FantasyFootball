@@ -1,0 +1,364 @@
+{
+ "_comment": "HAND-WRITTEN approximation of GET /fantasy/v2/league/{league_key}/players;status=A;position=RB;sort=OR;start=0;count=25;out=ownership,percent_owned?format=json (not captured live). Each player = [[meta], {ownership}, {percent_owned: [{coverage_type,week},{value},{delta}]}]. An empty page is returned as \"players\": [].",
+ "fantasy_content": {
+  "xml:lang": "en-US",
+  "yahoo:uri": "/fantasy/v2/league/461.l.1405188/players;status=A;position=RB;sort=OR;start=0;count=25;out=ownership,percent_owned",
+  "league": [
+   {
+    "league_key": "461.l.1405188",
+    "league_id": "1405188",
+    "name": "Sunday Funday",
+    "num_teams": 12,
+    "current_week": 4,
+    "start_week": "1",
+    "end_week": "17",
+    "season": "2026"
+   },
+   {
+    "players": {
+     "0": {
+      "player": [
+       [
+        {
+         "player_key": "461.p.33000"
+        },
+        {
+         "player_id": "33000"
+        },
+        {
+         "name": {
+          "full": "Waiver Wire Rb",
+          "first": "Waiver",
+          "last": "Wire Rb",
+          "ascii_first": "Waiver",
+          "ascii_last": "Wire Rb"
+         }
+        },
+        {
+         "editorial_player_key": "nfl.p.33000"
+        },
+        {
+         "editorial_team_key": "nfl.t.22"
+        },
+        {
+         "editorial_team_full_name": "Jacksonville Jaguars"
+        },
+        {
+         "editorial_team_abbr": "Jax"
+        },
+        {
+         "editorial_team_url": "https://sports.yahoo.com/nfl/teams/x/"
+        },
+        {
+         "bye_weeks": {
+          "week": "7"
+         }
+        },
+        {
+         "is_keeper": {
+          "status": false,
+          "cost": false,
+          "kept": false
+         }
+        },
+        {
+         "uniform_number": "1"
+        },
+        {
+         "display_position": "RB"
+        },
+        {
+         "headshot": {
+          "url": "https://example.invalid/h.png",
+          "size": "small"
+         }
+        },
+        {
+         "image_url": "https://example.invalid/h.png"
+        },
+        {
+         "is_undroppable": "0"
+        },
+        {
+         "position_type": "O"
+        },
+        {
+         "primary_position": "RB"
+        },
+        {
+         "eligible_positions": [
+          {
+           "position": "RB"
+          },
+          {
+           "position": "W/R/T"
+          }
+         ]
+        },
+        {
+         "eligible_positions_to_add": []
+        },
+        {
+         "has_player_notes": 1
+        },
+        {
+         "player_notes_last_timestamp": 1789900000
+        }
+       ],
+       {
+        "ownership": {
+         "ownership_type": "waivers",
+         "waiver_date": "2026-09-30"
+        }
+       },
+       {
+        "percent_owned": [
+         {
+          "coverage_type": "week",
+          "week": "4"
+         },
+         {
+          "value": "41"
+         },
+         {
+          "delta": "+22"
+         }
+        ]
+       }
+      ]
+     },
+     "1": {
+      "player": [
+       [
+        {
+         "player_key": "461.p.33001"
+        },
+        {
+         "player_id": "33001"
+        },
+        {
+         "name": {
+          "full": "Free Agent Wr",
+          "first": "Free",
+          "last": "Agent Wr",
+          "ascii_first": "Free",
+          "ascii_last": "Agent Wr"
+         }
+        },
+        {
+         "status": "D"
+        },
+        {
+         "status_full": "Doubtful"
+        },
+        {
+         "injury_note": "Ankle"
+        },
+        {
+         "editorial_player_key": "nfl.p.33001"
+        },
+        {
+         "editorial_team_key": "nfl.t.14"
+        },
+        {
+         "editorial_team_full_name": "Las Vegas Raiders"
+        },
+        {
+         "editorial_team_abbr": "LV"
+        },
+        {
+         "editorial_team_url": "https://sports.yahoo.com/nfl/teams/x/"
+        },
+        {
+         "bye_weeks": {
+          "week": "7"
+         }
+        },
+        {
+         "is_keeper": {
+          "status": false,
+          "cost": false,
+          "kept": false
+         }
+        },
+        {
+         "uniform_number": "1"
+        },
+        {
+         "display_position": "WR"
+        },
+        {
+         "headshot": {
+          "url": "https://example.invalid/h.png",
+          "size": "small"
+         }
+        },
+        {
+         "image_url": "https://example.invalid/h.png"
+        },
+        {
+         "is_undroppable": "0"
+        },
+        {
+         "position_type": "O"
+        },
+        {
+         "primary_position": "WR"
+        },
+        {
+         "eligible_positions": [
+          {
+           "position": "WR"
+          },
+          {
+           "position": "W/R/T"
+          }
+         ]
+        },
+        {
+         "eligible_positions_to_add": []
+        },
+        {
+         "has_player_notes": 1
+        },
+        {
+         "player_notes_last_timestamp": 1789900000
+        }
+       ],
+       {
+        "ownership": {
+         "ownership_type": "freeagents"
+        }
+       },
+       {
+        "percent_owned": [
+         {
+          "coverage_type": "week",
+          "week": "4"
+         },
+         {
+          "value": "12"
+         },
+         {
+          "delta": "-3"
+         }
+        ]
+       }
+      ]
+     },
+     "2": {
+      "player": [
+       [
+        {
+         "player_key": "461.p.33470"
+        },
+        {
+         "player_id": "33470"
+        },
+        {
+         "name": {
+          "full": "Obscure Rookie",
+          "first": "Obscure",
+          "last": "Rookie",
+          "ascii_first": "Obscure",
+          "ascii_last": "Rookie"
+         }
+        },
+        {
+         "editorial_player_key": "nfl.p.33470"
+        },
+        {
+         "editorial_team_key": "nfl.t.20"
+        },
+        {
+         "editorial_team_full_name": "Los Angeles Rams"
+        },
+        {
+         "editorial_team_abbr": "LAR"
+        },
+        {
+         "editorial_team_url": "https://sports.yahoo.com/nfl/teams/x/"
+        },
+        {
+         "bye_weeks": {
+          "week": "7"
+         }
+        },
+        {
+         "is_keeper": {
+          "status": false,
+          "cost": false,
+          "kept": false
+         }
+        },
+        {
+         "uniform_number": "1"
+        },
+        {
+         "display_position": "TE"
+        },
+        {
+         "headshot": {
+          "url": "https://example.invalid/h.png",
+          "size": "small"
+         }
+        },
+        {
+         "image_url": "https://example.invalid/h.png"
+        },
+        {
+         "is_undroppable": "0"
+        },
+        {
+         "position_type": "O"
+        },
+        {
+         "primary_position": "TE"
+        },
+        {
+         "eligible_positions": [
+          {
+           "position": "TE"
+          }
+         ]
+        },
+        {
+         "eligible_positions_to_add": []
+        },
+        {
+         "has_player_notes": 1
+        },
+        {
+         "player_notes_last_timestamp": 1789900000
+        }
+       ],
+       {
+        "ownership": {
+         "ownership_type": "freeagents"
+        }
+       },
+       {
+        "percent_owned": [
+         {
+          "coverage_type": "week",
+          "week": "4"
+         },
+         {
+          "value": 0
+         },
+         {
+          "delta": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "count": 3
+    }
+   }
+  ],
+  "time": "120.0ms",
+  "copyright": "Data provided by Yahoo! and STATS, LLC",
+  "refresh_rate": "31"
+ }
+}

@@ -1,0 +1,112 @@
+{
+  "_comment": "HAND-WRITTEN approximation of GET /fantasy/v2/league/{league_key}/settings?format=json, authored from Yahoo's documented shapes (not captured from a live response). league[0] = metadata, league[1].settings[0] = settings.",
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/league/461.l.1405188/settings",
+    "league": [
+      {
+        "league_key": "461.l.1405188",
+        "league_id": "1405188",
+        "name": "Sunday Funday",
+        "url": "https://football.fantasysports.yahoo.com/f1/1405188",
+        "logo_url": false,
+        "draft_status": "postdraft",
+        "num_teams": 12,
+        "edit_key": "4",
+        "weekly_deadline": "",
+        "league_update_timestamp": "1790000000",
+        "scoring_type": "head",
+        "league_type": "private",
+        "renew": "449_777777",
+        "renewed": "",
+        "felo_tier": "gold",
+        "iris_group_chat_id": "ABCDEF",
+        "allow_add_to_dl_extra_pos": 1,
+        "is_pro_league": "0",
+        "is_cash_league": "0",
+        "current_week": 4,
+        "start_week": "1",
+        "start_date": "2026-09-10",
+        "end_week": "17",
+        "end_date": "2027-01-04",
+        "game_code": "nfl",
+        "season": "2026"
+      },
+      {
+        "settings": [
+          {
+            "draft_type": "live",
+            "is_auction_draft": "0",
+            "scoring_type": "head",
+            "persistent_url": "https://football.fantasysports.yahoo.com/league/sundayfunday",
+            "uses_playoff": "1",
+            "has_playoff_consolation_games": true,
+            "playoff_start_week": "15",
+            "uses_playoff_reseeding": 0,
+            "uses_lock_eliminated_teams": 1,
+            "num_playoff_teams": "6",
+            "num_playoff_consolation_teams": 6,
+            "has_multiweek_championship": 0,
+            "waiver_type": "R",
+            "waiver_rule": "all",
+            "uses_faab": "0",
+            "draft_time": "1788400800",
+            "draft_pick_time": "90",
+            "post_draft_players": "W",
+            "max_teams": "12",
+            "waiver_time": "2",
+            "trade_end_date": "2026-11-28",
+            "trade_ratify_type": "commish",
+            "trade_reject_time": "1",
+            "player_pool": "ALL",
+            "cant_cut_list": "yahoo",
+            "draft_together": 0,
+            "can_trade_draft_picks": "0",
+            "sendbird_channel_url": "",
+            "roster_positions": [
+              { "roster_position": { "position": "QB", "position_type": "O", "count": 1, "is_starting_position": 1 } },
+              { "roster_position": { "position": "WR", "position_type": "O", "count": 2, "is_starting_position": 1 } },
+              { "roster_position": { "position": "RB", "position_type": "O", "count": 2, "is_starting_position": 1 } },
+              { "roster_position": { "position": "TE", "position_type": "O", "count": 1, "is_starting_position": 1 } },
+              { "roster_position": { "position": "W/R/T", "position_type": "O", "count": 1, "is_starting_position": 1 } },
+              { "roster_position": { "position": "K", "position_type": "K", "count": 1, "is_starting_position": 1 } },
+              { "roster_position": { "position": "DEF", "position_type": "DT", "count": 1, "is_starting_position": 1 } },
+              { "roster_position": { "position": "BN", "count": 6, "is_starting_position": 0 } },
+              { "roster_position": { "position": "IR", "count": 1, "is_starting_position": 0 } }
+            ],
+            "stat_categories": {
+              "stats": [
+                { "stat": { "stat_id": 4, "enabled": "1", "name": "Passing Yards", "display_name": "Pass Yds", "group": "passing", "abbr": "Pass Yds", "sort_order": "1", "position_type": "O", "stat_position_types": [ { "stat_position_type": { "position_type": "O" } } ] } },
+                { "stat": { "stat_id": 5, "enabled": "1", "name": "Passing Touchdowns", "display_name": "Pass TD", "group": "passing", "abbr": "Pass TD", "sort_order": "1", "position_type": "O", "stat_position_types": [ { "stat_position_type": { "position_type": "O" } } ] } },
+                { "stat": { "stat_id": 11, "enabled": "1", "name": "Receptions", "display_name": "Rec", "group": "receiving", "abbr": "Rec", "sort_order": "1", "position_type": "O", "stat_position_types": [ { "stat_position_type": { "position_type": "O" } } ] } }
+              ]
+            },
+            "stat_modifiers": {
+              "stats": [
+                { "stat": { "stat_id": 4, "value": "0.04", "bonuses": [ { "bonus": { "target": "300", "points": "3" } } ] } },
+                { "stat": { "stat_id": 5, "value": "4" } },
+                { "stat": { "stat_id": 6, "value": "-1" } },
+                { "stat": { "stat_id": 9, "value": "0.1" } },
+                { "stat": { "stat_id": 10, "value": "6" } },
+                { "stat": { "stat_id": 11, "value": "0.5" } },
+                { "stat": { "stat_id": 12, "value": "0.1" } },
+                { "stat": { "stat_id": 13, "value": "6" } },
+                { "stat": { "stat_id": 15, "value": "6" } },
+                { "stat": { "stat_id": 16, "value": "2" } },
+                { "stat": { "stat_id": 18, "value": "-2" } },
+                { "stat": { "stat_id": 57, "value": "6" } }
+              ]
+            },
+            "divisions": [],
+            "pickem_enabled": "0",
+            "uses_fractional_points": "1",
+            "uses_negative_points": "1"
+          }
+        ]
+      }
+    ],
+    "time": "38.1ms",
+    "copyright": "Data provided by Yahoo! and STATS, LLC",
+    "refresh_rate": "60"
+  }
+}

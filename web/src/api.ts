@@ -1,12 +1,13 @@
 // Typed fetch wrappers for every endpoint in docs/DESIGN.md "HTTP API contract".
 // With `?mock=1` in the page URL all calls are answered by ./mock.ts instead.
-import type { League, Position, TeamAnalysis, Trade, ValuedPlayer } from "../../server/model/types";
+import type { League, Position, TeamAnalysis, Trade, ValuedPlayer, WaiverTarget } from "../../server/model/types";
 import { ApiError } from "./lib/errors";
 
 export { ApiError };
+export type { WaiverTarget };
 
-/** ValuedPlayer as served by the API (the contract adds `why` and `trend`). */
-export type VP = ValuedPlayer & { why?: string; trend?: number };
+/** ValuedPlayer as served by the API. */
+export type VP = ValuedPlayer;
 
 export interface AppState {
   season: number;
@@ -44,17 +45,6 @@ export interface Analysis {
 }
 
 export type TradeResult = Trade & { verdict?: string };
-
-export interface WaiverTarget extends VP {
-  gain: number;
-  benchGain: number;
-  drop: VP | null;
-  trend: number;
-  recommendation: "claim" | "wait" | "optional" | "pass";
-  why: string;
-  onWaivers: boolean;
-  percentOwned?: number;
-}
 
 export interface WaiversResponse {
   freeAgents: WaiverTarget[];

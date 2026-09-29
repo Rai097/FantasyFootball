@@ -1,0 +1,277 @@
+{
+ "_comment": "HAND-WRITTEN approximation of GET /fantasy/v2/users;use_login=1/games;game_keys=nfl/leagues/teams?format=json (not captured live). users -> user [{guid},{games}] -> game [{meta},{leagues}] -> league [{meta},{teams}]. My team is flagged by is_owned_by_current_login / managers[].is_current_login. The second league deliberately has no team of mine (tests the /teams fallback).",
+ "fantasy_content": {
+  "xml:lang": "en-US",
+  "yahoo:uri": "/fantasy/v2/users;use_login=1/games;game_keys=nfl/leagues/teams",
+  "users": {
+   "0": {
+    "user": [
+     {
+      "guid": "GUIDME"
+     },
+     {
+      "games": {
+       "0": {
+        "game": [
+         {
+          "game_key": "461",
+          "game_id": "461",
+          "name": "Football",
+          "code": "nfl",
+          "type": "full",
+          "url": "https://football.fantasysports.yahoo.com/f1",
+          "season": "2026",
+          "is_registration_over": 0,
+          "is_game_over": 0,
+          "is_offseason": 0
+         },
+         {
+          "leagues": {
+           "0": {
+            "league": [
+             {
+              "league_key": "461.l.1405188",
+              "league_id": "1405188",
+              "name": "Sunday Funday",
+              "url": "https://football.fantasysports.yahoo.com/f1/1405188",
+              "draft_status": "postdraft",
+              "num_teams": 12,
+              "scoring_type": "head",
+              "current_week": 4,
+              "start_week": "1",
+              "end_week": "17",
+              "season": "2026",
+              "game_code": "nfl"
+             },
+             {
+              "teams": {
+               "0": {
+                "team": [
+                 [
+                  {
+                   "team_key": "461.l.1405188.t.1"
+                  },
+                  {
+                   "team_id": "1"
+                  },
+                  {
+                   "name": "Gridiron Gang"
+                  },
+                  {
+                   "url": "https://example.invalid"
+                  },
+                  {
+                   "team_logos": [
+                    {
+                     "team_logo": {
+                      "size": "large",
+                      "url": "https://example.invalid/l.png"
+                     }
+                    }
+                   ]
+                  },
+                  [],
+                  {
+                   "waiver_priority": 3
+                  },
+                  [],
+                  {
+                   "number_of_moves": "2"
+                  },
+                  {
+                   "number_of_trades": 0
+                  },
+                  [],
+                  {
+                   "league_scoring_type": "head"
+                  },
+                  [],
+                  [],
+                  {
+                   "has_draft_grade": 0
+                  },
+                  [],
+                  [],
+                  {
+                   "managers": [
+                    {
+                     "manager": {
+                      "manager_id": "1",
+                      "nickname": "Alex",
+                      "guid": "G1"
+                     }
+                    }
+                   ]
+                  }
+                 ]
+                ]
+               },
+               "1": {
+                "team": [
+                 [
+                  {
+                   "team_key": "461.l.1405188.t.3"
+                  },
+                  {
+                   "team_id": "3"
+                  },
+                  {
+                   "name": "My Squad"
+                  },
+                  {
+                   "is_owned_by_current_login": 1
+                  },
+                  {
+                   "url": "https://example.invalid"
+                  },
+                  {
+                   "team_logos": [
+                    {
+                     "team_logo": {
+                      "size": "large",
+                      "url": "https://example.invalid/l.png"
+                     }
+                    }
+                   ]
+                  },
+                  [],
+                  {
+                   "waiver_priority": 3
+                  },
+                  [],
+                  {
+                   "number_of_moves": "2"
+                  },
+                  {
+                   "number_of_trades": 0
+                  },
+                  [],
+                  {
+                   "league_scoring_type": "head"
+                  },
+                  [],
+                  [],
+                  {
+                   "has_draft_grade": 0
+                  },
+                  [],
+                  [],
+                  {
+                   "managers": [
+                    {
+                     "manager": {
+                      "manager_id": "3",
+                      "nickname": "Me",
+                      "guid": "G3",
+                      "is_current_login": "1"
+                     }
+                    }
+                   ]
+                  }
+                 ]
+                ]
+               },
+               "count": 2
+              }
+             }
+            ]
+           },
+           "1": {
+            "league": [
+             {
+              "league_key": "461.l.999999",
+              "league_id": "999999",
+              "name": "Work League",
+              "num_teams": 10,
+              "scoring_type": "head",
+              "current_week": 4,
+              "start_week": "1",
+              "end_week": "16",
+              "season": "2026",
+              "game_code": "nfl"
+             },
+             {
+              "teams": {
+               "0": {
+                "team": [
+                 [
+                  {
+                   "team_key": "461.l.999999.t.5"
+                  },
+                  {
+                   "team_id": "5"
+                  },
+                  {
+                   "name": "Office Hero"
+                  },
+                  {
+                   "url": "https://example.invalid"
+                  },
+                  {
+                   "team_logos": [
+                    {
+                     "team_logo": {
+                      "size": "large",
+                      "url": "https://example.invalid/l.png"
+                     }
+                    }
+                   ]
+                  },
+                  [],
+                  {
+                   "waiver_priority": 3
+                  },
+                  [],
+                  {
+                   "number_of_moves": "2"
+                  },
+                  {
+                   "number_of_trades": 0
+                  },
+                  [],
+                  {
+                   "league_scoring_type": "head"
+                  },
+                  [],
+                  [],
+                  {
+                   "has_draft_grade": 0
+                  },
+                  [],
+                  [],
+                  {
+                   "managers": [
+                    {
+                     "manager": {
+                      "manager_id": "5",
+                      "nickname": "Pat",
+                      "guid": "G5"
+                     }
+                    }
+                   ]
+                  }
+                 ]
+                ]
+               },
+               "count": 1
+              }
+             }
+            ]
+           },
+           "count": 2
+          }
+         }
+        ]
+       },
+       "count": 1
+      }
+     }
+    ]
+   },
+   "count": 1
+  },
+  "time": "90.0ms",
+  "copyright": "Data provided by Yahoo! and STATS, LLC",
+  "refresh_rate": "60"
+ }
+}

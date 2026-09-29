@@ -1,0 +1,144 @@
+{
+  "_comment": "HAND-WRITTEN approximation of GET /fantasy/v2/league/{league_key}/standings?format=json, authored from Yahoo's documented shapes (not captured live). Truncated to 3 of 12 teams. Each team is [[meta single-key objects and [] placeholders], {team_points}, {team_standings}].",
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/league/461.l.1405188/standings",
+    "league": [
+      {
+        "league_key": "461.l.1405188",
+        "league_id": "1405188",
+        "name": "Sunday Funday",
+        "num_teams": 12,
+        "current_week": 4,
+        "start_week": "1",
+        "end_week": "17",
+        "season": "2026"
+      },
+      {
+        "standings": [
+          {
+            "teams": {
+              "0": {
+                "team": [
+                  [
+                    { "team_key": "461.l.1405188.t.1" },
+                    { "team_id": "1" },
+                    { "name": "Gridiron Gang" },
+                    [],
+                    { "url": "https://football.fantasysports.yahoo.com/f1/1405188/1" },
+                    { "team_logos": [ { "team_logo": { "size": "large", "url": "https://example.invalid/logo1.png" } } ] },
+                    [],
+                    { "waiver_priority": 7 },
+                    [],
+                    { "number_of_moves": "4" },
+                    { "number_of_trades": 0 },
+                    { "roster_adds": { "coverage_type": "week", "coverage_value": "4", "value": "0" } },
+                    [],
+                    { "league_scoring_type": "head" },
+                    [],
+                    [],
+                    { "has_draft_grade": 1, "draft_grade": "B", "draft_recap_url": "https://example.invalid/recap" },
+                    [],
+                    [],
+                    { "managers": [ { "manager": { "manager_id": "1", "nickname": "Alex", "guid": "GUIDALEX", "is_commissioner": "1", "felo_score": "700", "felo_tier": "gold" } } ] }
+                  ],
+                  { "team_points": { "coverage_type": "season", "season": "2026", "total": "362.44" } },
+                  {
+                    "team_standings": {
+                      "rank": 1,
+                      "playoff_seed": "1",
+                      "outcome_totals": { "wins": "3", "losses": "0", "ties": 0, "percentage": "1.000" },
+                      "streak": { "type": "win", "value": "3" },
+                      "points_for": "362.44",
+                      "points_against": 301.2
+                    }
+                  }
+                ]
+              },
+              "1": {
+                "team": [
+                  [
+                    { "team_key": "461.l.1405188.t.2" },
+                    { "team_id": "2" },
+                    { "name": "Two Managers FC" },
+                    [],
+                    { "url": "https://football.fantasysports.yahoo.com/f1/1405188/2" },
+                    { "team_logos": [ { "team_logo": { "size": "large", "url": "https://example.invalid/logo2.png" } } ] },
+                    [],
+                    { "waiver_priority": 12 },
+                    [],
+                    { "number_of_moves": "1" },
+                    { "number_of_trades": "1" },
+                    { "roster_adds": { "coverage_type": "week", "coverage_value": "4", "value": "0" } },
+                    [],
+                    { "league_scoring_type": "head" },
+                    [],
+                    [],
+                    { "has_draft_grade": 0 },
+                    [],
+                    [],
+                    {
+                      "managers": [
+                        { "manager": { "manager_id": "2", "nickname": "Blair", "guid": "GUIDBLAIR" } },
+                        { "manager": { "manager_id": "13", "nickname": "Casey", "guid": "GUIDCASEY", "is_comanager": "1" } }
+                      ]
+                    }
+                  ],
+                  { "team_points": { "coverage_type": "season", "season": "2026", "total": "300.10" } },
+                  {
+                    "team_standings": {
+                      "rank": 7,
+                      "outcome_totals": { "wins": 1, "losses": 1, "ties": 1, "percentage": ".500" },
+                      "points_for": "300.10",
+                      "points_against": "310.00"
+                    }
+                  }
+                ]
+              },
+              "2": {
+                "team": [
+                  [
+                    { "team_key": "461.l.1405188.t.3" },
+                    { "team_id": "3" },
+                    { "name": "My Squad" },
+                    { "is_owned_by_current_login": 1 },
+                    { "url": "https://football.fantasysports.yahoo.com/f1/1405188/3" },
+                    { "team_logos": [ { "team_logo": { "size": "large", "url": "https://example.invalid/logo3.png" } } ] },
+                    [],
+                    { "waiver_priority": 3 },
+                    [],
+                    { "number_of_moves": "6" },
+                    { "number_of_trades": 0 },
+                    { "roster_adds": { "coverage_type": "week", "coverage_value": "4", "value": "1" } },
+                    [],
+                    { "league_scoring_type": "head" },
+                    [],
+                    [],
+                    { "has_draft_grade": 0 },
+                    [],
+                    [],
+                    { "managers": [ { "manager": { "manager_id": "3", "nickname": "Me", "guid": "GUIDME", "is_current_login": "1" } } ] }
+                  ],
+                  { "team_points": { "coverage_type": "season", "season": "2026", "total": "288.90" } },
+                  {
+                    "team_standings": {
+                      "rank": 9,
+                      "playoff_seed": "",
+                      "outcome_totals": { "wins": "1", "losses": "2", "ties": "0", "percentage": ".333" },
+                      "points_for": "288.90",
+                      "points_against": "315.55"
+                    }
+                  }
+                ]
+              },
+              "count": 3
+            }
+          }
+        ]
+      }
+    ],
+    "time": "55.2ms",
+    "copyright": "Data provided by Yahoo! and STATS, LLC",
+    "refresh_rate": "60"
+  }
+}

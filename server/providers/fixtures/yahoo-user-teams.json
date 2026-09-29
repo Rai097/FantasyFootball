@@ -1,0 +1,176 @@
+{
+ "_comment": "HAND-WRITTEN approximation of GET /fantasy/v2/users;use_login=1/games;game_keys=nfl/teams?format=json (not captured live). users -> user [{guid},{games}] -> game [{meta},{teams}] -> team [[meta]].",
+ "fantasy_content": {
+  "xml:lang": "en-US",
+  "yahoo:uri": "/fantasy/v2/users;use_login=1/games;game_keys=nfl/teams",
+  "users": {
+   "0": {
+    "user": [
+     {
+      "guid": "GUIDME"
+     },
+     {
+      "games": {
+       "0": {
+        "game": [
+         {
+          "game_key": "461",
+          "game_id": "461",
+          "name": "Football",
+          "code": "nfl",
+          "type": "full",
+          "url": "https://football.fantasysports.yahoo.com/f1",
+          "season": "2026",
+          "is_registration_over": 0,
+          "is_game_over": 0,
+          "is_offseason": 0
+         },
+         {
+          "teams": {
+           "0": {
+            "team": [
+             [
+              {
+               "team_key": "461.l.1405188.t.3"
+              },
+              {
+               "team_id": "3"
+              },
+              {
+               "name": "My Squad"
+              },
+              {
+               "is_owned_by_current_login": 1
+              },
+              {
+               "url": "https://example.invalid"
+              },
+              {
+               "team_logos": [
+                {
+                 "team_logo": {
+                  "size": "large",
+                  "url": "https://example.invalid/l.png"
+                 }
+                }
+               ]
+              },
+              [],
+              {
+               "waiver_priority": 3
+              },
+              [],
+              {
+               "number_of_moves": "2"
+              },
+              {
+               "number_of_trades": 0
+              },
+              [],
+              {
+               "league_scoring_type": "head"
+              },
+              [],
+              [],
+              {
+               "has_draft_grade": 0
+              },
+              [],
+              [],
+              {
+               "managers": [
+                {
+                 "manager": {
+                  "manager_id": "3",
+                  "nickname": "Me",
+                  "guid": "G3",
+                  "is_current_login": "1"
+                 }
+                }
+               ]
+              }
+             ]
+            ]
+           },
+           "1": {
+            "team": [
+             [
+              {
+               "team_key": "461.l.999999.t.7"
+              },
+              {
+               "team_id": "7"
+              },
+              {
+               "name": "Office Hero II"
+              },
+              {
+               "is_owned_by_current_login": 1
+              },
+              {
+               "url": "https://example.invalid"
+              },
+              {
+               "team_logos": [
+                {
+                 "team_logo": {
+                  "size": "large",
+                  "url": "https://example.invalid/l.png"
+                 }
+                }
+               ]
+              },
+              [],
+              {
+               "waiver_priority": 3
+              },
+              [],
+              {
+               "number_of_moves": "2"
+              },
+              {
+               "number_of_trades": 0
+              },
+              [],
+              {
+               "league_scoring_type": "head"
+              },
+              [],
+              [],
+              {
+               "has_draft_grade": 0
+              },
+              [],
+              [],
+              {
+               "managers": [
+                {
+                 "manager": {
+                  "manager_id": "7",
+                  "nickname": "Me",
+                  "guid": "G7",
+                  "is_current_login": "1"
+                 }
+                }
+               ]
+              }
+             ]
+            ]
+           },
+           "count": 2
+          }
+         }
+        ]
+       },
+       "count": 1
+      }
+     }
+    ]
+   },
+   "count": 1
+  },
+  "time": "60.0ms",
+  "copyright": "Data provided by Yahoo! and STATS, LLC",
+  "refresh_rate": "60"
+ }
+}
