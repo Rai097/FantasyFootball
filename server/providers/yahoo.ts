@@ -455,14 +455,23 @@ async function diagnose403(original: YahooError): Promise<YahooError> {
   };
   const pub = await probe("/game/nfl");
   const user = await probe("/users;use_login=1/games");
-  console.warn(`[yahoo] 403 diagnostics: /game/nfl=${pub} /users;use_login=1/games=${user}`);
+  // Where is this server? Yahoo Fantasy refuses non-US addresses.
+  let where = "unknown";
+  try {
+    const r = await fetch("https://ipinfo.io/json", { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(8_000) });
+    const g = (await r.json()) as { ip?: string; city?: string; region?: string; country?: string; org?: string };
+    where = `${g.city ?? "?"}, ${g.region ?? "?"}, ${g.country ?? "?"} (${g.org ?? "?"})`;
+  } catch {
+    /* ignore */
+  }
+  console.warn(`[yahoo] 403 diagnostics: /game/nfl=${pub} /users;use_login=1/games=${user} server-location=${where}`);
   let hint: string;
   if (pub === "ok" && user !== "ok")
     hint = "Your login token works for public data but not for your account, so it lacks the Fantasy Sports permission. Open https://developer.yahoo.com/apps/, click your app, confirm 'Fantasy Sports - Read' is ticked under API Permissions (re-tick and save if not), then in this app click Disconnect and Connect Yahoo again. On Yahoo's approval page, the text must mention Fantasy Sports.";
   else if (pub !== "ok" && user !== "ok")
     hint = "Yahoo rejects every Fantasy Sports call with this token. Two known causes: (1) the server is outside the US (Yahoo Fantasy is US-only and its API refuses non-US addresses; on Render check Settings → Region and redeploy in Oregon/Ohio/Virginia); (2) the app lacks 'Fantasy Sports - Read' under API Permissions at https://developer.yahoo.com/apps/ — if ticked, delete and recreate the app, update YAHOO_CLIENT_ID/SECRET, then Disconnect and Connect again.";
   else hint = "Yahoo allowed a basic account call but denied the leagues listing. Click Retry once; if it persists, paste this message into the Claude session.";
-  return new YahooError(`${original.message} [diagnostics: /game/nfl=${pub}, /users;use_login=1/games=${user}]`, 403, hint, original.yahooBody, original.endpoint);
+  return new YahooError(`${original.message} [diagnostics: /game/nfl=${pub}, /users;use_login=1/games=${user}, server location: ${where}]`, 403, hint, original.yahooBody, original.endpoint);
 }
 
 export const yahoo: YahooProvider = {
