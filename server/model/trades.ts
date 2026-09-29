@@ -285,7 +285,7 @@ export function evaluateTrade(
   const my = teamState(ctx, myTeamId);
   const their = teamState(ctx, partnerId);
   const pick = (ids: string[], roster: ValuedPlayer[], who: string) =>
-    ids.map((id) => {
+    [...new Set(ids)].map((id) => {
       const p = roster.find((r) => r.id === id);
       if (!p) throw Object.assign(new Error(`Player ${id} is not on ${who}'s roster`), { status: 400 });
       return p;
