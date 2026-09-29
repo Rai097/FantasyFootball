@@ -23,7 +23,7 @@ import {
   STAT_MAP,
   type PlayerFinder,
 } from "./yahoo-parse.js";
-import { describeYahooBody, normalizeLeagueKey } from "./yahoo.js";
+import { buildApiRequest, describeYahooBody, normalizeLeagueKey } from "./yahoo.js";
 import { normName, normTeam } from "../data/names.js";
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -292,4 +292,17 @@ test("league key normalisation strips a team suffix", async () => {
   assert.equal(await normalizeLeagueKey("461.l.1405188.t.3"), "461.l.1405188");
   assert.equal(await normalizeLeagueKey(" 461.l.1405188 "), "461.l.1405188");
   await assert.rejects(normalizeLeagueKey("not-a-key"), /Not a Yahoo league key/);
+});
+
+test("buildApiRequest shapes each request style", () => {
+  const d = buildApiRequest("/game/nfl", "TOK", "default");
+  assert.equal(d.url, "https://fantasysports.yahooapis.com/fantasy/v2/game/nfl?format=json");
+  assert.equal(d.headers.Authorization, "Bearer TOK");
+  const p = buildApiRequest("/game/nfl", "TOK", "python");
+  assert.equal(p.headers["User-Agent"], "python-requests/2.32.3");
+  assert.equal(p.headers.Authorization, "Bearer TOK");
+  const q = buildApiRequest("/game/nfl", "TOK", "query");
+  assert.equal(q.url, "https://fantasysports.yahooapis.com/fantasy/v2/game/nfl?format=json&access_token=TOK");
+  assert.equal(q.headers.Authorization, undefined);
+  assert.equal(buildApiRequest("/game/nfl", "TOK", "default", false).url, "https://fantasysports.yahooapis.com/fantasy/v2/game/nfl");
 });

@@ -257,11 +257,41 @@ function serialized<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * How API requests are shaped. "default" = Bearer header + Accept: application/json
+ * (what we always did); "python" = Bearer header with the headers python-requests
+ * sends (what yahoo_oauth/yfpy/yahoo_fantasy_api use in the wild); "query" =
+ * access_token as a query parameter. Set YAHOO_REQUEST_STYLE to force one; the
+ * 403 diagnostics switch to a style that works if they find one.
+ */
+export type RequestStyle = "default" | "python" | "query";
+const REQUEST_STYLES: readonly RequestStyle[] = ["default", "python", "query"];
+const PYTHON_HEADERS = { "User-Agent": "python-requests/2.32.3", Accept: "*/*", "Accept-Encoding": "gzip, deflate" } as const;
+let requestStyle: RequestStyle = REQUEST_STYLES.includes(process.env.YAHOO_REQUEST_STYLE as RequestStyle)
+  ? (process.env.YAHOO_REQUEST_STYLE as RequestStyle)
+  : "default";
+
+/** Build the URL and headers for a Yahoo API GET. `json: false` omits format=json (XML). */
+export function buildApiRequest(path: string, token: string, style: RequestStyle, json = true): { url: string; headers: Record<string, string> } {
+  const params = new URLSearchParams();
+  if (json) params.set("format", "json");
+  if (style === "query") params.set("access_token", token);
+  const qs = params.toString();
+  const url = `${API_BASE}${path}${qs ? (path.includes("?") ? "&" : "?") + qs : ""}`;
+  const headers: Record<string, string> =
+    style === "default"
+      ? { Authorization: `Bearer ${token}`, Accept: "application/json" }
+      : style === "python"
+        ? { ...PYTHON_HEADERS, Authorization: `Bearer ${token}` }
+        : { ...PYTHON_HEADERS };
+  return { url, headers };
+}
+
 async function rawGet(path: string): Promise<string> {
-  const url = `${API_BASE}${path}${path.includes("?") ? "&" : "?"}format=json`;
   const doFetch = async (token: string) => {
+    const { url, headers } = buildApiRequest(path, token, requestStyle);
     try {
-      return await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
+      return await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
     } catch (err) {
       throw new YahooError(`Could not reach Yahoo (${path}): ${(err as Error).message}`, 502, "Check your internet connection.", undefined, path);
     }
@@ -274,7 +304,7 @@ async function rawGet(path: string): Promise<string> {
   const text = await res.text();
   if (!res.ok) {
     const desc = describeYahooBody(text);
-    console.warn(`[yahoo] HTTP ${res.status} for ${path}; www-authenticate=${res.headers.get("www-authenticate") ?? "-"}; body: ${text.replace(/\s+/g, " ").slice(0, 600)}`);
+    console.warn(`[yahoo] HTTP ${res.status} for ${path} (style=${requestStyle}); www-authenticate=${res.headers.get("www-authenticate") ?? "-"}; body: ${text.replace(/\s+/g, " ").slice(0, 600)}`);
     const status = res.status === 999 ? 429 : res.status >= 500 ? 502 : res.status;
     throw new YahooError(`Yahoo API error ${res.status} for ${path}: ${desc}`, status, hintFor(res.status, text), text.slice(0, 2000), path);
   }
@@ -445,33 +475,90 @@ async function fetchFreeAgentsRaw(key: string): Promise<YahooPlayerEntry[]> {
  * to tell them apart and produce a precise hint.
  */
 async function diagnose403(original: YahooError): Promise<YahooError> {
-  const probe = async (path: string): Promise<string> => {
-    try {
-      await yget(path, () => true);
-      return "ok";
-    } catch (e) {
-      return e instanceof YahooError ? `HTTP ${e.status}` : "error";
-    }
-  };
-  const pub = await probe("/game/nfl");
-  const user = await probe("/users;use_login=1/games");
-  // Where is this server? Yahoo Fantasy refuses non-US addresses.
-  let where = "unknown";
-  try {
-    const r = await fetch("https://ipinfo.io/json", { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(8_000) });
-    const g = (await r.json()) as { ip?: string; city?: string; region?: string; country?: string; org?: string };
-    where = `${g.city ?? "?"}, ${g.region ?? "?"}, ${g.country ?? "?"} (${g.org ?? "?"})`;
-  } catch {
-    /* ignore */
+  const matrix = await run403Matrix();
+  const summary = Object.entries(matrix)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" ");
+  const pub = matrix.a;
+  const user = await serialized(() => probeOnce("/users;use_login=1/games", requestStyle));
+  const where = await serverLocation();
+  console.warn(`[yahoo] 403 matrix: ${summary} (a=current headers, b=python-requests headers, c=access_token query param, d=XML/no format, e=/games;game_codes=nfl)`);
+  console.warn(`[yahoo] 403 diagnostics: /game/nfl=${pub} /users;use_login=1/games=${user} style=${requestStyle} server-location=${where}`);
+
+  // If a different request shape works, switch to it for the rest of this process.
+  const winner: RequestStyle | undefined = matrix.b === "ok" ? "python" : matrix.c === "ok" ? "query" : undefined;
+  if (pub !== "ok" && winner) {
+    requestStyle = winner;
+    console.warn(`[yahoo] switching request style to "${winner}" for this server process`);
+    return new YahooError(
+      `${original.message} [403 matrix: ${summary}]`,
+      403,
+      `Yahoo accepted a different request format (${winner}). The server has switched to it — click Retry.`,
+      original.yahooBody,
+      original.endpoint,
+    );
   }
-  console.warn(`[yahoo] 403 diagnostics: /game/nfl=${pub} /users;use_login=1/games=${user} server-location=${where}`);
+
   let hint: string;
   if (pub === "ok" && user !== "ok")
     hint = "Your login token works for public data but not for your account, so it lacks the Fantasy Sports permission. Open https://developer.yahoo.com/apps/, click your app, confirm 'Fantasy Sports - Read' is ticked under API Permissions (re-tick and save if not), then in this app click Disconnect and Connect Yahoo again. On Yahoo's approval page, the text must mention Fantasy Sports.";
   else if (pub !== "ok" && user !== "ok")
-    hint = "Yahoo rejects every Fantasy Sports call with this token. Two known causes: (1) the server is outside the US (Yahoo Fantasy is US-only and its API refuses non-US addresses; on Render check Settings → Region and redeploy in Oregon/Ohio/Virginia); (2) the app lacks 'Fantasy Sports - Read' under API Permissions at https://developer.yahoo.com/apps/ — if ticked, delete and recreate the app, update YAHOO_CLIENT_ID/SECRET, then Disconnect and Connect again.";
+    hint = "Yahoo rejects every Fantasy Sports call with this token, whatever the request format. The token itself is not authorised for Fantasy Sports: check the app at https://developer.yahoo.com/apps/ has 'Fantasy Sports - Read' (and nothing requiring review), then Disconnect and Connect again.";
   else hint = "Yahoo allowed a basic account call but denied the leagues listing. Click Retry once; if it persists, paste this message into the Claude session.";
-  return new YahooError(`${original.message} [diagnostics: /game/nfl=${pub}, /users;use_login=1/games=${user}, server location: ${where}]`, 403, hint, original.yahooBody, original.endpoint);
+  return new YahooError(
+    `${original.message} [403 matrix: ${summary}; /users;use_login=1/games=${user}; server location: ${where}]`,
+    403,
+    hint,
+    original.yahooBody,
+    original.endpoint,
+  );
+}
+
+/** One GET with a given shape; returns "ok" or the HTTP status / error class. Never throws. */
+async function probeOnce(path: string, style: RequestStyle, json = true): Promise<string> {
+  try {
+    const { url, headers } = buildApiRequest(path, await accessToken(), style, json);
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+    const text = await res.text();
+    if (res.ok) return "ok";
+    if (res.status !== 403) console.warn(`[yahoo] probe ${style}${json ? "" : "/xml"} ${path}: HTTP ${res.status} ${describeYahooBody(text).slice(0, 120)}`);
+    return String(res.status);
+  } catch (err) {
+    return err instanceof YahooError ? `E${err.status}` : "neterr";
+  }
+}
+
+/** Try the public /game/nfl endpoint several ways to see whether request shape matters. */
+async function run403Matrix(): Promise<Record<"a" | "b" | "c" | "d" | "e", string>> {
+  const steps: [key: "a" | "b" | "c" | "d" | "e", run: () => Promise<string>][] = [
+    ["a", () => probeOnce("/game/nfl", "default")],
+    ["b", () => probeOnce("/game/nfl", "python")],
+    ["c", () => probeOnce("/game/nfl", "query")],
+    ["d", () => probeOnce("/game/nfl", "default", false)],
+    ["e", () => probeOnce("/games;game_codes=nfl", "default")],
+  ];
+  const out = { a: "?", b: "?", c: "?", d: "?", e: "?" };
+  for (const [k, run] of steps) out[k] = await serialized(run);
+  return out;
+}
+
+/** Public location of this server (Yahoo Fantasy refuses non-US addresses). */
+async function serverLocation(): Promise<string> {
+  const sources: [url: string, pick: (g: Record<string, unknown>) => (unknown)[]][] = [
+    ["https://ipinfo.io/json", (g) => [g.city, g.region, g.country, g.org]],
+    ["https://ipapi.co/json/", (g) => [g.city, g.region, g.country_code, g.org]],
+  ];
+  for (const [url, pick] of sources) {
+    try {
+      const r = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "curl/8.5.0" }, signal: AbortSignal.timeout(8_000) });
+      if (!r.ok) continue;
+      const [city, region, country, org] = pick((await r.json()) as Record<string, unknown>).map((v) => (typeof v === "string" ? v : "?"));
+      if (country !== "?") return `${city}, ${region}, ${country} (${org})`;
+    } catch {
+      /* try next */
+    }
+  }
+  return "unknown";
 }
 
 export const yahoo: YahooProvider = {
