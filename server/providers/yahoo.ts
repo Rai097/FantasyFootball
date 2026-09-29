@@ -172,6 +172,7 @@ async function tokenRequest(params: Record<string, string>): Promise<Tokens> {
   const text = await res.text();
   if (!res.ok) {
     const desc = describeYahooBody(text);
+    console.warn(`[yahoo] HTTP ${res.status} for ${path}; www-authenticate=${res.headers.get("www-authenticate") ?? "-"}; body: ${text.replace(/\s+/g, " ").slice(0, 600)}`);
     const grant = params.grant_type;
     const hint =
       grant === "authorization_code"
@@ -273,6 +274,7 @@ async function rawGet(path: string): Promise<string> {
   const text = await res.text();
   if (!res.ok) {
     const desc = describeYahooBody(text);
+    console.warn(`[yahoo] HTTP ${res.status} for ${path}; www-authenticate=${res.headers.get("www-authenticate") ?? "-"}; body: ${text.replace(/\s+/g, " ").slice(0, 600)}`);
     const status = res.status === 999 ? 429 : res.status >= 500 ? 502 : res.status;
     throw new YahooError(`Yahoo API error ${res.status} for ${path}: ${desc}`, status, hintFor(res.status, text), text.slice(0, 2000), path);
   }
