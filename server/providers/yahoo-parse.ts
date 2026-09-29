@@ -455,7 +455,7 @@ export function parseGameKey(json: unknown): string {
 /**
  * Map a Yahoo status to our Player.injury. Undefined when healthy / empty.
  *  - Q / D / O / P → Questionable / Doubtful / Out / Probable (detail = injury note)
- *  - "-R" designations (IR-R, PUP-R, NFI-R: designated to return) → Out, detail = note or "return designation" (short-term)
+ *  - "-R" designations (IR-R, PUP-R, NFI-R: designated to return) → Out, detail "<note> (return designation)" or "return designation" (short-term)
  *  - IR, IR-LT, PUP(-P), NFI(-A) and "O" parked in an IR slot → Out, detail "IR…" (long-term)
  *  - NA (not on an active NFL roster) → Out, detail "NA…" (long-term, same as IR)
  *  - SUSP → Out, detail "Suspended…"
@@ -469,7 +469,7 @@ export function yahooInjury(status: string | undefined, note: string | undefined
   if (s === "D") return mk("Doubtful", note);
   if (s === "P") return mk("Probable", note);
   if (s === "O") return selectedPosition?.toUpperCase() === "IR" || selectedPosition?.toUpperCase() === "IL" ? mk("Out", withNote("IR")) : mk("Out", note);
-  if (/^(IR|PUP|NFI)-R$/.test(s)) return mk("Out", note ?? "return designation");
+  if (/^(IR|PUP|NFI)-R$/.test(s)) return mk("Out", note ? `${note} (return designation)` : "return designation");
   if (/^(IR|PUP|NFI)\b/.test(s)) return mk("Out", withNote("IR"));
   if (s === "NA") return mk("Out", withNote("NA"));
   if (s === "SUSP") return mk("Out", withNote("Suspended"));

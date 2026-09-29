@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { curveAt, injuryKind, replacementRanks, smooth, valuePlayers, WEIGHTS } from "./projection.js";
+import { CONSENSUS_WEIGHT, curveAt, injuryKind, replacementRanks, smooth, valuePlayers, WEIGHTS } from "./projection.js";
 import { league, line, rawPlayer, team } from "./testkit.js";
 import type { Player, WeekLine } from "./types.js";
 
@@ -152,4 +152,26 @@ test("deterministic", () => {
   const a = valuePlayers(L, field).players.get("rb2");
   const b = valuePlayers(L, field).players.get("rb2");
   assert.deepEqual(a, b);
+});
+
+test("consensus anchor: ECR overall #3 with a cold start still lands in the top 10", () => {
+  // 12-team league, 60 RBs from 30 down to 0.5 ppg, ECR overall in the same order.
+  const L12 = league([team("1", [])], undefined, { numTeams: 12 });
+  const deep = Array.from({ length: 60 }, (_, i) => steadyRb(`d${i + 1}`, 30 - i * 0.5, 3, 17, { ecrOverall: i + 1 }));
+  // Last year's stud (28 ppg in 2025) off to a 10-ppg start in 2026.
+  const l26 = line({ rushYd: 100 });
+  const cold = steadyRb("cold", 28, 0, 17, {
+    ecrOverall: 3,
+    weeks: [1, 2, 3].map((week) => ({ season: 2026, week, team: "KC", actual: l26, expected: l26 })),
+  });
+  const v = valuePlayers(L12, [...deep, cold]);
+  const ranked = [...v.players.values()].sort((a, b) => b.value - a.value);
+  const idx = ranked.findIndex((p) => p.id === "cold");
+  const c = v.players.get("cold")!;
+  const model = Number(/model (\d+\.\d)/.exec(c.why)![1]);
+  assert.ok(idx < 10, `cold ranks #${idx + 1} (value ${c.value})`);
+  assert.ok(model < ranked[9].value, "the model alone would not have him top 10");
+  assert.match(c.why, /consensus #3 \(implies [\d.]+, 35%\) pulls to/);
+  assert.equal(ranked[0].value, 100, "rescaled so the max is 100");
+  assert.equal(CONSENSUS_WEIGHT, 0.35);
 });

@@ -30,6 +30,8 @@ export const FLEX_SHARE: Partial<Record<SlotKind, Partial<Record<Position, numbe
 /** Bench-depth term of the replacement rank, for a 12-team league (scaled by numTeams/12). */
 export const BENCH_DEPTH: Record<Position, number> = { QB: 2, RB: 6, WR: 6, TE: 3, K: 0, DEF: 0 };
 export const PLAYOFF_WEIGHT = 1.25;
+/** Weight of the overall-ECR implied value in the final value (model value gets the rest). */
+export const CONSENSUS_WEIGHT = 0.35;
 const CONVEXITY = 1.15;
 const LONG_TERM_RE = /ACL|Achilles|season|\bIR\b|^NA\b/i;
 const RETURN_RE = /return designation/i;
@@ -300,6 +302,25 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
   const rawValue = (b: Base) => Math.max(0, b.ppg - replacement[b.p.pos]) * b.weightedGames;
   let maxRaw = 0;
   for (const b of bases) maxRaw = Math.max(maxRaw, rawValue(b));
+  const modelValueOf = (b: Base) => {
+    const rv = rawValue(b);
+    return maxRaw > 0 && rv > 0 ? 100 * Math.pow(rv / maxRaw, CONVEXITY) : 0;
+  };
+
+  // --- 6. consensus anchor: blend model value with the value implied by overall ECR rank.
+  const isSkill = (b: Base) => b.p.pos !== "K" && b.p.pos !== "DEF";
+  const valueAtRank = bases.filter(isSkill).map(modelValueOf).sort((x, y) => y - x);
+  const anchorOf = (b: Base): Anchor => {
+    const model = modelValueOf(b);
+    if (!isSkill(b) || b.p.ecrOverall === undefined || !valueAtRank.length) return { model, blended: model };
+    // Implied value at the player's overall rank, scaled by availability (IR / injuries / no team still cost value).
+    const avail = b.weeksLeft > 0 ? Math.min(1, b.remainingGames / b.weeksLeft) : 0;
+    const implied = curveAt(valueAtRank, b.p.ecrOverall) * avail;
+    return { model, implied, rank: b.p.ecrOverall, blended: (1 - CONSENSUS_WEIGHT) * model + CONSENSUS_WEIGHT * implied };
+  };
+  let maxBlended = 0;
+  for (const b of bases) maxBlended = Math.max(maxBlended, anchorOf(b).blended);
+  const scale = maxBlended > 0 ? 100 / maxBlended : 0;
 
   const posRankOf = (pos: Position, ppg: number) => {
     // number of players at pos with strictly higher ppg, +1
@@ -317,8 +338,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
   const finalize = (b: Base, posRank: number): ValuedPlayer => {
     const p = b.p;
     const vorp = Math.max(0, b.ppg - replacement[p.pos]);
-    const rv = rawValue(b);
-    const value = maxRaw > 0 && rv > 0 ? r1(100 * Math.pow(rv / maxRaw, CONVEXITY)) : 0;
+    const anchor = anchorOf(b);
+    const value = r1(Math.min(100, anchor.blended * scale));
     const weekProj = p.weekProjByFormat?.[fmt] ?? p.weekProj;
     const effPpg = effPpgOf(b);
     return {
@@ -335,7 +356,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
       posRank,
       remainingGames: r1(b.remainingGames),
       trend: r2(b.trend),
-      why: explain(b, replacement[p.pos], vorp, value),
+      why: explain(b, replacement[p.pos], vorp, value, anchor, scale),
     };
   };
 
@@ -372,7 +393,14 @@ function effPpgOf(b: Pick<Base, "ppg" | "remainingGames" | "weeksLeft">): number
   return Math.max(0, b.ppg) * Math.min(1, b.remainingGames / b.weeksLeft);
 }
 
-function explain(b: Base, repl: number, vorp: number, value: number): string {
+interface Anchor {
+  model: number;
+  implied?: number;
+  rank?: number;
+  blended: number;
+}
+
+function explain(b: Base, repl: number, vorp: number, value: number, anchor: Anchor, scale: number): string {
   const p = b.p;
   const f1 = (x: number) => x.toFixed(1);
   const parts: string[] = [];
@@ -393,7 +421,9 @@ function explain(b: Base, repl: number, vorp: number, value: number): string {
   const games = b.remainingGames;
   s += ` ${p.pos} replacement ${f1(repl)} → +${f1(vorp)}/g × ${Math.round(games * 10) / 10} games`;
   if (b.gameNotes.length) s += ` (${b.gameNotes.join("; ")})`;
-  s += ` → value ${f1(value)}.`;
+  if (anchor.implied !== undefined && anchor.rank !== undefined) {
+    s += ` → model ${f1(anchor.model * scale)} · consensus #${Math.round(anchor.rank * 10) / 10} (implies ${f1(anchor.implied * scale)}, ${Math.round(CONSENSUS_WEIGHT * 100)}%) pulls to ${f1(value)}.`;
+  } else s += ` → value ${f1(value)}.`;
   const eff = effPpgOf(b);
   if (b.remainingGames > 0 && b.remainingGames < b.weeksLeft) {
     s += ` Lineup ppg ${f1(eff)} = ${f1(b.ppg)} × ${Math.round(b.remainingGames * 10) / 10}/${b.weeksLeft} games (availability-adjusted).`;

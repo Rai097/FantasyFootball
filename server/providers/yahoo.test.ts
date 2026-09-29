@@ -260,7 +260,7 @@ test("yahoo status → injury mapping", () => {
   assert.deepEqual(yahooInjury("O", "Knee", 4), { status: "Out", detail: "Knee", week: 4 });
   // designated to return: short-term, never "IR"
   assert.deepEqual(yahooInjury("IR-R", undefined, 4), { status: "Out", detail: "return designation", week: 4 });
-  assert.deepEqual(yahooInjury("PUP-R", "Knee", 4), { status: "Out", detail: "Knee", week: 4 });
+  assert.deepEqual(yahooInjury("PUP-R", "Knee", 4), { status: "Out", detail: "Knee (return designation)", week: 4 });
   assert.deepEqual(yahooInjury("NFI-R", undefined, 4, "IR"), { status: "Out", detail: "return designation", week: 4 });
   // long-term
   assert.deepEqual(yahooInjury("IR", "ACL", 4), { status: "Out", detail: "IR (ACL)", week: 4 });
