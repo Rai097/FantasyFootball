@@ -103,6 +103,37 @@ Please don't refresh in a tight loop — see *999* below.
 | **Some players listed as "unmatched"** | A rostered player couldn't be matched to the free player database (very new signings, practice-squad call-ups). They're shown on the team but not valued. Usually fixes itself within a day when the data files update. |
 | **"Could not parse Yahoo response for …"** | Yahoo returned something the importer didn't expect. The error message contains the endpoint and the first 500 characters of Yahoo's reply (the full reply is in the server console). Please copy it into a bug report. |
 
+## Testing your Yahoo app from another network
+
+If login works but every Fantasy call fails with 403 *"This application is not
+authorized to perform this action"*, run the probe from a different machine or
+network (your laptop, or a fresh Claude Code session whose network allows
+`api.login.yahoo.com`, `fantasysports.yahooapis.com` and `ipinfo.io`). It uses
+the same app credentials and the oob flow, so it doesn't need a redirect URI.
+
+```sh
+npm install
+npm run yahoo:probe                     # reads YAHOO_CLIENT_ID / YAHOO_CLIENT_SECRET from env or .env
+# or
+npx tsx scripts/yahoo-probe.mts --id <client id> --secret <client secret>
+```
+
+1. It prints a Yahoo consent URL. Open it, click **Agree**, and paste the code
+   it shows (or rerun with `--code <code>` to skip the prompt; codes expire in
+   a few minutes and work only once).
+2. It exchanges the code, calls `/game/nfl`, `/games;game_codes=nfl`,
+   `/users;use_login=1/games` and `/users;use_login=1/games;game_keys=nfl/leagues`,
+   and retries `/game/nfl` with a different User-Agent, with the token in the
+   query string, and as XML.
+3. It ends with a verdict and a summary block that is safe to paste (no secret,
+   no tokens):
+   - **WORKS from this network**: Yahoo is refusing the deployed server's
+     address, not your app.
+   - **FAILS the same way**: the Yahoo app itself isn't authorized for Fantasy
+     Sports. Check its permissions, or create a new app.
+
+Add `--no-scope` to leave out `scope=fspt-r` from the consent URL.
+
 ## Advanced: callback (redirect-URI) mode
 
 If you'd rather not paste a code, you can let Yahoo redirect back to the app —
