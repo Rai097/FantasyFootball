@@ -247,6 +247,9 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     const bad = await get(`${L}/trades?partner=nope`);
     assert.equal(bad.status, 400);
     assert.equal(typeof bad.json.error, "string");
+    const self = await get(`${L}/trades?partner=${trades[0].me.teamId}`);
+    assert.equal(self.status, 400, "partner == team must be rejected");
+    assert.equal(typeof self.json.error, "string");
   });
 
   test("POST trade/evaluate", async () => {
@@ -286,8 +289,14 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     const notMine = await post(`${L}/trade/evaluate`, { team: me.team.id, partner: partner.team.id, give: [partner.team.playerIds[0]], get: [] });
     assert.equal(notMine.status, 400);
     assert.equal(typeof notMine.json.error, "string");
+    const unknownGive = await post(`${L}/trade/evaluate`, { team: me.team.id, partner: partner.team.id, give: ["no-such-player"], get: [theirWorst] });
+    assert.equal(unknownGive.status, 400);
+    assert.equal(typeof unknownGive.json.error, "string");
+    const unknownGet = await post(`${L}/trade/evaluate`, { team: me.team.id, partner: partner.team.id, give: [myBest], get: ["no-such-player"] });
+    assert.equal(unknownGet.status, 400);
     const self = await post(`${L}/trade/evaluate`, { team: me.team.id, partner: me.team.id, give: [myBest], get: [] });
     assert.equal(self.status, 400);
+    assert.equal(typeof self.json.error, "string");
     const noPartner = await post(`${L}/trade/evaluate`, { team: me.team.id, give: [myBest], get: [] });
     assert.equal(noPartner.status, 400);
     const empty = await post(`${L}/trade/evaluate`, { team: me.team.id, partner: partner.team.id, give: [], get: [] });

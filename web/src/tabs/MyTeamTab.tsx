@@ -153,6 +153,8 @@ export function MyTeamTab({ analysis }: { analysis: Analysis }) {
         </div>
         <p className="muted small">Power score = 0.7 × starter ppg + 0.3 × bench strength; ties broken by record.</p>
       </section>
+
+      {analysis.notes && analysis.notes.length > 0 && <p className="muted small footnote">{analysis.notes.join(" · ")}</p>}
     </div>
   );
 }

@@ -131,6 +131,8 @@ const PLAYERS: VP[] = ROWS.map(([name, pos, team, ppg, bye, , inj], i) => {
     posRank: 0,
     remainingGames: remaining,
     trend: r1(3 * noise(i + 301)),
+    // Injury-adjusted per-game rate used for lineups (server: ppg × remainingGames / weeks left).
+    effPpg: status === "Out" || status === "D" ? r1((ppg * remaining) / (FINAL_WEEK - CURRENT_WEEK + 1)) : undefined,
     why: "",
   };
 });
@@ -459,7 +461,7 @@ function route(method: string, url: URL, body: unknown): unknown {
   if (sub === "analysis") {
     const players: Record<string, VP> = {};
     for (const x of PLAYERS) players[x.id] = x;
-    return { league, players, teams: analyse(), replacement, myTeamId: team } satisfies Analysis;
+    return { league, players, teams: analyse(), replacement, myTeamId: team, notes: ["ECR ranks are PPR; points use league scoring."] } satisfies Analysis;
   }
   if (sub === "trades") {
     const n = (k: string) => Number(url.searchParams.get(k) ?? 2) || 2;

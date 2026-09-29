@@ -28,7 +28,7 @@ export function LineupTable({ lineup }: { lineup: LineupSlot[] }) {
                 <td>
                   <PlayerChip player={p} showValue={false} />
                 </td>
-                <td className="num">{p ? f1(p.ppg) : "–"}</td>
+                <td className="num">{p ? <PpgCell player={p} /> : "–"}</td>
                 <td className="num">{p ? f1(p.value) : "–"}</td>
                 <td className="why-cell">{p && <Why text={p.why} />}</td>
               </tr>
@@ -37,6 +37,17 @@ export function LineupTable({ lineup }: { lineup: LineupSlot[] }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Lineup ppg: the injury-adjusted rate (effPpg) when it differs from the healthy ppg. */
+function PpgCell({ player }: { player: VP }) {
+  const eff = player.effPpg;
+  if (eff == null || !Number.isFinite(eff) || f1(eff) === f1(player.ppg)) return <>{f1(player.ppg)}</>;
+  return (
+    <span title={`Injury-adjusted: ${f1(eff)} ppg over the remaining weeks; ${f1(player.ppg)} ppg when healthy.`}>
+      {f1(eff)} <span className="muted small eff-hint">({f1(player.ppg)} healthy)</span>
+    </span>
   );
 }
 

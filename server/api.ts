@@ -219,6 +219,7 @@ apiRouter.get(
     const team = teamParam(req, l.league);
     const partner = req.query.partner ? String(req.query.partner) : undefined;
     if (partner && !l.league.teams.some((t) => t.id === partner)) throw new HttpError(400, `Unknown partner "${partner}"`);
+    if (partner === team) throw new HttpError(400, "Partner must be a different team");
     const wantPos = req.query.wantPos ? String(req.query.wantPos).toUpperCase() : undefined;
     const maxGive = Number(req.query.maxGive ?? 2) || 2;
     const maxGet = Number(req.query.maxGet ?? 2) || 2;

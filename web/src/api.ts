@@ -42,6 +42,8 @@ export interface Analysis {
   teams: TeamAnalysis[];
   replacement: Record<string, number>;
   myTeamId: string;
+  /** Model caveats shown as a footnote (e.g. "ECR ranks are PPR; points use league scoring."). */
+  notes?: string[];
 }
 
 export type TradeResult = Trade & { verdict?: string };
