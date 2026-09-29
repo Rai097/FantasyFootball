@@ -67,6 +67,18 @@ async function loadLeague(provider: Provider, id: string, refresh: boolean): Pro
   return { db, league };
 }
 
+/**
+ * Player pool for valuation: the PlayerDb, with Yahoo's per-league copies
+ * (fresher injury / IR status) substituted where present. Demo and Yahoo share this path.
+ */
+export function playerPool(db: PlayerDb, league: League): Player[] {
+  const overrides = (league as League & { playerOverrides?: Record<string, Player> }).playerOverrides ?? {};
+  const out: Player[] = [];
+  for (const p of db.players.values()) out.push(overrides[p.id] ?? p);
+  for (const [id, p] of Object.entries(overrides)) if (!db.players.has(id)) out.push(p);
+  return out;
+}
+
 interface Loaded {
   db: PlayerDb;
   league: League;
@@ -77,7 +89,7 @@ function loadContext(provider: Provider, id: string, refresh: boolean): Promise<
   if (refresh) invalidate(`${provider}:${id}:`);
   return cached(`${provider}:${id}:ctx`, refresh, async () => {
     const { db, league } = await loadLeague(provider, id, refresh);
-    const ctx = analyzeLeague(league, db.players.values());
+    const ctx = analyzeLeague(league, playerPool(db, league));
     return { db, league, ctx };
   });
 }
@@ -242,6 +254,7 @@ apiRouter.get(
     const result = await cached(key, refresh, async () => {
       let fas: { player: Player; onWaivers: boolean; percentOwned?: number }[];
       let myPriority: number | undefined;
+      let league = l.league;
       if (provider === "demo") {
         const d = demoFreeAgents({ ...l.league, myTeamId: team }, l.db.players.values());
         fas = d.freeAgents;
@@ -250,6 +263,9 @@ apiRouter.get(
         const y = await yahoo.getFreeAgents(l.db, req.params.id, { refresh });
         fas = y.freeAgents;
         myPriority = team === l.league.myTeamId ? y.myPriority : undefined;
+        if (team === l.league.myTeamId && y.myFaabBalance !== undefined) {
+          league = { ...l.league, teams: l.league.teams.map((t) => (t.id === team ? { ...t, faabRemaining: y.myFaabBalance } : t)) };
+        }
       }
       const rostered = new Set(l.league.teams.flatMap((t) => t.playerIds));
       const seen = new Set<string>();
@@ -259,7 +275,7 @@ apiRouter.get(
         seen.add(f.player.id);
         input.push({ player: l.ctx.valuation.valueOf(f.player), onWaivers: f.onWaivers, percentOwned: f.percentOwned });
       }
-      return rankWaivers(l.ctx, team, input, { myPriority });
+      return rankWaivers({ ...l.ctx, league }, team, input, { myPriority });
     });
     res.json(result);
   }),

@@ -104,7 +104,9 @@ export function rankWaivers(
     const faRank = list.indexOf(fa) + 1;
     const fifth = list[4];
     const top3AtNeed = faRank > 0 && faRank <= 3 && isNeedPos(fa.pos);
-    const valueJump = drop ? fa.value >= 1.5 * drop.value && fa.value > drop.value : fa.value > 0;
+    // ≥1.5× the dropped value, and a real difference (≥3 value points) so 0-vs-1 swaps don't burn priority.
+    const MIN_VALUE_JUMP = 3;
+    const valueJump = fa.value >= 1.5 * (drop?.value ?? 0) && fa.value - (drop?.value ?? 0) >= MIN_VALUE_JUMP;
 
     let recommendation: WaiverTarget["recommendation"];
     const reasons: string[] = [];
@@ -154,7 +156,7 @@ export function rankWaivers(
     };
   });
 
-  targets.sort((a, b) => b.rankScore - a.rankScore || b.value - a.value || a.id.localeCompare(b.id));
+  targets.sort((a, b) => b.rankScore - a.rankScore || b.gain - a.gain || b.value - a.value || b.ppg - a.ppg || a.id.localeCompare(b.id));
   const limited = targets.slice(0, opts.limit ?? 60);
   const claims = limited.filter((t) => t.recommendation === "claim");
   const needList = [...needs].join(", ") || "none";

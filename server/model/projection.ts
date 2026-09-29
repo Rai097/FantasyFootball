@@ -208,7 +208,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
     } else {
       const curve = curves[p.pos] ?? [];
       if (ecrRank !== undefined) ecrPts = curveAt(curve, ecrRank);
-      else if (s.games > 0 || s.hasPrior) {
+      else if ((s.games > 0 || s.hasPrior) && maxRank[p.pos] > 0) {
         // Unranked by the experts but has production: anchor to the curve just past the last ranked player.
         ecrPts = curveAt(curve, maxRank[p.pos] + 1);
         ecrUnranked = true;
@@ -312,6 +312,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
     };
   };
 
+  const poolById = new Map(all.map((p) => [p.id, p]));
   const players = new Map<string, ValuedPlayer>();
   for (const b of bases) players.set(b.p.id, finalize(b, posRankOf(b.p.pos, b.ppg)));
 
@@ -319,8 +320,9 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
     players,
     replacement,
     valueOf(p: Player) {
+      // Same object as in the pool → reuse; otherwise (e.g. Yahoo copy with fresher injury) re-value.
       const hit = players.get(p.id);
-      if (hit) return hit;
+      if (hit && poolById.get(p.id) === p) return hit;
       const b = makeBase(p);
       return finalize(b, posRankOf(p.pos, b.ppg));
     },

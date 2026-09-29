@@ -99,6 +99,10 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown):
     /* non-JSON body */
   }
   if (!res.ok) {
+    if (data === undefined && !text && res.status >= 500) {
+      // The Vite dev/preview proxy answers 500 with an empty body when the API server is down.
+      throw new ApiError("The Trade Desk server did not respond.", res.status, "Is `npm run dev` still running? Check its terminal for errors, then retry.");
+    }
     const e = (data ?? {}) as { error?: string; hint?: string };
     throw new ApiError(e.error ?? `Request failed (${res.status})`, res.status, e.hint ?? (text && !data ? text.slice(0, 200) : undefined));
   }

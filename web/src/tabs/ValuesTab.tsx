@@ -97,7 +97,7 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
                     <div className="player-cell">
                       <PosBadge pos={r.pos} />
                       <span className="strong">{r.name}</span>
-                      <span className="muted small">{r.team}</span>
+                      <span className="muted small hide-sm">{r.team}</span>
                       <InjuryDot player={r} />
                       <Why text={r.why} />
                     </div>

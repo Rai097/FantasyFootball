@@ -66,7 +66,7 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
             <tbody>
               {rows.map((p) => (
                 <tr key={p.id}>
-                  <td>
+                  <td className="player-td">
                     <div className="player-cell">
                       <PosBadge pos={p.pos} />
                       <span className="strong">{p.name}</span>
@@ -79,16 +79,16 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
                       )}
                     </div>
                   </td>
-                  <td className="num">{f1(p.ppg)}</td>
-                  <td className="num">{f1(p.value)}</td>
-                  <td className="num">
+                  <td className="num" data-label="PPG">{f1(p.ppg)}</td>
+                  <td className="num" data-label="Value">{f1(p.value)}</td>
+                  <td className="num" data-label="Gain">
                     <span className={`delta ${deltaClass(p.gain)}`}>{signed(p.gain)}</span>
                     <div className={`small delta ${deltaClass(p.benchGain)}`} title="Value gained vs the player you'd drop">
                       {signed(p.benchGain)} val
                     </div>
                   </td>
                   <td className="hide-sm small">{p.drop ? `${p.drop.name} (${f1(p.drop.value)})` : "–"}</td>
-                  <td className="num">
+                  <td className="num" data-label="Trend">
                     <Trend value={p.trend} />
                     {p.snapTrend != null && Number.isFinite(p.snapTrend) && Math.abs(p.snapTrend) >= 0.05 && (
                       <div className={`small delta ${p.snapTrend > 0 ? "pos" : "neg"}`} title="Last-week snap share vs earlier weeks">
@@ -98,7 +98,7 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
                     )}
                   </td>
                   {showOwned && <td className="num hide-sm">{p.percentOwned != null ? `${f1(p.percentOwned)}%` : "–"}</td>}
-                  <td>
+                  <td className="call-td">
                     <span className={`rec rec-${p.recommendation}`}>{p.recommendation}</span>
                     <span className="show-sm">
                       <Why text={p.why} />

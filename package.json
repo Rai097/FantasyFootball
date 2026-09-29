@@ -10,7 +10,7 @@
     "build": "vite build --config web/vite.config.ts",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p web/tsconfig.json",
-    "test": "tsx --test server/**/*.test.ts"
+    "test": "tsx --test \"server/**/*.test.ts\""
   },
   "dependencies": {
     "dotenv": "^16.4.5",

@@ -262,10 +262,15 @@ export function findTrades(ctx: TradeContext, myTeamId: string, opts: TradeOptio
   return picked;
 }
 
-/** Verdict from my side, based on my lineup delta and value fairness to me. */
-export function verdictFor(myDelta: number, myFairness: number): string {
-  if ((myDelta >= MIN_MY_DELTA && myFairness >= 0.9) || (myDelta >= 0 && myFairness >= 1.15)) return "Accept";
-  if ((myDelta >= 0.25 && myFairness >= 0.75) || (myDelta >= -0.25 && myFairness >= 1.0)) return "Fair, lean accept";
+/**
+ * Verdict from my side, based on my lineup delta and value fairness to me
+ * ((value I get + 5) / (value I give + 5)). A big lineup gain justifies paying
+ * some value (VORP-based value understates players who replace sub-replacement
+ * starters), mirroring the finder's rule that my total value may fall ≤ 20%.
+ */
+export function verdictFor(myDelta: number, myFairness: number, myValueDrop = 0): string {
+  if (myValueDrop <= MAX_MY_VALUE_DROP && ((myDelta >= MIN_MY_DELTA && myFairness >= 0.5) || (myDelta >= 0 && myFairness >= 1.15))) return "Accept";
+  if ((myDelta >= 0.25 && myFairness >= 0.5) || (myDelta >= -0.25 && myFairness >= 1.0)) return "Fair, lean accept";
   return "Decline";
 }
 
@@ -290,8 +295,8 @@ export function evaluateTrade(
   if (!give.length && !get.length) throw Object.assign(new Error("Trade must include at least one player"), { status: 400 });
   const sim = simulate(ctx, my, their, give, get);
   const trade = buildTrade(ctx, sim, ctx.teams.find((t) => t.team.id === myTeamId), their.team);
-  const verdict = verdictFor(sim.me.lineupDelta, sim.myFairness);
   const valueDrop = sim.myTotalBefore > 0 ? 1 - sim.myTotalAfter / sim.myTotalBefore : 0;
+  const verdict = verdictFor(sim.me.lineupDelta, sim.myFairness, valueDrop);
   const notes: string[] = [];
   notes.push(`Verdict "${verdict}": your lineup ${fmtSigned(sim.me.lineupDelta)} ppg, value to you ${sim.myFairness.toFixed(2)} (what you get vs give, +5 cushion).`);
   if (valueDrop > MAX_MY_VALUE_DROP) notes.push(`Warning: your total roster value falls ${Math.round(valueDrop * 100)}%.`);

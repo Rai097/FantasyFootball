@@ -92,8 +92,10 @@ function Side({ title, players, total, drops }: { title: string; players: VP[]; 
       {players.map((p) => (
         <div key={p.id} className="side-player">
           <PlayerChip player={p} />
-          <span className="muted small">{f1(p.ppg)} ppg</span>
-          <Why text={p.why} />
+          <span className="side-meta">
+            <span className="muted small">{f1(p.ppg)} ppg</span>
+            <Why text={p.why} />
+          </span>
         </div>
       ))}
       {drops && drops.length > 0 && (

@@ -311,3 +311,33 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
   .filters .field { flex-basis: 100%; }
   .tab { padding: 10px 10px; }
 }
+
+/* ---------- layout fixes from screenshot review ---------- */
+.stack-sm > .btn { align-self: flex-start; }
+.side-player { flex-wrap: wrap; row-gap: 2px; }
+.side-player .chip { min-width: 0; max-width: 100%; }
+.side-meta { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
+.player-cell .strong { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+@media (max-width: 700px) {
+  .table.lineup .chip-team { display: none; }
+  .table.lineup .chip-name { max-width: 150px; }
+  .table.lineup td:first-child { width: 44px; }
+  .table.values .owner { max-width: 84px; }
+  .table.values .player-cell .strong { max-width: 130px; }
+  .bench-list .chip-team { display: none; }
+
+  /* waivers: each row becomes a small card */
+  .table.waivers thead { display: none; }
+  .table.waivers, .table.waivers tbody, .table.waivers tr, .table.waivers td { display: block; }
+  .table.waivers tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .table.waivers td { border: none; padding: 0; text-align: left; }
+  .table.waivers td.hide-sm { display: none; }
+  .table.waivers .player-td, .table.waivers .call-td { grid-column: 1 / -1; }
+  .table.waivers .call-td { display: flex; align-items: center; }
+  .table.waivers td[data-label]::before { content: attr(data-label); display: block; font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+}
+@media (max-width: 700px) {
+  .tabs { justify-content: space-between; gap: 0; }
+  .tab { padding: 9px 5px; font-size: 13px; }
+}
