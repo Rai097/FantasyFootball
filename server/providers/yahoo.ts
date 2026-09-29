@@ -172,7 +172,7 @@ async function tokenRequest(params: Record<string, string>): Promise<Tokens> {
   const text = await res.text();
   if (!res.ok) {
     const desc = describeYahooBody(text);
-    console.warn(`[yahoo] HTTP ${res.status} for ${path}; www-authenticate=${res.headers.get("www-authenticate") ?? "-"}; body: ${text.replace(/\s+/g, " ").slice(0, 600)}`);
+    console.warn(`[yahoo] HTTP ${res.status} for token request (${params.grant_type}); www-authenticate=${res.headers.get("www-authenticate") ?? "-"}; body: ${text.replace(/\s+/g, " ").slice(0, 600)}`);
     const grant = params.grant_type;
     const hint =
       grant === "authorization_code"
