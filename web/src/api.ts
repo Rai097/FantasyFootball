@@ -47,6 +47,8 @@ export interface Analysis {
   myTeamId: string;
   /** Model caveats shown as a footnote (e.g. "ECR ranks are PPR; points use league scoring."). */
   notes?: string[];
+  /** Where players' market values come from ("model" = FantasyCalc unavailable, no market columns). */
+  valueSource?: "fantasycalc" | "model";
 }
 
 export type TradeResult = Trade & { verdict?: string };
@@ -188,7 +190,7 @@ export const api = {
       "GET",
       `${base(a)}/trades${qs({ team: a.team, partner: q.partner, wantPos: q.wantPos, maxGive: q.maxGive ?? 2, maxGet: q.maxGet ?? 2 })}`,
     ),
-  /** Trade Finder v2: clear wins, smaller edges, near misses and a summary line. */
+  /** Trade Finder v3: market-value packages, smaller edges, near misses, partners and a summary line. */
   trades2: (a: Active, q: TradeQuery = {}) =>
     request<TradeFinderResult>(
       "GET",

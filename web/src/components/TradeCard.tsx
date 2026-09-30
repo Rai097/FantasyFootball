@@ -21,21 +21,38 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
         <div>
           <div className="eyebrow">with {partnerName}</div>
           {verdict && <span className={`verdict ${verdictClass(verdict)}`}>{verdict}</span>}
+          {trade.bandLabel && (
+            <span className={`band band-${trade.band}`} title="Fairness by market value, from their side: fair within ±5%, slightly 5–12%, favors beyond 12%">
+              {trade.bandLabel}
+            </span>
+          )}
         </div>
-        <div className={`accept ${accCls}`} title="Rough chance the other manager accepts, from value fairness and their lineup change">
+        <div className={`accept ${accCls}`} title={trade.band ? "Chance the other manager accepts: logistic in their market-value edge (+5% → 65%), less for extra players they must roster or their best player, more if it fixes their weakest slot" : "Rough chance the other manager accepts, from value fairness and their lineup change"}>
           <span className="accept-num">{pct(trade.acceptance)}</span>
           <span className="accept-label">accept</span>
         </div>
       </header>
 
       <div className="trade-cols">
-        <Side title="You give" players={me.gives} total={me.valueGiven} drops={me.drops} />
-        <Side title="You get" players={them.gives} total={them.valueGiven} />
+        <Side title="You give" players={me.gives} total={me.valueGiven} drops={me.drops} market={!!trade.band} />
+        <Side title="You get" players={them.gives} total={them.valueGiven} market={!!trade.band} />
       </div>
+
+      {trade.pitch && <Pitch text={trade.pitch} />}
 
       {trade.reason && <div className="notice warn small">{trade.reason}</div>}
 
-      {me.scoreDelta != null ? (
+      {trade.band ? (
+        <div className="trade-metrics">
+          <Metric label="Your lineup" value={me.seasonDelta ?? 0} unit=" /wk" title="Your weekly lineup points over the rest of the season (byes and injuries included)" />
+          <Metric label="Their lineup" value={them.seasonDelta ?? 0} unit=" /wk" title="Their weekly lineup points over the rest of the season, by our projections" />
+          <Metric label="Your team" value={me.scoreDelta ?? 0} unit="" title={`Weighted roster score for the ${trade.mode ?? "balanced"} mode (now / season / playoffs / depth)`} />
+          <div className="metric" title="Market package value they receive ÷ what they give (best + 0.85·2nd + 0.70·3rd, net of any player they must drop)">
+            <span className="metric-label">To them</span>
+            <span className="metric-value">{signed(trade.fairnessPct ?? 0)}%</span>
+          </div>
+        </div>
+      ) : me.scoreDelta != null ? (
         <>
           <div className="delta-row" aria-label="Your team, by component">
             <SmallDelta label="Now" value={me.nowDelta} title="This week's optimal lineup, ppg" />
@@ -66,11 +83,19 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
       {trade.tags.length > 0 && (
         <div className="tags">
           {trade.tags.map((t) => (
-            <span key={t} className="tag">
+            <span key={t} className={`tag${/^buy-low/.test(t) ? " tag-good" : /^sell-high/.test(t) ? " tag-warn" : ""}`}>
               {t}
             </span>
           ))}
         </div>
+      )}
+
+      {trade.notes && trade.notes.length > 0 && (
+        <ul className="trade-notes muted small">
+          {trade.notes.map((n, i) => (
+            <li key={i}>{n}</li>
+          ))}
+        </ul>
       )}
 
       <button className="link-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
@@ -104,17 +129,32 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
   );
 }
 
-function Side({ title, players, total, drops }: { title: string; players: VP[]; total: number; drops?: VP[] }) {
+function Side({ title, players, total, drops, market }: { title: string; players: VP[]; total: number; drops?: VP[]; market?: boolean }) {
   return (
     <div className="trade-side">
       <div className="side-title">
-        {title} <span className="muted small">value {f1(total)}</span>
+        {title}{" "}
+        <span className="muted small" title={market ? "Market package value: best + 0.85·2nd + 0.70·3rd" : undefined}>
+          {market ? "market" : "value"} {f1(total)}
+        </span>
       </div>
       {players.map((p) => (
         <div key={p.id} className="side-player">
-          <PlayerChip player={p} />
+          <PlayerChip player={p} showValue={!market} />
           <span className="side-meta">
-            <span className="muted small">{f1(p.ppg)} ppg</span>
+            <span className="muted small">
+              {p.pos}
+              {p.posRank} · {f1(p.ppg)} ppg
+            </span>
+            {market && (
+              <span
+                className="muted small"
+                title={`Market ${p.marketEstimated ? "(not in the market list: our estimate) " : ""}${f1(p.market ?? p.value)}${p.marketRank ? `, #${p.marketRank} overall` : ""}. True = our value ${f1(p.value)} on the model scale, ${f1(p.trueMarket ?? p.value)} on the market scale.`}
+              >
+                mkt {f1(p.market ?? p.value)}
+                {p.marketEstimated ? "*" : ""} · true {f1(p.trueMarket ?? p.value)}
+              </span>
+            )}
             <Why text={p.why} />
           </span>
         </div>
@@ -124,6 +164,27 @@ function Side({ title, players, total, drops }: { title: string; players: VP[]; 
           + you drop {drops.map((p) => `${p.name} (${f1(p.value)})`).join(", ")}
         </div>
       )}
+    </div>
+  );
+}
+
+function Pitch({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked: the text is selectable */
+    }
+  };
+  return (
+    <div className="pitch">
+      <span className="pitch-text">“{text}”</span>
+      <button className="link-btn small" onClick={copy} title="Copy this message to send to the other manager">
+        {copied ? "Copied" : "Copy"}
+      </button>
     </div>
   );
 }

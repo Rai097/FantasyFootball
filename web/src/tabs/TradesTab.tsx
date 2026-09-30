@@ -5,6 +5,7 @@ import { Empty, ErrorBox, Loading } from "../components/common";
 import { TradeBuilder } from "../components/TradeBuilder";
 import { TradeCard } from "../components/TradeCard";
 import { useAsync } from "../lib/useAsync";
+import { f1 } from "../lib/format";
 
 const POSITIONS = ["QB", "RB", "WR", "TE"];
 
@@ -98,7 +99,7 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
               <span>Package size</span>
               <select value={size} onChange={(e) => (setSize(Number(e.target.value)), setShown(10))}>
                 <option value={1}>1-for-1 only</option>
-                <option value={2}>Up to 2 (3-for-1 outside Win now)</option>
+                <option value={2}>Up to 2 (3-for-1 to struggling teams)</option>
               </select>
             </label>
           </div>
@@ -108,13 +109,16 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
         {res.error && <ErrorBox error={res.error} onRetry={res.reload} />}
         {!res.loading && data && (
           <>
+            {data.valueSource === "model" && (
+              <div className="notice warn small">Market values (FantasyCalc) are unavailable right now, so "what the other manager thinks" uses our own values: fairness and acceptance are rougher, and buy-low / sell-high edges are not shown.</div>
+            )}
             <div className="notice finder-summary">{data.summary}</div>
             {data.trades.length === 0 ? (
               <Empty>No clear win right now. Check the smaller edges, near misses and bench upgrades below, or try another mode.</Empty>
             ) : (
               <>
                 <p className="muted small">
-                  {data.trades.length} clear win{data.trades.length > 1 ? "s" : ""} (your team +1.0 or more, ≥ 45% likely accepted), best first by your gain × acceptance.
+                  {data.trades.length} trade{data.trades.length > 1 ? "s" : ""} a manager would plausibly accept (your team +1.0 or more, fair or better for them by market value, their lineup not worse), best first by min(your gain, theirs + 2) × acceptance.
                 </p>
                 {data.trades.slice(0, shown).map((t) => (
                   <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} />
@@ -126,7 +130,17 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
                 )}
               </>
             )}
-            <Fold title="Smaller edges" count={data.smallerEdges.length} hint="+0.5 to +1.0 for you, still fair to them">
+            <Fold title="Best-fit partners" count={data.partners?.length ?? 0} hint="ranked by how their needs match your surplus (and vice versa)">
+              <ol className="partner-list">
+                {data.partners?.map((p) => (
+                  <li key={p.teamId}>
+                    <span className="strong">{names.get(p.teamId) ?? p.teamId}</span> <span className="muted small">fit {f1(p.complementarity)}</span>
+                    <div className="muted small">{p.pitch}</div>
+                  </li>
+                ))}
+              </ol>
+            </Fold>
+            <Fold title="Smaller edges" count={data.smallerEdges.length} hint="smaller gains for you (or small-value deals), still fair to them">
               {data.smallerEdges.map((t) => (
                 <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} />
               ))}
@@ -140,7 +154,7 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
         )}
 
         <h2 className="section-title">Bench upgrades</h2>
-        <p className="muted small">1-for-1 swaps of a bench player (or your weakest starter) for someone else's bench player that raise your rest-of-season or playoff lineup.</p>
+        <p className="muted small">1-for-1 swaps of a bench player (or your weakest starter) for someone else's bench player that add 0.8+ pts/week to your rest-of-season lineup; both players must be worth something (market or our value 3+).</p>
         {bench.loading && <Loading label="Looking for bench upgrades…" />}
         {bench.error && <ErrorBox error={bench.error} onRetry={bench.reload} />}
         {!bench.loading && bench.data && bench.data.length === 0 && <Empty>No bench swap raises your season or playoff lineup at a price the other side would take.</Empty>}
