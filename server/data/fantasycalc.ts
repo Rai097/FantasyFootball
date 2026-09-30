@@ -36,6 +36,8 @@ export interface FcEntry {
 }
 
 export const FC_TTL_HOURS = 12;
+/** 12-team, 1-QB, half-PPR redraft (used when no league settings are given). */
+export const DEFAULT_MARKET_OPTS: MarketOpts = { numQbs: 1, numTeams: 12, ppr: 0.5 };
 
 /** Round a league's points-per-reception to FantasyCalc's 0 / 0.5 / 1. */
 export function pprBucket(rec: number): 0 | 0.5 | 1 {
@@ -109,7 +111,7 @@ const memo = new Map<string, { at: number; p: Promise<MarketData> }>();
  * Market values with their source. On any fetch / parse failure `source` is "model" and
  * `values` is empty: callers fall back to our own value (and the UI shows a warning).
  */
-export function getMarketData(opts: MarketOpts): Promise<MarketData> {
+export function getMarketData(opts: MarketOpts = DEFAULT_MARKET_OPTS): Promise<MarketData> {
   const url = fantasyCalcUrl(opts);
   const hit = memo.get(url);
   if (hit && Date.now() - hit.at < 60 * 60 * 1000) return hit.p;
@@ -130,6 +132,6 @@ export function getMarketData(opts: MarketOpts): Promise<MarketData> {
 }
 
 /** Market values keyed by internal player id (empty Map when FantasyCalc is unavailable). */
-export async function getMarketValues(opts: MarketOpts): Promise<Map<string, MarketValue>> {
+export async function getMarketValues(opts: MarketOpts = DEFAULT_MARKET_OPTS): Promise<Map<string, MarketValue>> {
   return (await getMarketData(opts)).values;
 }

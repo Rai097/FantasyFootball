@@ -99,6 +99,17 @@ export interface ValuedPlayer extends Player {
   why: string;
   /** Expected pts/game over the last 2 weeks minus season expected pts/game. */
   trend: number;
+  /**
+   * Market (perceived) trade value, 0-100 with the market's #1 = 100 (FantasyCalc redraft values
+   * for the league's format). 0 = outside the market's list. Unset when market values are
+   * unavailable (valueSource "model") and for K / DEF.
+   */
+  market?: number;
+  /** Market overall rank / position rank (unset when the player is not in the market list). */
+  marketRank?: number;
+  marketPosRank?: number;
+  /** Our value minus market value (positive = the market undervalues him); set with `market`. */
+  edge?: number;
 }
 
 export type SlotKind = "QB" | "RB" | "WR" | "TE" | "K" | "DEF" | "FLEX" | "SFLEX" | "RFLEX" | "WRRB" | "BN" | "IR";
@@ -220,7 +231,22 @@ export interface Trade {
   mode?: "now" | "balanced" | "playoffs";
   /** Near misses only: why the trade did not make the main list. */
   reason?: string;
+  // ---- Trade Finder v3 (market-value packages); optional so v1/v2 trades stay valid.
+  /** Fairness band from the partner's point of view (perceived market values). */
+  band?: FairnessBand;
+  /** "Fair", "Slightly favors them (+7%)", … */
+  bandLabel?: string;
+  /** Partner's perceived edge in percent: (fairness − 1) × 100. */
+  fairnessPct?: number;
+  /** One line I could paste to the other manager. */
+  pitch?: string;
+  /** Bye overlap and playoff-week (byes in the fantasy playoffs) notes. */
+  notes?: string[];
+  /** Package values (best + 0.85·second + 0.70·third), market and true, net of drop cost on the receiving side. */
+  packages?: { marketGive: number; marketGet: number; trueGive: number; trueGet: number; myTrueChange: number; theirMarketChange: number };
 }
+
+export type FairnessBand = "fair" | "slightly-favors-them" | "favors-them" | "slightly-favors-you" | "favors-you";
 
 /** GET /trades2 response. */
 export interface TradeFinderResult {
@@ -233,6 +259,10 @@ export interface TradeFinderResult {
   mode: "now" | "balanced" | "playoffs";
   /** One or two sentences on what the finder found and why the list is short when it is. */
   summary: string;
+  /** v3: where perceived (market) values came from; "model" = FantasyCalc unavailable, our values used. */
+  valueSource?: "fantasycalc" | "model";
+  /** v3: partners ranked by roster complementarity (best first). */
+  partners?: { teamId: string; complementarity: number; pitch: string }[];
 }
 
 export interface WaiverTarget extends ValuedPlayer {
@@ -248,4 +278,77 @@ export interface WaiverTarget extends ValuedPlayer {
   percentOwned?: number;
   /** Ranking score: max(gain*3, benchGain/10). */
   rankScore: number;
+}
+
+/** Breakout Targets (GET /breakouts): a player whose role is rising before his fantasy points have. */
+export interface BreakoutAhead {
+  id: string;
+  name: string;
+  /** Depth-chart order (1 = first at the position), when known. */
+  depth?: number;
+  /** Injury report status (Questionable / Doubtful / Out / IR …). */
+  status?: string;
+  detail?: string;
+  /** Last-week snap share minus the mean of earlier weeks (0..1 scale). */
+  snapTrend: number;
+  /** Latest snap share (0..1). */
+  snapsNow?: number;
+}
+
+export interface BreakoutComponents {
+  /** Latest-week offensive snap share (0..1). */
+  roleNow: number;
+  /** Last-week snap share − mean of earlier weeks (0..1 scale; 0 with < 2 weeks). */
+  roleTrend: number;
+  /** Last-week expected points − mean of earlier weeks (league scoring). */
+  oppTrend: number;
+  /** Mean expected points over the last 2 weeks (league scoring). */
+  oppLevel: number;
+  /** Expected ppg − actual ppg this season (positive = producing less than usage suggests). */
+  gap: number;
+  /** 0, 0.5 (structural path: handcuff / committee / WR3 rising / TE1 in waiting) or 1 (starter hurt / slipping / promoted). */
+  situation: number;
+  cheap: boolean;
+  /** Our trade value (0-100) and the market value when a market source is connected. */
+  value: number;
+  marketValue?: number;
+  /** Positional rank by actual ppg this season, ECR positional rank, and the difference (production − ECR). */
+  prodRank: number;
+  ecrPos?: number;
+  ecrEdge?: number;
+  age?: number;
+  /** Tie-break only: 0.7·clamp(ecrEdge/24) + 0.3·(age ≤ 26). */
+  upside: number;
+  /** Normalised (0..1 over the candidate pool) trend and gap inputs. */
+  nRoleTrend: number;
+  nOppTrend: number;
+  nGap: number;
+  /** Weighted contributions to the score (sum = score). */
+  parts: { roleTrend: number; oppTrend: number; gap: number; situation: number; cheap: number };
+}
+
+export interface BreakoutTarget {
+  player: ValuedPlayer;
+  where: { type: "fa" } | { type: "roster"; teamId: string; teamName: string };
+  /** 0..100 = 100 × (0.30·nRoleTrend + 0.25·nOppTrend + 0.15·nGap + 0.20·situation + 0.10·cheap). */
+  score: number;
+  components: BreakoutComponents;
+  /** Week labels for the per-week arrays below (weeks the player appeared). */
+  weeks: number[];
+  snaps: number[];
+  expPpg: number[];
+  actPpg: number[];
+  /** Targets (WR/TE) or carries + targets (RB) per week, when the opportunity columns exist. */
+  touches?: number[];
+  /** "RB2", "WR3" … from the depth chart (or snap order when the chart is missing). */
+  depthLabel?: string;
+  ahead: BreakoutAhead[];
+  tags: string[];
+  thesis: string;
+  ask?: string;
+}
+
+export interface BreakoutResult {
+  targets: BreakoutTarget[];
+  notes: string[];
 }

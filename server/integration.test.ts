@@ -366,6 +366,31 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     }
   });
 
+  test("GET breakouts", async () => {
+    const { status, json } = await get(`${L}/breakouts?limit=30`);
+    assert.equal(status, 200);
+    assertClean(json, "breakouts");
+    assert.ok(Array.isArray(json.notes) && json.notes.length > 0);
+    assert.ok(json.targets.length >= 10, `only ${json.targets.length} breakout targets`);
+    const league = (await get(L)).json;
+    const mine = new Set(league.teams.find((t: any) => t.id === league.myTeamId).playerIds);
+    let prev = Infinity;
+    for (const t of json.targets) {
+      assertValuedPlayer(t.player, "breakouts");
+      assert.ok(["RB", "WR", "TE"].includes(t.player.pos), `${t.player.name}: ${t.player.pos}`);
+      assert.ok(!mine.has(t.player.id), `${t.player.name} is on my roster`);
+      assert.ok(typeof t.thesis === "string" && t.thesis.length > 20, `${t.player.name}: thesis`);
+      assert.ok(t.where.type === "fa" || (t.where.type === "roster" && typeof t.where.teamName === "string"));
+      assert.ok(typeof t.ask === "string" && t.ask.length > 0);
+      assert.equal(t.snaps.length, t.weeks.length);
+      assert.ok(t.score <= prev, "sorted by score");
+      prev = t.score;
+    }
+    const rb = await get(`${L}/breakouts?pos=RB&limit=5`);
+    assert.ok(rb.json.targets.length > 0 && rb.json.targets.every((t: any) => t.player.pos === "RB"));
+    assert.equal((await get(`${L}/breakouts?pos=QB`)).status, 400);
+  });
+
   test("unknown team / provider / route → JSON errors", async () => {
     const team = await get(`${L}/analysis?team=zzz`);
     assert.equal(team.status, 400);

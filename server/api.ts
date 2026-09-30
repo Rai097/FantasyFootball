@@ -28,7 +28,9 @@ import { findTrades } from "./model/trades.js";
 import { evaluateTradeV2, findBenchUpgrades, findTradesV2 } from "./model/tradesV2.js";
 import { parseMode } from "./model/rosterScore.js";
 import { rankWaivers, type FreeAgentInput } from "./model/waivers.js";
-import type { League, Player, Trade, TradeFinderResult, ValuedPlayer } from "./model/types.js";
+import { findBreakouts, type MarketValue } from "./model/breakouts.js";
+import { getDepthChart } from "./data/depthCharts.js";
+import type { BreakoutResult, League, Player, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "./model/types.js";
 
 const CACHE_TTL_MS = 60_000;
 
@@ -170,6 +172,60 @@ export function errorMiddleware(err: unknown, _req: Request, res: Response, _nex
     body.yahooBody = e.yahooBody;
   }
   res.status(status).json(body);
+}
+
+// ---------------------------------------------------------------- free agents (waivers + breakouts)
+async function freeAgentInputs(
+  l: Loaded,
+  provider: Provider,
+  id: string,
+  team: string,
+  refresh: boolean,
+): Promise<{ input: FreeAgentInput[]; myPriority?: number; league: League }> {
+  let fas: { player: Player; onWaivers: boolean; percentOwned?: number }[];
+  let myPriority: number | undefined;
+  let league = l.league;
+  if (provider === "demo") {
+    const d = demoFreeAgents({ ...l.league, myTeamId: team }, l.db.players.values());
+    fas = d.freeAgents;
+    myPriority = d.myPriority;
+  } else if (provider === "import") {
+    const stored = await mustReadImport(id);
+    const d = importFreeAgents(l.league, l.db, stored, l.league.settings.currentWeek);
+    fas = d.freeAgents;
+    myPriority = team === l.league.myTeamId ? d.myPriority : undefined;
+  } else {
+    const y = await yahoo.getFreeAgents(l.db, id, { refresh });
+    fas = y.freeAgents;
+    myPriority = team === l.league.myTeamId ? y.myPriority : undefined;
+    if (team === l.league.myTeamId && y.myFaabBalance !== undefined) {
+      league = { ...l.league, teams: l.league.teams.map((t) => (t.id === team ? { ...t, faabRemaining: y.myFaabBalance } : t)) };
+    }
+  }
+  const rostered = new Set(l.league.teams.flatMap((t) => t.playerIds));
+  const seen = new Set<string>();
+  const input: FreeAgentInput[] = [];
+  for (const f of fas) {
+    if (rostered.has(f.player.id) || seen.has(f.player.id)) continue;
+    seen.add(f.player.id);
+    input.push({ player: l.ctx.valuation.valueOf(f.player), onWaivers: f.onWaivers, percentOwned: f.percentOwned });
+  }
+  return { input, myPriority, league };
+}
+
+/**
+ * MARKET VALUE HOOK: server/data/fantasycalc.ts (owned by the trade-finder rewrite) is expected to
+ * export `getMarketValues(): Promise<Map<playerId, { value, trend30, tradeFreq }>>`. It is loaded
+ * lazily by path so this file compiles before it exists; until then breakouts use our value only.
+ */
+async function loadMarketValues(): Promise<Map<string, MarketValue> | null> {
+  const spec = "./data/fantasycalc.js";
+  try {
+    const mod = (await import(spec)) as { getMarketValues?: () => Promise<Map<string, MarketValue>> };
+    return mod.getMarketValues ? await mod.getMarketValues() : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------- routes
@@ -319,35 +375,41 @@ apiRouter.get(
     const team = teamParam(req, l.league);
     const key = `${provider}:${req.params.id}:waivers:${team}`;
     const result = await cached(key, refresh, async () => {
-      let fas: { player: Player; onWaivers: boolean; percentOwned?: number }[];
-      let myPriority: number | undefined;
-      let league = l.league;
-      if (provider === "demo") {
-        const d = demoFreeAgents({ ...l.league, myTeamId: team }, l.db.players.values());
-        fas = d.freeAgents;
-        myPriority = d.myPriority;
-      } else if (provider === "import") {
-        const stored = await mustReadImport(req.params.id);
-        const d = importFreeAgents(l.league, l.db, stored, l.league.settings.currentWeek);
-        fas = d.freeAgents;
-        myPriority = team === l.league.myTeamId ? d.myPriority : undefined;
-      } else {
-        const y = await yahoo.getFreeAgents(l.db, req.params.id, { refresh });
-        fas = y.freeAgents;
-        myPriority = team === l.league.myTeamId ? y.myPriority : undefined;
-        if (team === l.league.myTeamId && y.myFaabBalance !== undefined) {
-          league = { ...l.league, teams: l.league.teams.map((t) => (t.id === team ? { ...t, faabRemaining: y.myFaabBalance } : t)) };
-        }
-      }
-      const rostered = new Set(l.league.teams.flatMap((t) => t.playerIds));
-      const seen = new Set<string>();
-      const input: FreeAgentInput[] = [];
-      for (const f of fas) {
-        if (rostered.has(f.player.id) || seen.has(f.player.id)) continue;
-        seen.add(f.player.id);
-        input.push({ player: l.ctx.valuation.valueOf(f.player), onWaivers: f.onWaivers, percentOwned: f.percentOwned });
-      }
+      const { input, myPriority, league } = await freeAgentInputs(l, provider, req.params.id, team, refresh);
       return rankWaivers({ ...l.ctx, league }, team, input, { myPriority });
+    });
+    res.json(result);
+  }),
+);
+
+// Breakout Targets: rising role before rising points (RB/WR/TE), FA or on other rosters.
+apiRouter.get(
+  "/api/league/:provider/:id/breakouts",
+  h(async (req, res) => {
+    const provider = parseProvider(req.params.provider);
+    const refresh = isRefresh(req);
+    const l = await loadContext(provider, req.params.id, refresh);
+    const team = teamParam(req, l.league);
+    const rawPos = String(req.query.pos ?? "all").toUpperCase();
+    if (!["RB", "WR", "TE", "ALL"].includes(rawPos)) throw new HttpError(400, `Unknown pos "${req.query.pos}"`, "Use pos=RB, WR, TE or all.");
+    const pos = rawPos === "ALL" ? "all" : (rawPos as "RB" | "WR" | "TE");
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 30) || 30));
+    const key = `${provider}:${req.params.id}:breakouts:${team}:${pos}:${limit}`;
+    const result = await cached<BreakoutResult>(key, refresh, async () => {
+      const [depth, market, fa] = await Promise.all([
+        getDepthChart(l.db.season),
+        loadMarketValues(),
+        freeAgentInputs(l, provider, req.params.id, team, refresh).catch((e) => {
+          console.warn(`[breakouts] free agents unavailable: ${(e as Error).message}`);
+          return null;
+        }),
+      ]);
+      let waivers: Map<string, WaiverTarget> | undefined;
+      if (fa) {
+        const w = rankWaivers({ ...l.ctx, league: fa.league }, team, fa.input, { myPriority: fa.myPriority, limit: fa.input.length });
+        waivers = new Map(w.freeAgents.map((x) => [x.id, x]));
+      }
+      return findBreakouts({ league: l.league, players: l.ctx.players, teams: l.ctx.teams, myTeamId: team, depth, market, waivers, pos, limit });
     });
     res.json(result);
   }),
