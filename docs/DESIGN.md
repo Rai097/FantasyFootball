@@ -341,6 +341,56 @@ first, capped at 6000 per partner. My delta uses the mode weights; the partner's
 * Value exponent raised 1.15 → 1.35 (star premium); 1-QB leagues: QBs ranked below numTeams get a
   "Backup QB … ~0 trade value" hint in their why.
 
+## Trade finder v3 (server/data/fantasycalc.ts, model/market.ts, tradesV3.ts) — overrides v2 for trades2 / evaluate
+
+Why: v2 suggested trades no manager would send or accept (backup QBs as chips, a stud for two mid pieces,
+worthless-for-worthless bench swaps). v3 prices every deal the way the other manager does (market values)
+and keeps only deals that also raise my roster by our model.
+
+**Market values** (`getMarketValues(opts)` / `getMarketData(opts)`): FantasyCalc
+`/values/current?isDynasty=&numQbs=&numTeams=&ppr=` (numQbs 2 with a superflex or second QB slot; ppr = league
+rec rounded to 0 / 0.5 / 1), cached 12 h on disk. Rows match our players by Sleeper id, then normalised
+name + position; value scaled so #1 = 100. `attachMarket` sets on each skill ValuedPlayer: `market`,
+`marketRank`, `marketPosRank`, `trueMarket` (our `value` mapped onto the market scale by rank — our curve is
+far steeper, so raw value − market would call every mid player a "sell-high"), `edge = trueMarket − market`.
+Unlisted players get market 0, except ones we rank inside the list (`marketEstimated`: market = trueMarket).
+On any fetch failure `valueSource = "model"`: market fields are unset, perceived = our value, the UI warns.
+
+**Eligible pieces**: no K/DEF; not (market < 3 and value < 3); not IR / long-term / out ≥ 4 weeks. QBs only
+when a team has two QBs ranked ≤ 14 (market position rank) and the other team's best QB ranks > 18 — then the
+QB it does not start (lower projection) may move, in either direction.
+
+**Package value** = best + 0.85·second + 0.70·third, market ("perceived") and trueMarket ("true"). The side
+receiving more players subtracts a drop cost per cut player = max(3, his value). Consolidation premium: in any
+deal that is not 1-for-1, the side receiving the single best player (market) must give ≥ 110% of the other
+package. Fairness = partner's perceived received (net) / given; bands fair ±5%, slightly 5–12%, favors > 12%.
+
+**Keep** when: my roster-score Δ (mode weights) ≥ 0.5 and my true change ≥ 3% of the deal's true total; the
+partner's perceived change ≥ −3% of the perceived total, their rest-of-season weekly lineup Δ (our projections)
+> 0 (or ≥ −0.3 at fairness ≥ 1.05), and not (they give the best player while losing > 5%).
+**Acceptance** = logistic(k·edge%), k = ln(0.65/0.35)/5 (+5% → 0.65), × 0.85 per extra player they must
+absorb (give − get), × 0.8 when asking for their market #1, × 1.10 when a player I send beats the starter in
+their weakest group; capped at 0.95.
+**Partners**: complementarity = Σ over RB/WR/TE of their deficit (group ppg below league average; FLEX counts
+half) × my bench surplus (vorp, capped) plus the reverse, plus the QB case. Top 8 partners searched first
+(pools: top 14 eligible by max(market, true); 1–2 per side; 3-for-1 only when I give quantity to a team at
+≤ 1/3 wins); the rest only if < 6 main-list trades were found.
+**Ranking**: score = min(my Δ, their lineup Δ + 2) × P ÷ (1 + 2·max(0, fairness − 1.12)) (the same gain at a
+fairer price ranks first); ties by edge. Main list (≤ 10): my Δ ≥ 1.0, P ≥ 0.40, the deal's best player has
+market ≥ 8; ≤ 2 per partner, ≤ 2 per player I give, one per (partner, my top piece, their top piece).
+`smallerEdges`: the other kept deals. `nearMisses` (≤ 10, with `reason`): "They'd likely refuse: …",
+"Partner unlikely to accept (…)", "Marginal: …".
+**Cards**: position rank, market and true value per player, my / their weekly lineup Δ, roster score, band and
+%, acceptance, a pasteable `pitch`, buy-low / sell-high tags (|edge| ≥ 8), bye-overlap and playoff-week notes.
+**Bench upgrades** additionally need both players worth ≥ 3 (market or value) and my season Δ ≥ 0.8.
+
+```
+GET  /api/league/:provider/:id/trades2 → TradeFinderResult & { valueSource: "fantasycalc"|"model",
+       partners: [{ teamId, complementarity, pitch }] }; Trade gains band, bandLabel, fairnessPct, pitch, notes, packages
+POST /api/league/:provider/:id/trade/evaluate → v3 Trade & { verdict } (band, acceptance; flags pieces outside the rules)
+GET  /api/league/:provider/:id/analysis → … + valueSource;  values rows carry market, marketRank, trueMarket, edge
+```
+
 ## Breakout Targets (server/model/breakouts.ts, web/src/tabs/TargetsTab.tsx)
 
 Why: find RB / WR / TE whose ROLE is rising before their fantasy points have (cheap now, path to a bigger role).
