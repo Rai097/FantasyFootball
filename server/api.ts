@@ -25,7 +25,9 @@ import { parseRosterText } from "./providers/import-text.js";
 import { bookmarkletCode, bookmarkletUrl } from "./providers/import-bookmarklet.js";
 import { analyzeLeague, type LeagueContext } from "./model/analysis.js";
 import { findTrades } from "./model/trades.js";
-import { evaluateTradeV2, findBenchUpgrades, findTradesV2 } from "./model/tradesV2.js";
+import { findBenchUpgrades } from "./model/tradesV2.js";
+import { benchUpgradeOk, evaluateTradeV3, findTradesV3 } from "./model/tradesV3.js";
+import { attachMarket, marketQuery, type ValueSource } from "./model/market.js";
 import { parseMode } from "./model/rosterScore.js";
 import { rankWaivers, type FreeAgentInput } from "./model/waivers.js";
 import { findBreakouts, type MarketValue } from "./model/breakouts.js";
@@ -117,6 +119,8 @@ interface Loaded {
   db: PlayerDb;
   league: League;
   ctx: LeagueContext;
+  /** Where ValuedPlayer.market came from ("model" = FantasyCalc unavailable; market fields unset). */
+  valueSource: ValueSource;
 }
 
 function loadContext(provider: Provider, id: string, refresh: boolean): Promise<Loaded> {
@@ -124,7 +128,11 @@ function loadContext(provider: Provider, id: string, refresh: boolean): Promise<
   return cached(`${provider}:${id}:ctx`, refresh, async () => {
     const { db, league } = await loadLeague(provider, id, refresh);
     const ctx = analyzeLeague(league, playerPool(db, league));
-    return { db, league, ctx };
+    // Market (perceived) values for Trade Finder v3 and the Values tab; our values when unavailable.
+    const md = await getMarketData(marketQuery(league.settings));
+    const valueSource: ValueSource = md.source === "fantasycalc" && md.values.size ? "fantasycalc" : "model";
+    attachMarket(ctx.players, valueSource === "fantasycalc" ? md.values : null);
+    return { db, league, ctx, valueSource };
   });
 }
 
@@ -288,7 +296,7 @@ apiRouter.get(
     const team = teamParam(req, l.league);
     const players: Record<string, ValuedPlayer> = {};
     for (const p of relevantPlayers(l)) players[p.id] = p;
-    res.json({ league: l.league, players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes });
+    res.json({ league: l.league, players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes, valueSource: l.valueSource });
   }),
 );
 
@@ -310,7 +318,7 @@ apiRouter.get(
   }),
 );
 
-// Trade Finder v2: roster-score trades + smaller edges + near misses + summary (UI uses this).
+// Trade Finder v3 (market-value packages; same shape as v2 plus valueSource / partners). UI uses this.
 apiRouter.get(
   "/api/league/:provider/:id/trades2",
   h(async (req, res) => {
@@ -326,7 +334,7 @@ apiRouter.get(
     const mode = parseMode(req.query.mode);
     const key = `${provider}:${req.params.id}:trades2:${team}:${mode}:${partner ?? ""}:${wantPos ?? ""}:${maxGive}:${maxGet}`;
     const result = await cached<TradeFinderResult>(key, false, async () => {
-      const { simulated: _simulated, ...r } = findTradesV2(l.ctx, team, { partnerId: partner, wantPos, maxGive, maxGet, mode });
+      const { simulated: _simulated, ...r } = findTradesV3(l.ctx, team, { partnerId: partner, wantPos, maxGive, maxGet, mode, valueSource: l.valueSource });
       return r;
     });
     res.json(result);
@@ -341,7 +349,8 @@ apiRouter.get(
     const team = teamParam(req, l.league);
     const mode = parseMode(req.query.mode);
     const key = `${provider}:${req.params.id}:bench:${team}:${mode}`;
-    res.json(await cached<Trade[]>(key, false, async () => findBenchUpgrades(l.ctx, team, { mode })));
+    // v3: no worthless-for-worthless swaps (both players worth ≥ 3, my season lineup +0.8 pts/week).
+    res.json(await cached<Trade[]>(key, false, async () => findBenchUpgrades(l.ctx, team, { mode, accept: (m, g, j) => benchUpgradeOk(m, g, j.sim.myParts.season) })));
   }),
 );
 
@@ -356,7 +365,7 @@ apiRouter.post(
     if (!partner || !l.league.teams.some((t) => t.id === partner)) throw new HttpError(400, `Unknown partner "${partner ?? ""}"`, "Pass { team, partner, give: string[], get: string[] }.");
     if (partner === team) throw new HttpError(400, "Partner must be a different team");
     const ids = (x: unknown) => (Array.isArray(x) ? x.map(String) : []);
-    res.json(evaluateTradeV2(l.ctx, team, partner, ids(body.give), ids(body.get), parseMode(body.mode ?? req.query.mode)));
+    res.json(evaluateTradeV3(l.ctx, team, partner, ids(body.give), ids(body.get), parseMode(body.mode ?? req.query.mode)));
   }),
 );
 

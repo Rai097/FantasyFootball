@@ -558,7 +558,11 @@ function upgradeWhy(ctx: TradeContext, j: Judged, mine: ValuedPlayer, theirs: Va
  * Bench upgrades: 1-for-1 swaps of one of my bench players (or my lowest skill
  * starter) for a partner's bench player where my season or playoff score rises.
  */
-export function findBenchUpgrades(ctx: TradeContext, myTeamId: string, opts: { mode?: TradeMode; limit?: number; partnerId?: string } = {}): Trade[] {
+export function findBenchUpgrades(
+  ctx: TradeContext,
+  myTeamId: string,
+  opts: { mode?: TradeMode; limit?: number; partnerId?: string; accept?: (mine: ValuedPlayer, theirs: ValuedPlayer, j: Judged) => boolean } = {},
+): Trade[] {
   const mode = opts.mode ?? "balanced";
   if (tradeDeadlinePassed(ctx.league)) return [];
   const my = state2(ctx, myTeamId);
@@ -584,6 +588,7 @@ export function findBenchUpgrades(ctx: TradeContext, myTeamId: string, opts: { m
         if (j.sim.fairness < V2.benchUpgradeFairness || !j.valueOk) continue;
         if (!(j.sim.myParts.season > 0.05 || j.sim.myParts.playoffs > 0.05)) continue;
         if (j.myDelta <= 0.05) continue;
+        if (opts.accept && !opts.accept(m, g, j)) continue;
         scored.push({ j, their, m, g });
       }
     }

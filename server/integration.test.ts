@@ -190,6 +190,12 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assertClean(json, "values");
     assert.ok(json[0].value >= 99 && json[0].value <= 100.05, `top value ${json[0].value}`);
     for (let i = 1; i < json.length; i++) assert.ok(json[i - 1].value >= json[i].value, "values not sorted");
+    // Market columns (FantasyCalc; absent when the market is unavailable).
+    const withMarket = json.filter((p: any) => typeof p.market === "number");
+    if (withMarket.length) {
+      assert.ok(withMarket.some((p: any) => p.marketRank === 1 && p.market === 100), "market #1 = 100");
+      for (const p of withMarket) assert.ok(p.market >= 0 && p.market <= 100 && Number.isFinite(p.edge), `${p.name} market ${p.market}`);
+    }
     for (const p of json.slice(0, 300)) {
       assertValuedPlayer(p, "values");
       assert.ok(p.value >= 0 && p.value <= 100.05, `${p.name} value ${p.value}`);
@@ -267,8 +273,8 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.equal(lop.json.verdict, "Decline");
     assert.ok(lop.json.why.length > 0);
 
-    // A finder trade should evaluate to a non-Decline verdict.
-    const t = trades[0];
+    // A v3 finder trade should evaluate to an accept verdict with its band and acceptance.
+    const t = (await get(`${L}/trades2`)).json.trades[0];
     const ok = await post(`${L}/trade/evaluate`, {
       team: t.me.teamId,
       partner: t.them.teamId,
@@ -276,8 +282,10 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
       get: t.them.gives.map((p: any) => p.id),
     });
     assert.equal(ok.status, 200);
-    assert.notEqual(ok.json.verdict, "Decline");
+    assert.match(ok.json.verdict, /^Accept/);
     assert.equal(ok.json.me.lineupDelta, t.me.lineupDelta);
+    assert.equal(ok.json.band, t.band);
+    assert.equal(ok.json.acceptance, t.acceptance);
 
     // Duplicate ids are counted once.
     const dup = await post(`${L}/trade/evaluate`, { team: me.team.id, partner: partner.team.id, give: [myBest, myBest], get: [theirWorst] });
@@ -303,29 +311,43 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.equal(empty.status, 400);
   });
 
-  test("GET trades2 (v2 shape) and bench-upgrades", async () => {
+  test("GET trades2 (v3: market packages) and bench-upgrades", async () => {
     const t0 = Date.now();
     const { status, json } = await get(`${L}/trades2`);
     const ms = Date.now() - t0;
     assert.equal(status, 200);
     assertClean(json, "trades2");
-    assert.ok(Array.isArray(json.trades) && json.trades.length > 0, "no trades");
+    assert.ok(Array.isArray(json.trades) && json.trades.length > 0 && json.trades.length <= 10, "trades: 1..10");
     assert.ok(Array.isArray(json.smallerEdges));
     assert.ok(Array.isArray(json.nearMisses) && json.nearMisses.length <= 10);
     assert.equal(json.mode, "balanced");
+    assert.ok(["fantasycalc", "model"].includes(json.valueSource), `valueSource ${json.valueSource}`);
+    assert.ok(Array.isArray(json.partners) && json.partners.length === 11);
+    for (const p of json.partners) assert.ok(typeof p.teamId === "string" && Number.isFinite(p.complementarity) && p.pitch.length > 10);
     assert.equal(typeof json.summary, "string");
     assert.ok(json.summary.length > 20);
     assert.ok(ms < 15_000, `trades2 took ${ms}ms`);
+    const perPartner = new Map<string, number>();
     for (const t of json.trades) {
       for (const k of ["scoreDelta", "nowDelta", "seasonDelta", "playoffDelta", "depthDelta"]) {
         assert.equal(typeof t.me[k], "number", `${t.key}: me.${k}`);
         assert.equal(typeof t.them[k], "number", `${t.key}: them.${k}`);
       }
-      assert.ok(t.acceptance >= 0.45, `${t.key}: acceptance ${t.acceptance}`);
+      assert.ok(t.acceptance >= 0.4 && t.acceptance <= 0.95, `${t.key}: acceptance ${t.acceptance}`);
       assert.ok(t.me.scoreDelta >= 0.95, `${t.key}: me.scoreDelta ${t.me.scoreDelta}`);
-      assert.ok(t.me.gives.length <= 3 && t.them.gives.length <= 3);
-      for (const p of [...t.me.gives, ...t.them.gives]) assert.ok(p.pos !== "K" && p.pos !== "DEF");
+      assert.ok(t.me.gives.length <= 3 && t.them.gives.length <= 2);
+      for (const p of [...t.me.gives, ...t.them.gives]) {
+        assert.ok(!["QB", "K", "DEF"].includes(p.pos), `${t.key}: ${p.pos} ${p.name}`);
+        assert.ok((p.market ?? p.value) >= 3 || p.value >= 3, `${t.key}: waiver-level ${p.name}`);
+      }
+      assert.equal(typeof t.pitch, "string");
+      assert.ok(t.pitch.length > 20, t.key);
+      assert.ok(["fair", "slightly-favors-them", "favors-them", "slightly-favors-you", "favors-you"].includes(t.band), `${t.key}: band ${t.band}`);
+      assert.equal(typeof t.bandLabel, "string");
+      assert.ok(Array.isArray(t.notes) && t.notes.length > 0);
+      perPartner.set(t.them.teamId, (perPartner.get(t.them.teamId) ?? 0) + 1);
     }
+    for (const [id, n] of perPartner) assert.ok(n <= 2, `partner ${id}: ${n} trades`);
     for (const t of json.nearMisses) assert.equal(typeof t.reason, "string");
     for (const mode of ["now", "playoffs"]) {
       const r = await get(`${L}/trades2?mode=${mode}&maxGive=1&maxGet=1`);
@@ -345,6 +367,8 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
       assert.equal(t.them.gives.length, 1);
       assert.ok(t.fairness >= 0.9);
       assert.ok(t.why.length > 0);
+      assert.ok((t.me.seasonDelta ?? 0) >= 0.75, `${t.key}: bench upgrade season ${t.me.seasonDelta}`);
+      for (const p of [...t.me.gives, ...t.them.gives]) assert.ok((p.market ?? 0) >= 3 || p.value >= 3, `${t.key}: worthless ${p.name}`);
     }
   });
 
