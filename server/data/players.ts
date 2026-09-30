@@ -1,7 +1,7 @@
 import { fetchCached } from "./cache.js";
 import { sources } from "./sources.js";
 import { parseCsv, num, opt } from "./csv.js";
-import { normTeam, normName, normPos, NFL_TEAM_NAMES } from "./names.js";
+import { normTeam, normName, normPos, NFL_TEAM_NAMES, teamFromDefenseName } from "./names.js";
 import { getNflState } from "./nfl.js";
 import type { Player, Position, StatLine, WeekLine } from "../model/types.js";
 
@@ -287,7 +287,11 @@ async function buildPlayerDb(): Promise<PlayerDb> {
       const pos = normPos(o.pos);
       if (pos === "DEF") {
         const abbr = normTeam(o.team);
-        return players.get(`DEF:${abbr}`) ?? [...players.values()].find((p) => p.pos === "DEF" && normName(p.name) === normName(o.name!));
+        return (
+          players.get(`DEF:${abbr}`) ??
+          players.get(`DEF:${teamFromDefenseName(o.name) ?? ""}`) ??
+          [...players.values()].find((p) => p.pos === "DEF" && normName(p.name) === normName(o.name!))
+        );
       }
       const cands = (pos ? byName.get(nameKey(o.name, pos)) : undefined) ?? [];
       if (cands.length === 0) {

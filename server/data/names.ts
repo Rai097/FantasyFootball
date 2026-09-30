@@ -1,8 +1,23 @@
 const TEAM_ALIASES: Record<string, string> = {
   LA: "LAR", LVR: "LV", OAK: "LV", JAC: "JAX", WSH: "WAS", GNB: "GB", KAN: "KC", NWE: "NE", NOR: "NO",
   SFO: "SF", TAM: "TB", SD: "LAC", SDG: "LAC", STL: "LAR", HST: "HOU", BLT: "BAL", CLV: "CLE", ARZ: "ARI",
+  // Yahoo / other four-letter and legacy spellings
+  BUFF: "BUF", JACK: "JAX", WASH: "WAS", PITT: "PIT", CINC: "CIN", CLEV: "CLE", DENV: "DEN", DETR: "DET",
+  HOUS: "HOU", INDY: "IND", MINN: "MIN", SEAT: "SEA", TENN: "TEN", DALL: "DAL", BALT: "BAL", CHIC: "CHI",
+  MIAM: "MIA", ATLA: "ATL", CARO: "CAR", PHIL: "PHI", ARIZ: "ARI", LARM: "LAR", LACH: "LAC",
   "": "FA", NA: "FA",
 };
+
+/** Map a defense nickname or city ("Bills", "Buffalo", "Buffalo Bills") to its abbreviation. */
+export function teamFromDefenseName(name: string): string | undefined {
+  const n = name.toLowerCase().replace(/[^a-z ]/g, "").replace(/\b(d\/?st|defense|def)\b/g, "").trim();
+  if (!n) return undefined;
+  for (const [abbr, full] of Object.entries(NFL_TEAM_NAMES)) {
+    const f = full.toLowerCase();
+    if (f === n || f.endsWith(" " + n) || f.startsWith(n + " ") || n === f.split(" ").pop()) return abbr;
+  }
+  return undefined;
+}
 
 export function normTeam(t: string | undefined): string {
   const u = (t ?? "").toUpperCase().trim();
