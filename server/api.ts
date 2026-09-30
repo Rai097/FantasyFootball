@@ -30,7 +30,9 @@ import {
 } from "./providers/import.js";
 import { parseRosterText } from "./providers/import-text.js";
 import { bookmarkletCode, bookmarkletUrl } from "./providers/import-bookmarklet.js";
-import { analyzeLeague, type LeagueContext } from "./model/analysis.js";
+import { analyzeLeague, analyzeTeams, type LeagueContext } from "./model/analysis.js";
+import { attachFloor, attachRisers } from "./model/signals.js";
+import { getPriorWeeks } from "./data/priorWeeks.js";
 import { findTrades } from "./model/trades.js";
 import { findBenchUpgrades } from "./model/tradesV2.js";
 import { benchUpgradeFilter, evaluateTradeV3, findTradesV3, qbRuleNote } from "./model/tradesV3.js";
@@ -148,6 +150,10 @@ function loadContext(provider: Provider, id: string, refresh: boolean): Promise<
     const md = await getMarketData(marketQuery(league.settings));
     const valueSource: ValueSource = md.source === "fantasycalc" && md.values.size ? "fantasycalc" : "model";
     attachMarket(ctx.players, valueSource === "fantasycalc" ? md.values : null);
+    // v3.1 signals: role risers (ppg blends recent expected points) and weekly floor; then re-analyse teams.
+    attachRisers(ctx.players, league.settings);
+    attachFloor(ctx.players, await getPriorWeeks(db.season - 1), league.settings.scoring);
+    ctx.teams = analyzeTeams(league, ctx.players, ctx.replacement);
     return { db, league, ctx, valueSource };
   });
 }

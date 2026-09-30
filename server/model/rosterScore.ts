@@ -2,6 +2,7 @@
 import type { LeagueSettings, Position, SlotKind, ValuedPlayer } from "./types.js";
 import { effPpg, isStartingSlot, SLOT_ELIGIBILITY, usable } from "./lineup.js";
 import { injuryKind } from "./projection.js";
+import { floorFactor } from "./signals.js";
 
 export type TradeMode = "now" | "balanced" | "playoffs";
 export const TRADE_MODES: TradeMode[] = ["now", "balanced", "playoffs"];
@@ -205,6 +206,9 @@ export function rosterParts(S: LeagueSettings, roster: ValuedPlayer[], replaceme
       row[0] = effPpg(p);
       row[1] = usable(p) ? p.ppg : 0;
       row.set(pts, 2);
+      // v3.1: lineup contribution = 0.8·ppg + 0.2·floor when the weekly floor is known.
+      const ff = floorFactor(p);
+      if (ff !== 1) for (let c = 0; c < stride; c++) row[c] *= ff;
       rec = { row, bit: POS_BIT[p.pos] ?? 0, irr: irregular(p, pts) };
       recs.set(p, rec);
     }

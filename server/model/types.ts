@@ -117,6 +117,12 @@ export interface ValuedPlayer extends Player {
   marketEstimated?: boolean;
   /** trueMarket − market (positive = the market undervalues him); set with `market`. */
   edge?: number;
+  /** 25th percentile of weekly league-scored actual points (prior + current season, ≥ 6 games). */
+  floor?: number;
+  /** floor / mean weekly points (0..1; higher = steadier). */
+  consistency?: number;
+  /** Role rising (snap share +12 pts and expected pts +2, new season high, not already full-time): ppg blends 30% of last-2-week expected ppg. */
+  riser?: boolean;
 }
 
 export type SlotKind = "QB" | "RB" | "WR" | "TE" | "K" | "DEF" | "FLEX" | "SFLEX" | "RFLEX" | "WRRB" | "BN" | "IR";

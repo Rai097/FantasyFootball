@@ -143,6 +143,10 @@ function Side({ title, players, total, drops, market: marketTotals }: { title: s
             <span className="muted small">
               {p.pos}
               {p.posRank} · {f1(p.ppg)} ppg
+              {p.floor !== undefined && (
+                <span title={`Weekly floor: 25th percentile of league-scored games (2025–26); consistency ${f1((p.consistency ?? 0) * 100)}%`}> · floor {f1(p.floor)}</span>
+              )}
+              {p.riser && <span title="Role rising: snaps and expected points up"> · riser</span>}
             </span>
             {market && (
               <span

@@ -1,12 +1,13 @@
 // Trade Finder v3: market-value packages that another manager would actually send or accept.
 // Perceived value = FantasyCalc market (fallback: our value); true value = our model. See docs/DESIGN.md "Trade finder v3".
 import type { FairnessBand, LeagueSettings, Position, SlotKind, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
-import { FLEX_SLOTS, effPpg, eligible, slotLabels, usable, type LineupResult } from "./lineup.js";
+import { FLEX_SLOTS, effPpg, eligible, optimalLineup, slotLabels, usable, type LineupResult } from "./lineup.js";
 import { applyTrade, combos, fmtSigned, lineupChanges, names, tradeDeadlinePassed, type TradeContext } from "./trades.js";
 import { state2, type State2 } from "./tradesV2.js";
 import { MODE_WEIGHTS, combine, partsDelta, riskAdjusted, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
 import { injuryKind } from "./projection.js";
 import { edgeOf, marketOf, trueOf, type ValueSource } from "./market.js";
+import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";
 
 /** Config for Trade Finder v3 (architect's design after user feedback on v2). */
 export const V3 = {
@@ -56,6 +57,12 @@ export const V3 = {
   minHeadliner: 8,
   minAcceptance: 0.4,
   nearMissLimit: 10,
+  /** v3.1: a starting slot losing ≥ this many ppg counts ×1.5 (extra 0.5 × loss), −1.0 more when thin + injured. */
+  slotLossMin: 3,
+  slotLossExtra: 0.5,
+  thinPenalty: 1.0,
+  /** v3.1: giving a riser costs ×1.15 of his value (selling upside); same for the partner. */
+  riserPremium: 1.15,
   /** Search bounds. */
   poolSize: 14,
   comboCap: 4000,
@@ -184,6 +191,9 @@ export interface TeamV3 extends State2 {
   surplusNames: Record<"RB" | "WR" | "TE", string[]>;
   topMarketId: string | null;
   starters: Set<string>;
+  /** Starters + top-3 bench by lineup ppg (for same-NFL-team overlap). */
+  core: ValuedPlayer[];
+  starterList: ValuedPlayer[];
   bad: boolean;
 }
 
@@ -232,7 +242,9 @@ export function teamV3(ctx: TradeContext, teamId: string): TeamV3 {
   const rec = s.team.record;
   const games = rec ? rec.wins + rec.losses + rec.ties : 0;
   const bad = !!rec && games >= 2 && rec.wins / games <= 1 / 3 + 1e-9;
-  return { ...s, analysis, pieces, deficit, weakest, surplus, surplusNames, topMarketId: top?.id ?? null, starters, bad };
+  const starterList = s.base.lineup.map((l) => l.player).filter((p): p is ValuedPlayer => !!p);
+  const core = [...starterList, ...[...s.base.bench].sort((a, b) => effPpg(b) - effPpg(a)).slice(0, 3)];
+  return { ...s, analysis, pieces, deficit, weakest, surplus, surplusNames, topMarketId: top?.id ?? null, starters, core, starterList, bad };
 }
 
 const deficitFor = (t: TeamV3, pos: "RB" | "WR" | "TE") => Math.max(t.deficit[pos], 0.5 * t.deficit.FLEX);
@@ -296,6 +308,13 @@ export interface Judged3 {
   losesTheirTop: boolean;
   score: number;
   edgeSum: number;
+  /** v3.1 tags (overlap, stack, slot downgrade, thin, riser) and why-notes. */
+  tags31: string[];
+  why31: string[];
+  /** Slot-loss penalty subtracted from myDelta (≥ 0). */
+  slotPenalty: number;
+  /** A received player shares NFL team + group with one of my players (kept out of the main list). */
+  overlap: boolean;
   /** Why my side fails (empty when myOk). */
   myFail: string;
   /** Why the partner would refuse (empty when partnerOk). */
@@ -306,22 +325,64 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
   const S = ctx.league.settings;
   const repl = ctx.replacement;
   return (give: ValuedPlayer[], get: ValuedPlayer[]): Judged3 => {
+    const tags31: string[] = [];
+    const why31: string[] = [];
+    let overlap = false;
+    // A: same-NFL-team overlap / stacks, judged against each receiver's remaining core.
+    const myCore = my.core.filter((p) => !give.includes(p));
+    const myStart = my.starterList.filter((p) => !give.includes(p));
+    const theirCore = their.core.filter((p) => !get.includes(p));
+    const theirStart = their.starterList.filter((p) => !get.includes(p));
     const myAfter: ValuedPlayer[] = [];
     for (const p of my.roster) if (!give.includes(p)) myAfter.push(p);
-    for (const p of get) myAfter.push(riskAdjusted(p));
+    for (const p of get) {
+      const o = overlapFactor(p, myCore, myStart);
+      if (o.tag) tags31.push(o.f < 1 ? `${p.name} ${o.tag}` : `stack: ${p.name} + ${o.tag.replace(/^stack with /, "")}`);
+      if (o.f < 1) overlap = true;
+      myAfter.push(scaledPlayer(riskAdjusted(p), o.f));
+    }
     const theirAfter: ValuedPlayer[] = [];
     for (const p of their.roster) if (!get.includes(p)) theirAfter.push(p);
-    for (const p of give) theirAfter.push(p);
+    for (const p of give) theirAfter.push(scaledPlayer(p, overlapFactor(p, theirCore, theirStart).f));
     const me = rosterParts(S, myAfter, repl, get.length > give.length ? { count: get.length - give.length, keep: (p) => my.irIds.has(p.id) || get.some((g) => g.id === p.id) } : undefined);
     const th = rosterParts(S, theirAfter, repl, give.length > get.length ? { count: give.length - get.length, keep: (p) => their.irIds.has(p.id) || give.includes(p) } : undefined);
     const myParts = partsDelta(me.parts, my.parts);
     const theirParts = partsDelta(th.parts, their.parts);
-    const myDelta = combine(myParts, MODE_WEIGHTS[mode]);
+    // B: slot loss aversion — a starting slot that drops ≥ 3 ppg counts ×1.5.
+    let slotPenalty = 0;
+    if (give.length) {
+      const after = optimalLineup(S.slots, myAfter.filter((p) => !me.drops.includes(p)));
+      const labels = slotLabels(my.base.lineup);
+      my.base.lineup.forEach((l, i) => {
+        if (l.slot === "K" || l.slot === "DEF") return;
+        const b = effPpg(l.player);
+        const a = effPpg(after.lineup[i]?.player ?? null);
+        const loss = b - a;
+        if (loss < V3.slotLossMin) return;
+        slotPenalty += V3.slotLossExtra * loss;
+        const label = FLEX_SLOTS.includes(l.slot) ? labels[i] : l.slot;
+        tags31.push(`downgrades ${label} by ${loss.toFixed(1)}`);
+        const pos = l.player?.pos;
+        if (pos) {
+          const left = myAfter.filter((p) => p.pos === pos && !me.drops.includes(p)).length;
+          if (left < 2 && get.some((g) => g.pos === pos && g.injury)) {
+            slotPenalty += V3.thinPenalty;
+            tags31.push(`thin at ${pos}`);
+          }
+        }
+      });
+      if (slotPenalty > 0) why31.push(`Slot loss aversion: −${slotPenalty.toFixed(1)} (a starting slot losing ≥ ${V3.slotLossMin} ppg counts ×1.5${tags31.some((t) => t.startsWith("thin")) ? "; −1.0 for being thin with an injured replacement" : ""}).`);
+    }
+    const myDelta = combine(myParts, MODE_WEIGHTS[mode]) - slotPenalty;
     const theirLineup = theirParts.season;
 
+    // D: selling a riser means selling upside: his value counts ×1.15 on the giving side.
+    const riserUp = (v: (p: ValuedPlayer) => number) => (p: ValuedPlayer) => v(p) * (p.riser ? V3.riserPremium : 1);
+    for (const p of give) if (p.riser) why31.push(`${p.name} is a riser: his value counts ×${V3.riserPremium} in what you give (you sell upside).`);
+    for (const p of get) if (p.riser) why31.push(`${p.name} is a riser: ${their.team.name} values him ×${V3.riserPremium}.`);
     const marketGive = packageValue(give.map(marketOf));
-    const marketGet = packageValue(get.map(marketOf));
-    const trueGive = packageValue(give.map(trueOf));
+    const marketGet = packageValue(get.map(riserUp(marketOf)));
+    const trueGive = packageValue(give.map(riserUp(trueOf)));
     const trueGet = packageValue(get.map(trueOf));
     const theirDropP = give.length > get.length ? dropCost(th.drops.map(marketOf)) : 0;
     const myDropP = get.length > give.length ? dropCost(me.drops.map(marketOf)) : 0;
@@ -349,8 +410,8 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     }
 
     let myFail = "";
-    if (myDelta < V3.minMyDelta) myFail = `your team ${fmtSigned(myDelta)} (needs +${V3.minMyDelta.toFixed(1)})`;
-    else if (premiumMine && !premiumOk) myFail = `you move the best player for a package worth less than ${pct(V3.consolidationPremium)} of him`;
+    if (premiumMine && !premiumOk) myFail = `you move the best player for a package worth less than ${pct(V3.consolidationPremium)} of him`;
+    else if (myDelta < V3.minMyDelta) myFail = `your team ${fmtSigned(myDelta)} (needs +${V3.minMyDelta.toFixed(1)})${slotPenalty > 0 ? ` after −${slotPenalty.toFixed(1)} slot-loss aversion` : ""}`;
     else if (myTrueChange < V3.minMyTrueGain * trueTotal) myFail = `you pay market price: true value ${fmtSigned(myTrueChange)} (needs +${(V3.minMyTrueGain * trueTotal).toFixed(1)}, 3% of the deal)`;
 
     let theirFail = "";
@@ -371,7 +432,7 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     return {
       give, get, myParts, theirParts, myDrops: me.drops, theirDrops: th.drops, myDelta, theirLineup,
       marketGive, marketGet, trueGive, trueGet, fairness, theirMarketChange, myTrueChange, bestToMe, premiumOk,
-      myOk: !myFail, partnerOk: !theirFail, acceptance, fixesWorst, losesTheirTop, score, edgeSum, myFail, theirFail,
+      myOk: !myFail, partnerOk: !theirFail, acceptance, fixesWorst, losesTheirTop, score, edgeSum, myFail, theirFail, tags31, why31, slotPenalty, overlap,
     };
   };
 }
@@ -397,7 +458,7 @@ function sideOf(teamId: string, gives: ValuedPlayer[], before: LineupResult, aft
 function edgeTags(j: Judged3): string[] {
   const tags: string[] = [];
   for (const p of j.get) if (edgeOf(p) >= V3.edgeTag) tags.push(`buy-low: ${p.name} (+${edgeOf(p).toFixed(1)})`);
-  for (const p of j.give) if (edgeOf(p) <= -V3.edgeTag) tags.push(`sell-high: ${p.name} (${fmtSigned(edgeOf(p))})`);
+  for (const p of j.give) if (!p.riser && edgeOf(p) <= -V3.edgeTag) tags.push(`sell-high: ${p.name} (${fmtSigned(edgeOf(p))})`);
   return tags;
 }
 
@@ -451,7 +512,12 @@ function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, m
   const band = fairnessBand(j.fairness);
   const key = `${their.team.id}:${give.map((p) => p.id).sort().join(",")}>${get.map((p) => p.id).sort().join(",")}`;
   const p100 = Math.round(j.acceptance * 100);
-  const tags: string[] = [...edgeTags(j)];
+  const tags: string[] = [...edgeTags(j), ...j.tags31];
+  for (const p of [...give, ...get]) if (p.riser) tags.push(`riser: ${p.name}`);
+  for (const p of get) {
+    if (p.consistency !== undefined && p.consistency >= FLOOR.highFloor && p.ppg >= FLOOR.highFloorPpg) tags.push(`high floor: ${p.name}`);
+    else if (p.consistency !== undefined && p.consistency <= FLOOR.volatile) tags.push(`volatile: ${p.name}`);
+  }
   if (j.fixesWorst && their.weakest) tags.push(`fixes their ${their.weakest.slot}`);
   if (give.length > get.length) tags.push("consolidation for them");
   if (get.length > give.length) tags.push("adds depth (you drop a bench player)");
@@ -460,6 +526,7 @@ function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, m
   if (j.theirLineup > 0 && j.myParts.season > 0) tags.push("helps both");
   const summary = `Give ${names(give)} to ${their.team.name} for ${names(get)}: your team ${fmtSigned(j.myDelta)} (${mode}), their lineup ${fmtSigned(j.theirLineup)} pts/week; ${band.label}; ~${p100}% accept.`;
   const why =
+    (j.why31.length ? `${j.why31.join(" ")} ` : "") +
     `Market package values (best + 0.85·2nd + 0.70·3rd): you give ${j.marketGive.toFixed(1)}, get ${j.marketGet.toFixed(1)}` +
     (them.drops?.length ? `; they must cut ${them.drops.map((p) => p.name).join(", ")} (drop cost counted)` : "") +
     (me.drops?.length ? `; you cut ${me.drops.map((p) => p.name).join(", ")}` : "") +
@@ -516,7 +583,7 @@ function classify(j: Judged3): Cls | null {
   if (j.myOk && j.partnerOk) {
     if (j.acceptance < V3.minAcceptance) return "unlikely";
     const headliner = Math.max(...j.give.map(marketOf), ...j.get.map(marketOf));
-    return j.myDelta >= V3.clearDelta && headliner >= V3.minHeadliner ? "clear" : "edge";
+    return j.myDelta >= V3.clearDelta && headliner >= V3.minHeadliner && !j.overlap ? "clear" : "edge";
   }
   if (j.myOk && !j.partnerOk && j.fairness >= 0.85 && j.theirLineup >= -2) return "refuse";
   if (!j.myOk && j.partnerOk && j.myDelta > 0 && j.myTrueChange >= -0.05 * (j.trueGive + j.trueGet)) return "marginal";

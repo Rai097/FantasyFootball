@@ -126,6 +126,9 @@ const theirs = [
   vp("tWR4", "WR", 12.5, 14, G), vp("tWR5", "WR", 11, 9, G), vp("tTE", "TE", 8, 5, G), vp("tBN", "TE", 4, 0.4, G),
   vp("tK", "K", 8, 1, G), vp("tDEF", "DEF", 7, 1, G),
 ];
+// Distinct NFL teams so same-team overlap (v3.1 A) only applies where a test sets it up.
+const NFL = ["ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC", "LAC", "LAR", "LV", "MIA", "MIN", "NE", "NO", "NYG"];
+[...mine, ...theirs].forEach((p, i) => (p.team = NFL[i % NFL.length]));
 function ctxFor(l: League, ps: ValuedPlayer[]): TradeContext {
   const players = new Map(ps.map((p) => [p.id, p]));
   return { league: l, players, teams: analyzeTeams(l, players, REPL), replacement: REPL };
@@ -242,4 +245,51 @@ test("bench-upgrade filter applies eligibility and the QB rule", () => {
   assert.equal(ok(P("mQB"), P("tWR4"), 2, "them"), false, "my starting QB never moves");
   const notes = qbRuleNote(ctx, "me", "them", [P("mQB2")], [P("tWR5")]);
   assert.match(notes!.join(" "), /QB rule: mQB2 .* allowed/);
+});
+
+// ---------------------------------------------------------------- v3.1
+
+test("v3.1 A: a received pass-catcher from my WR's NFL team counts ×0.85 and is tagged", () => {
+  const base = J()([P("mRB3")], [P("tWR3")]);
+  const saved = P("tWR3").team;
+  P("tWR3").team = P("mWR1").team; // same NFL team as my starting WR
+  try {
+    const shared = judge3(ctx, teamV3(ctx, "me"), teamV3(ctx, "them"), "balanced")([P("mRB3")], [P("tWR3")]);
+    assert.ok(shared.myDelta < base.myDelta, `${shared.myDelta} vs ${base.myDelta}`);
+    assert.ok(shared.tags31.some((t) => /shares targets with mWR1/.test(t)), shared.tags31.join());
+  } finally {
+    P("tWR3").team = saved;
+  }
+});
+
+test("v3.1 B: a starting slot losing ≥ 3 ppg counts ×1.5 and is tagged; thin + injured adds −1.0", () => {
+  const j = J()([P("mTE")], [P("tWR3")]); // my only TE (8 ppg) leaves: TE slot → empty
+  assert.ok(j.slotPenalty >= 0.5 * 8 - 1e-9, `penalty ${j.slotPenalty}`);
+  assert.ok(j.tags31.some((t) => /^downgrades TE by 8\.0$/.test(t)), j.tags31.join());
+  // Thin: get an injured TE back for my only TE.
+  const saved = P("tTE").injury;
+  P("tTE").injury = { status: "Questionable", week: 4 };
+  try {
+    const k = judge3(ctx, teamV3(ctx, "me"), teamV3(ctx, "them"), "balanced")([P("mTE"), P("mRB4")], [P("tTE"), P("tWR5")]);
+    if (k.tags31.some((t) => t.startsWith("downgrades TE"))) assert.ok(k.tags31.includes("thin at TE"), k.tags31.join());
+  } finally {
+    P("tTE").injury = saved;
+  }
+});
+
+test("v3.1 D: giving a riser costs ×1.15 in my true value and he is never tagged sell-high", () => {
+  const plain = J()([P("mRB3")], [P("tWR3")]);
+  P("mRB3").riser = true;
+  P("mRB3").edge = -12;
+  try {
+    const j = J()([P("mRB3")], [P("tWR3")]);
+    assert.ok(Math.abs(j.trueGive - plain.trueGive * 1.15) < 1e-9);
+    assert.ok(j.why31.some((w) => /riser/.test(w)));
+    const ev = evaluateTradeV3(ctx, "me", "them", ["mRB3"], ["tWR3"]);
+    assert.ok(ev.tags.includes("riser: mRB3"), ev.tags.join());
+    assert.ok(!ev.tags.some((t) => t.startsWith("sell-high")), ev.tags.join());
+  } finally {
+    delete P("mRB3").riser;
+    delete P("mRB3").edge;
+  }
 });
