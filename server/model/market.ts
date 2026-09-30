@@ -14,34 +14,45 @@ export function marketQuery(S: LeagueSettings): { numQbs: 1 | 2; numTeams: numbe
 }
 
 /**
- * Set market / marketRank / marketPosRank / edge on every skill player (in place).
- * With `values` null (market unavailable) the fields are cleared and callers use `value`.
+ * Set market / marketRank / marketPosRank / trueMarket / edge on every skill player (in place).
+ * trueMarket maps our value onto the market's scale by rank (quantile mapping), so edges compare
+ * like with like. A player the market list omits but we rank inside it gets market = trueMarket
+ * (marketEstimated, edge 0) instead of a spurious 0. With `values` null the fields are cleared.
  */
 export function attachMarket(players: Map<string, ValuedPlayer>, values: Map<string, MarketValue> | null): void {
+  const skill = [...players.values()].filter((p) => p.pos !== "K" && p.pos !== "DEF");
   for (const p of players.values()) {
-    if (!values || p.pos === "K" || p.pos === "DEF") {
-      delete p.market;
-      delete p.marketRank;
-      delete p.marketPosRank;
-      delete p.edge;
-      continue;
-    }
+    delete p.market;
+    delete p.marketRank;
+    delete p.marketPosRank;
+    delete p.marketEstimated;
+    delete p.trueMarket;
+    delete p.edge;
+  }
+  if (!values) return;
+  // Market scale: every skill player's market value (0 when unlisted), high → low.
+  const scale = skill.map((p) => values.get(p.id)?.value ?? 0).sort((a, b) => b - a);
+  const listed = values.size;
+  const ranked = [...skill].sort((a, b) => b.value - a.value || b.ppg - a.ppg);
+  ranked.forEach((p, i) => {
     const m = values.get(p.id);
-    p.market = m ? m.value : 0;
+    const tm = p.value > 0 ? scale[i] ?? 0 : 0;
+    p.trueMarket = r1(tm);
     if (m) {
+      p.market = m.value;
       p.marketRank = m.overallRank;
       p.marketPosRank = m.posRank;
-    } else {
-      delete p.marketRank;
-      delete p.marketPosRank;
-    }
-    p.edge = r1(p.value - p.market);
-  }
+    } else if (i < listed && tm >= 3) {
+      p.market = p.trueMarket;
+      p.marketEstimated = true;
+    } else p.market = 0;
+    p.edge = r1(p.trueMarket - p.market);
+  });
 }
 
 /** Perceived (market) value; our value when the market is unavailable. */
 export const marketOf = (p: ValuedPlayer): number => p.market ?? p.value;
-/** True value = our model value. */
-export const trueOf = (p: ValuedPlayer): number => p.value;
-/** Our value minus market value (0 without market values). */
-export const edgeOf = (p: ValuedPlayer): number => (p.market === undefined ? 0 : p.value - p.market);
+/** True value on the market scale (our value when the market is unavailable). */
+export const trueOf = (p: ValuedPlayer): number => p.trueMarket ?? p.value;
+/** trueMarket − market (0 without market values). */
+export const edgeOf = (p: ValuedPlayer): number => p.edge ?? 0;

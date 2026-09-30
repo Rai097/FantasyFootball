@@ -46,10 +46,14 @@ export const V3 = {
   accCap: 0.95,
   /** Ranking: min(myGain, partnerGain + margin) × P. */
   margin: 2,
+  /** Score ÷ (1 + 2 × market overpay beyond +12%): the same gain at a fairer price ranks first. */
+  overpayPenalty: 2,
   perPartner: 2,
   perGive: 2,
   limit: 10,
   clearDelta: 1.0,
+  /** Main list only: the deal's best player must have market value ≥ this (else it is a smaller edge, not a headline trade). */
+  minHeadliner: 8,
   minAcceptance: 0.4,
   nearMissLimit: 10,
   /** Search bounds. */
@@ -83,9 +87,9 @@ export function fairnessBand(ratio: number): { band: FairnessBand; label: string
   const p = (ratio - 1) * 100;
   const a = Math.abs(ratio - 1);
   const signed = `${p >= 0 ? "+" : "−"}${Math.abs(p).toFixed(0)}%`;
-  if (a <= V3.fairBand) return { band: "fair", label: `Fair (${signed} to them)`, pct: r1(p) };
+  if (a <= V3.fairBand + 1e-9) return { band: "fair", label: `Fair (${signed} to them)`, pct: r1(p) };
   const them = ratio > 1;
-  if (a <= V3.slightBand) return { band: them ? "slightly-favors-them" : "slightly-favors-you", label: `Slightly favors ${them ? "them" : "you"} (${signed} to them)`, pct: r1(p) };
+  if (a <= V3.slightBand + 1e-9) return { band: them ? "slightly-favors-them" : "slightly-favors-you", label: `Slightly favors ${them ? "them" : "you"} (${signed} to them)`, pct: r1(p) };
   return { band: them ? "favors-them" : "favors-you", label: `Favors ${them ? "them" : "you"} (${signed} to them)`, pct: r1(p) };
 }
 
@@ -120,7 +124,7 @@ function weeksLeft(p: ValuedPlayer, S: LeagueSettings): number {
 /** Why a player cannot be a trade piece (empty string when he can), QB rule aside. */
 export function ineligibleReason(p: ValuedPlayer, S: LeagueSettings, irIds: Set<string> = new Set()): string {
   if (p.pos === "K" || p.pos === "DEF") return "K / DEF are streamed, not traded";
-  if (marketOf(p) < V3.minPieceValue && trueOf(p) < V3.minPieceValue) return "waiver-level value";
+  if (marketOf(p) < V3.minPieceValue && p.value < V3.minPieceValue) return "waiver-level value";
   const k = injuryKind(p.injury);
   if (irIds.has(p.id) || k === "long") return "on IR / out long-term";
   if (!usable(p) || weeksLeft(p, S) - p.remainingGames >= V3.outWeeks - 1e-9 || k === "return") return `out ${V3.outWeeks}+ weeks`;
@@ -139,10 +143,13 @@ export function bestQbRank(roster: ValuedPlayer[]): number {
   return best;
 }
 
-/** A team's second QB when it has two QBs ranked ≤ qbDepthRank (the only QB it may trade). */
+/**
+ * A team's second QB (the one it does not start: lower projected ppg) when its top two QBs both
+ * rank ≤ qbDepthRank — the only QB it may trade.
+ */
 export function spareQb(roster: ValuedPlayer[]): ValuedPlayer | null {
-  const qbs = roster.filter((p) => p.pos === "QB" && usable(p)).sort((a, b) => qbRank(a) - qbRank(b) || b.value - a.value);
-  return qbs.length >= 2 && qbRank(qbs[1]) <= V3.qbDepthRank ? qbs[1] : null;
+  const qbs = roster.filter((p) => p.pos === "QB" && usable(p)).sort((a, b) => effPpg(b) - effPpg(a) || qbRank(a) - qbRank(b));
+  return qbs.length >= 2 && qbRank(qbs[0]) <= V3.qbDepthRank && qbRank(qbs[1]) <= V3.qbDepthRank ? qbs[1] : null;
 }
 
 /** QB rule: `from` may send its spare QB to `to` only when `to`'s best QB ranks worse than qbNeedRank. */
@@ -329,11 +336,13 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     // Single best player in the deal (market, then true value).
     const all = [...give, ...get].sort((a, b) => marketOf(b) - marketOf(a) || trueOf(b) - trueOf(a));
     const bestToMe = get.includes(all[0]);
+    // Consolidation premium: in any deal that is not 1-for-1, whoever receives the single best player
+    // must give ≥ 110% of the other side's package (perceived, net of drop cost).
     let premiumOk = true;
     let premiumMine = false;
-    if (give.length !== get.length) {
-      if (bestToMe && give.length > get.length) premiumOk = theirRecvNet >= V3.consolidationPremium * marketGet;
-      else if (!bestToMe && get.length > give.length) {
+    if (give.length > 1 || get.length > 1) {
+      if (bestToMe) premiumOk = theirRecvNet >= V3.consolidationPremium * marketGet;
+      else {
         premiumOk = marketGet - myDropP >= V3.consolidationPremium * marketGive;
         premiumMine = true;
       }
@@ -341,8 +350,8 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
 
     let myFail = "";
     if (myDelta < V3.minMyDelta) myFail = `your team ${fmtSigned(myDelta)} (needs +${V3.minMyDelta.toFixed(1)})`;
-    else if (myTrueChange < V3.minMyTrueGain * trueTotal) myFail = `you pay market price: true value ${fmtSigned(myTrueChange)} (needs +${(V3.minMyTrueGain * trueTotal).toFixed(1)}, 3% of the deal)`;
     else if (premiumMine && !premiumOk) myFail = `you move the best player for a package worth less than ${pct(V3.consolidationPremium)} of him`;
+    else if (myTrueChange < V3.minMyTrueGain * trueTotal) myFail = `you pay market price: true value ${fmtSigned(myTrueChange)} (needs +${(V3.minMyTrueGain * trueTotal).toFixed(1)}, 3% of the deal)`;
 
     let theirFail = "";
     if (!premiumMine && !premiumOk) theirFail = `consolidation premium: they give the best player, so your package must be worth ≥ ${pct(V3.consolidationPremium)} of theirs (it is ${pct(fairness)})`;
@@ -355,7 +364,9 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     const w = their.weakest;
     const fixesWorst = !!w && theirLineup > 0 && give.some((p) => fitsGroup(w.group, p.pos) && effPpg(p) > effPpg(w.player));
     const acceptance = acceptanceV3((fairness - 1) * 100, { extraGiven: give.length - get.length, losesTheirTop, fixesWorst });
-    const score = Math.min(myDelta, theirLineup + V3.margin) * acceptance;
+    // Ranking: min(my gain, their gain + margin) × P, discounted when I overpay by market beyond the "slightly" band.
+    const overpay = Math.max(0, fairness - 1 - V3.slightBand);
+    const score = (Math.min(myDelta, theirLineup + V3.margin) * acceptance) / (1 + V3.overpayPenalty * overpay);
     const edgeSum = get.reduce((a, p) => a + edgeOf(p), 0) - give.reduce((a, p) => a + edgeOf(p), 0);
     return {
       give, get, myParts, theirParts, myDrops: me.drops, theirDrops: th.drops, myDelta, theirLineup,
@@ -448,7 +459,7 @@ function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, m
     (give.length > get.length ? ` × ${V3.extraPlayerMult}^${give.length - get.length} (extra players)` : "") +
     (j.losesTheirTop ? ` × ${V3.loseTopMult} (their best player)` : "") +
     (j.fixesWorst ? ` × ${V3.fixesWorstMult} (fixes their weakest slot)` : "") +
-    `; score = min(your gain, their gain + ${V3.margin}) × acceptance = ${j.score.toFixed(2)}.`;
+    `; score = min(your gain, their gain + ${V3.margin}) × acceptance${j.fairness > 1 + V3.slightBand ? " ÷ overpay penalty" : ""} = ${j.score.toFixed(2)}.`;
   return {
     key,
     me,
@@ -491,7 +502,8 @@ interface Cand {
 function classify(j: Judged3): Cls | null {
   if (j.myOk && j.partnerOk) {
     if (j.acceptance < V3.minAcceptance) return "unlikely";
-    return j.myDelta >= V3.clearDelta ? "clear" : "edge";
+    const headliner = Math.max(...j.give.map(marketOf), ...j.get.map(marketOf));
+    return j.myDelta >= V3.clearDelta && headliner >= V3.minHeadliner ? "clear" : "edge";
   }
   if (j.myOk && !j.partnerOk && j.fairness >= 0.85 && j.theirLineup >= -2) return "refuse";
   if (!j.myOk && j.partnerOk && j.myDelta > 0 && j.myTrueChange >= -0.05 * (j.trueGive + j.trueGet)) return "marginal";
@@ -678,7 +690,7 @@ export function evaluateTradeV3(
 /** v3 bench-upgrade rule: both players worth ≥ 3 (market or true) and my season lineup +0.8 pts/week. */
 export const BENCH_MIN_SEASON = 0.8;
 export function benchUpgradeOk(mine: ValuedPlayer, theirs: ValuedPlayer, mySeasonDelta: number): boolean {
-  const worth = (p: ValuedPlayer) => marketOf(p) >= V3.minPieceValue || trueOf(p) >= V3.minPieceValue;
+  const worth = (p: ValuedPlayer) => marketOf(p) >= V3.minPieceValue || p.value >= V3.minPieceValue;
   return worth(mine) && worth(theirs) && mySeasonDelta >= BENCH_MIN_SEASON;
 }
 

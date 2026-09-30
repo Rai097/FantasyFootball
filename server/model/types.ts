@@ -108,7 +108,14 @@ export interface ValuedPlayer extends Player {
   /** Market overall rank / position rank (unset when the player is not in the market list). */
   marketRank?: number;
   marketPosRank?: number;
-  /** Our value minus market value (positive = the market undervalues him); set with `market`. */
+  /**
+   * Our value on the market's scale: the market value at the player's rank by our `value`
+   * (quantile mapping; our value curve is steeper than the market's). Set with `market`.
+   */
+  trueMarket?: number;
+  /** True when the market list omits a player we rank inside it: `market` is then our trueMarket (no edge). */
+  marketEstimated?: boolean;
+  /** trueMarket − market (positive = the market undervalues him); set with `market`. */
   edge?: number;
 }
 
