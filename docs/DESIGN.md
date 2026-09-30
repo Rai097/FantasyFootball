@@ -208,7 +208,10 @@ GET  /api/league/:provider/:id        → League   (provider = demo | yahoo | im
 GET  /api/league/:provider/:id/analysis?team=ID
        → { league, players: Record<id, ValuedPlayer>, teams: TeamAnalysis[], replacement: Record<pos, number>, myTeamId }
 GET  /api/league/:provider/:id/trades?team=ID&partner=&wantPos=&maxGive=2&maxGet=2 → Trade[]
-POST /api/league/:provider/:id/trade/evaluate  { team, partner, give: string[], get: string[] } → Trade & { verdict: string }
+GET  /api/league/:provider/:id/trades2?team=ID&mode=now|balanced|playoffs&partner=&wantPos=&maxGive=2&maxGet=2
+       → { trades: Trade[] (clear wins), smallerEdges: Trade[], nearMisses: (Trade & { reason })[], mode, summary: string }   (UI uses this)
+GET  /api/league/:provider/:id/bench-upgrades?team=ID&mode= → Trade[] (≤ 15 one-for-one bench swaps)
+POST /api/league/:provider/:id/trade/evaluate  { team, partner, give: string[], get: string[], mode? } → Trade & { verdict: string }  (v2 scoring)
 GET  /api/league/:provider/:id/waivers?team=ID → { freeAgents: WaiverTarget[], myPriority?: number, numTeams, advice: string }
        WaiverTarget = ValuedPlayer & { gain: number, benchGain: number, drop: ValuedPlayer|null, trend: number, recommendation: "claim"|"wait"|"optional"|"pass", why: string, onWaivers: boolean, percentOwned?: number }
 GET  /api/league/:provider/:id/values?team=ID  → ValuedPlayer[] sorted by value, rostered flag { ...ValuedPlayer, ownerTeamId?: string }
@@ -303,3 +306,37 @@ architect's final review passes.
 * Yahoo requires https redirect URIs, so the default is the `oob` paste-a-code flow ("Installed Application").
 * Free agents: `status=A;out=ownership,percent_owned;sort=OR`, `ownership.ownership_type ∈ {freeagents, waivers}`.
 * One call `/users;use_login=1/games;game_keys=nfl/leagues/teams` lists leagues with my team; `/game/nfl` gives the game id to build `{gid}.l.{leagueId}`.
+
+## Trade finder v2 (server/model/rosterScore.ts, tradesV2.ts) — overrides "Trade finder" for trades2 / evaluate
+
+Why: a strong starting lineup made v1 return nothing; managers also value depth, byes, injuries and playoffs.
+
+**Roster score** for any roster: `now` = optimal-lineup effPpg sum (= starterPpg); `season` = mean over every
+remaining week of that week's optimal lineup (bye → 0; games removed by the injury model come off the earliest
+weeks); `playoffs` = same mean over weeks regularSeasonEnd+1..finalWeek; `depth` = top-K bench players'
+max(0, effPpg − replacement[pos]), K = max(3, ceil(starting skill slots / 2)).
+`score = wNow·now + wSeason·season + wPlayoffs·playoffs + wDepth·depth` with `MODE_WEIGHTS`:
+now {1, 0, 0, 0.15}, balanced {0.4, 0.4, 0.2, 0.25}, playoffs {0.15, 0.25, 0.6, 0.25}.
+
+**Search**: pools = top 14 by value + all my bench + partner bench with value ≥ 1; packages 1–2 per side, plus
+3-for-1 / 1-for-3 outside "now" mode; pairs with raw fairness ≥ 0.7 that keep my value ≥ 80%, closest-to-fair
+first, capped at 6000 per partner. My delta uses the mode weights; the partner's uses balanced.
+
+**Rules** (V2 config in tradesV2.ts):
+* Keep for me: team Δ ≥ 0.5 or now Δ ≥ 0.75; +0.5 on both when I receive more players than I give (my
+  fairness nets the player I drop). Giving my #1/#2 most valuable player needs Δ ≥ 2.0 (now Δ in "now"); tag "moving a star".
+* Throw-ins (value < 3) in a multi-player package must add ≥ 1.0 to the receiver's score by themselves, else the
+  package is dropped (the version without them is searched anyway); tag "throw-in: fills their QB slot".
+  Any low-value player adds at most +1.0 to the partner's Δ.
+* Players I receive with Questionable / Doubtful / Out count at 0.85 / 0.70 / 0.55 of their ppg in my deltas
+  (not in theirs); tag "injury risk".
+* Partner: (Δ ≥ −0.25 and fairness ≥ 0.85) or (fairness ≥ 1.10 and Δ ≥ −1.0). Asking for their #1/#2 player
+  also needs fairness ≥ 1.05 and Δ ≥ 0, and acceptance × 0.8; tag "asks for their star".
+* Main list ("clear wins"): acceptance ≥ 0.45 and my Δ ≥ 1.0, sorted by Δ × acceptance. `smallerEdges`: the rest
+  that pass. `nearMisses` (≤ 10): "They'd likely refuse" (partner filter, fairness ≥ 0.7, their Δ ≥ −3),
+  "Partner unlikely to accept (<pct>)" (acceptance < 0.45), "Marginal" (0 < Δ < bar with value in my favour, or a
+  star moved for too little). `summary` says why the list is short (top-3 groups, where gains come from, byes).
+* Bench upgrades: 1-for-1, my bench player (or weakest starter, never my top-2) for a partner bench player, fairness
+  to them ≥ 0.9, my season or playoff score up; ranked by my Δ; why cites ppg, trend, expected > actual, playoff byes.
+* Value exponent raised 1.15 → 1.35 (star premium); 1-QB leagues: QBs ranked below numTeams get a
+  "Backup QB … ~0 trade value" hint in their why.
