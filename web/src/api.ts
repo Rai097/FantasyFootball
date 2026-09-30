@@ -1,6 +1,6 @@
 // Typed fetch wrappers for every endpoint in docs/DESIGN.md "HTTP API contract".
 // With `?mock=1` in the page URL all calls are answered by ./mock.ts instead.
-import type { League, Position, TeamAnalysis, Trade, ValuedPlayer, WaiverTarget } from "../../server/model/types";
+import type { League, Position, Scoring, SlotKind, TeamAnalysis, Trade, ValuedPlayer, WaiverTarget } from "../../server/model/types";
 import { ApiError } from "./lib/errors";
 
 export { ApiError };
@@ -57,7 +57,53 @@ export interface WaiversResponse {
 
 export type ValueRow = VP & { ownerTeamId?: string };
 
-export type ProviderId = "demo" | "yahoo";
+export type ProviderId = "demo" | "yahoo" | "import";
+
+export type SettingsSource = "page" | "partial" | "default" | "user";
+
+export interface ImportSummary {
+  id: string;
+  name: string;
+  importedAt: string;
+  numTeams: number;
+  teams: number;
+  settingsSource: SettingsSource;
+}
+
+export interface ImportResult {
+  id: string;
+  name: string;
+  teams: { id: string; name: string; players: number }[];
+  myTeamId?: string;
+  settingsSource: SettingsSource;
+  skippedLines?: number;
+}
+
+/** Stored import as returned by GET /api/import/:id (raw rosters, editable settings). */
+export interface StoredImport {
+  id: string;
+  name: string;
+  numTeams: number;
+  slots: SlotKind[];
+  scoring: Scoring;
+  regularSeasonEnd: number;
+  finalWeek: number;
+  tradeDeadlineWeek?: number;
+  myTeamId?: string;
+  waiverPriority?: number;
+  teams: { id: string; name: string; owner?: string; players: { name: string; pos: string; team?: string }[] }[];
+  importedAt: string;
+  settingsSource: SettingsSource;
+}
+
+export interface ImportSettingsPatch {
+  scoring?: Partial<Scoring>;
+  slots?: string;
+  waiverPriority?: number | null;
+  myTeamId?: string;
+  name?: string;
+  tradeDeadlineWeek?: number | null;
+}
 
 export interface Active {
   provider: ProviderId;
@@ -74,7 +120,7 @@ export interface TradeQuery {
 
 export const MOCK = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mock") === "1";
 
-async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+async function request<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
   if (MOCK) {
     const { mockRequest } = await import("./mock");
     return mockRequest(method, path, body) as Promise<T>;
@@ -142,4 +188,12 @@ export const api = {
     request<Trade & { verdict: string }>("POST", `${base(a)}/trade/evaluate`, { team: a.team, partner, give, get }),
   waivers: (a: Active) => request<WaiversResponse>("GET", `${base(a)}/waivers${qs({ team: a.team })}`),
   values: (a: Active) => request<ValueRow[]>("GET", `${base(a)}/values${qs({ team: a.team })}`),
+
+  imports: () => request<ImportSummary[]>("GET", "/api/import"),
+  importGet: (id: string) => request<StoredImport>("GET", `/api/import/${encodeURIComponent(id)}`),
+  /** Bookmarklet JSON (parsed object) or paste mode { text, teamName, id? }. */
+  importPost: (body: unknown) => request<ImportResult>("POST", "/api/import", body),
+  importDelete: (id: string) => request<{ ok: true }>("DELETE", `/api/import/${encodeURIComponent(id)}`),
+  importSettings: (id: string, patch: ImportSettingsPatch) => request<StoredImport>("PUT", `/api/import/${encodeURIComponent(id)}/settings`, patch),
+  bookmarkletUrl: () => request<{ url: string }>("GET", "/api/import/bookmarklet.js?format=url"),
 };

@@ -349,3 +349,10 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
   .tabs { justify-content: space-between; gap: 0; }
   .tab { padding: 9px 5px; font-size: 13px; }
 }
+
+/* ---------- import ---------- */
+textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; width: 100%; resize: vertical; min-height: 120px; box-sizing: border-box; }
+.bookmarklet { display: inline-block; cursor: grab; text-decoration: none; margin: 4px 0; }
+.import-settings { border-top: 1px solid var(--border); padding-top: 12px; }
+.import-settings .filters .field { flex: 1 1 130px; }
+.banner { margin-bottom: var(--gap); }

@@ -7,7 +7,7 @@ export function loadActive(): Active | null {
   try {
     const raw = localStorage.getItem(KEY);
     const v = (raw ? JSON.parse(raw) : {}) as Partial<Active>;
-    if ((v.provider === "demo" || v.provider === "yahoo") && typeof v.id === "string" && v.id) {
+    if ((v.provider === "demo" || v.provider === "yahoo" || v.provider === "import") && typeof v.id === "string" && v.id) {
       return { provider: v.provider, id: v.id, team: typeof v.team === "string" && v.team ? v.team : undefined };
     }
   } catch {

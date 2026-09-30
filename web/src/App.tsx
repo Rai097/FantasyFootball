@@ -77,6 +77,7 @@ export function App() {
     if (!state.data) return { cls: "neutral", text: "Checking…" };
     if (active?.provider === "yahoo") return state.data.yahooConnected ? { cls: "good", text: "Yahoo connected" } : { cls: "warn", text: "Yahoo disconnected" };
     if (active?.provider === "demo") return { cls: "neutral", text: "Demo league" };
+    if (active?.provider === "import") return { cls: "neutral", text: "Imported league" };
     return state.data.yahooConnected ? { cls: "good", text: "Yahoo connected" } : { cls: "neutral", text: "Not connected" };
   }, [state.data, state.error, active]);
 
@@ -123,6 +124,16 @@ export function App() {
             }}
             onGo={() => setTab("team")}
           />
+        )}
+        {tab !== "connect" && league?.import?.settingsSource === "default" && (
+          <div className="notice warn banner">
+            This imported league uses Yahoo's <b>default</b> settings because its settings page could not be read. Check scoring and roster
+            slots on the{" "}
+            <button className="link-btn" onClick={() => setTab("connect")}>
+              Connect tab
+            </button>
+            .
+          </div>
         )}
         {tab !== "connect" && (
           <NeedLeague active={active} analysis={analysis} onConnect={() => setTab("connect")}>

@@ -4,6 +4,7 @@ import { ErrorBox, Loading } from "../components/common";
 import type { ApiError } from "../lib/errors";
 import { ago, record } from "../lib/format";
 import { toApiError, useAsync, type AsyncState } from "../lib/useAsync";
+import { ImportSection } from "./ImportSection";
 
 interface Props {
   state: AsyncState<AppState>;
@@ -41,12 +42,17 @@ export function ConnectTab({ state, active, analysis, justConnected, onChoose, o
         </section>
 
         <section className="card">
-          <h2>Yahoo Fantasy</h2>
+          <h2>Yahoo Fantasy (API)</h2>
+          <p className="muted small">
+            Yahoo now approves API apps one by one (1–2 weeks). Until then, use <a href="#import">Import from Yahoo (browser)</a> below.
+          </p>
           {state.loading && !state.data && <Loading label="Checking server…" />}
           {state.data && <YahooSection state={state.data} reloadState={state.reload} active={active} onChoose={onChoose} />}
           {state.error && !state.data && <p className="muted">Yahoo status is unavailable until the server responds.</p>}
         </section>
       </div>
+
+      <ImportSection active={active} onChoose={onChoose} onGo={onGo} onSettingsSaved={analysis.reload} />
 
       {state.data && (
         <p className="muted small">
@@ -70,11 +76,12 @@ function CurrentLeague({ active, analysis, onChoose, onGo }: { active: Active; a
     <section className="card current">
       <div className="row between wrap">
         <div>
-          <div className="eyebrow">Active league · {active.provider === "demo" ? "Demo" : "Yahoo"}</div>
+          <div className="eyebrow">Active league · {active.provider === "demo" ? "Demo" : active.provider === "import" ? "Imported from Yahoo" : "Yahoo"}</div>
           <h2 className="no-margin">{league.data?.settings.name ?? active.id}</h2>
           {league.data && (
             <div className="muted small">
-              {league.data.settings.numTeams} teams · week {league.data.settings.currentWeek} · fetched {ago(league.data.fetchedAt)}
+              {league.data.settings.numTeams} teams · week {league.data.settings.currentWeek} · {active.provider === "import" ? "imported" : "fetched"}{" "}
+              {ago(league.data.fetchedAt)}
             </div>
           )}
         </div>
@@ -117,7 +124,8 @@ function CurrentLeague({ active, analysis, onChoose, onGo }: { active: Active; a
           <select value={team} onChange={(e) => onChoose({ ...active, team: e.target.value })}>
             {teams.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.name} ({t.owner}) {record(t.record)}
+                {t.name}
+                {t.owner ? ` (${t.owner})` : ""} {record(t.record)}
                 {t.id === league.data?.myTeamId ? " · you" : ""}
               </option>
             ))}
