@@ -222,7 +222,10 @@ export interface Trade {
 
 /** GET /trades2 response. */
 export interface TradeFinderResult {
+  /** Clear wins: my team score +1.0 or more at ≥ 45% acceptance, best first (my delta × acceptance). */
   trades: Trade[];
+  /** Trades that clear the bar (+0.5 team score or +0.75 this week) but add < 1.0; collapsed in the UI. */
+  smallerEdges: Trade[];
   /** Up to 10 trades that just missed (partner would likely refuse, or marginal for me), each with `reason`. */
   nearMisses: Trade[];
   mode: "now" | "balanced" | "playoffs";
