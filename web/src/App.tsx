@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, MOCK, type Active, type Analysis } from "./api";
+import { api, MOCK, type Active, type Analysis, type ImportResult } from "./api";
 import { ErrorBox, Loading } from "./components/common";
 import { ago } from "./lib/format";
 import { loadActive, loadImportBackup, saveActive } from "./lib/storage";
@@ -81,6 +81,32 @@ export function App() {
     if (active && !active.team && analysis.data?.myTeamId) setActive({ ...active, team: analysis.data.myTeamId });
   }, [active, analysis.data, setActive]);
 
+  // Short confirmation after an import (e.g. "League updated: 2 roster changes").
+  const [toast, setToast] = useState<string>();
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(undefined), 6000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const onImported = useCallback(
+    (r: ImportResult) => {
+      // Same league id → same `active`, so reload explicitly or the old rosters stay on screen.
+      state.reload();
+      analysis.reload();
+      setTab("team");
+      const n = r.changes?.playersChanged ?? 0;
+      setToast(
+        r.updated
+          ? n
+            ? `League updated: ${n} roster change${n === 1 ? "" : "s"}`
+            : "League updated: no roster changes detected"
+          : `League imported: ${r.teams.length} team${r.teams.length === 1 ? "" : "s"}`,
+      );
+    },
+    [state, analysis, setTab],
+  );
+
   const league = analysis.data?.league;
   const week = league?.settings.currentWeek ?? state.data?.currentWeek;
 
@@ -135,6 +161,7 @@ export function App() {
               setActive(a);
             }}
             onGo={() => setTab("team")}
+            onImported={onImported}
           />
         )}
         {tab !== "connect" && league?.import?.settingsSource === "default" && (
@@ -165,6 +192,11 @@ export function App() {
           </NeedLeague>
         )}
       </main>
+      {toast && (
+        <div className="toast" role="status" onClick={() => setToast(undefined)}>
+          {toast}
+        </div>
+      )}
       <footer className="footer">
         Numbers are rest-of-season projections under your league's scoring. Tap <span className="why-btn inline">?</span> for how each one is made.
       </footer>

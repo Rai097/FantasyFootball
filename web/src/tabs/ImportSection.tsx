@@ -12,11 +12,12 @@ import { toApiError, useAsync } from "../lib/useAsync";
 interface Props {
   active: Active | null;
   onChoose: (a: Active | null) => void;
-  onGo: () => void;
+  /** Called after a successful import / re-import; the app refetches and opens My Team. */
+  onImported: (r: ImportResult) => void;
   onSettingsSaved: () => void;
 }
 
-export function ImportSection({ active, onChoose, onGo, onSettingsSaved }: Props) {
+export function ImportSection({ active, onChoose, onImported, onSettingsSaved }: Props) {
   const list = useAsync(() => api.imports(), []);
   const activeImport = active?.provider === "import" ? active.id : undefined;
 
@@ -39,8 +40,10 @@ export function ImportSection({ active, onChoose, onGo, onSettingsSaved }: Props
           activeImport={activeImport}
           onImported={(r) => {
             list.reload();
-            onChoose({ provider: "import", id: r.id, team: r.myTeamId ?? r.teams[0]?.id });
-            onGo();
+            // Re-import keeps the team the user picked; a new league starts on its detected team.
+            const team = r.updated && active?.provider === "import" && active.id === r.id && active.team && r.teams.some((t) => t.id === active.team) ? active.team : r.myTeamId ?? r.teams[0]?.id;
+            onChoose({ provider: "import", id: r.id, team });
+            onImported(r);
           }}
         />
       </div>
@@ -113,7 +116,11 @@ function PasteCard({ imports, activeImport, onImported }: { imports: ImportSumma
     setBusy(true);
     try {
       const r = await api.importPost(body);
-      await api.importGet(r.id).then(saveImportBackup, () => undefined);
+      // Replace (never merge with) this league's browser backup: the server's merged copy, else the payload.
+      removeImportBackup(r.id);
+      await api.importGet(r.id).then(saveImportBackup, () => {
+        if (isJson) saveImportBackup({ ...(body as object), id: r.id });
+      });
       if (r.skippedLines) setNote(`${r.skippedLines} line(s) were not recognised as players and were skipped.`);
       setText("");
       onImported(r);
@@ -144,6 +151,9 @@ function PasteCard({ imports, activeImport, onImported }: { imports: ImportSumma
           placeholder={'{"source":"yahoo-bookmarklet", …}\n\nor roster text, one player per line:\nPatrick Mahomes KC - QB\nJosh Allen (QB - BUF)\n=== Another Team ==='}
         />
       </label>
+      <p className="muted small no-margin">
+        <b>Re-import:</b> Pasting the same league again updates rosters and keeps your settings.
+      </p>
       {trimmed && !isJson && (
         <div className="row gap wrap">
           {!multi && (
@@ -213,6 +223,7 @@ function ImportList({
                   {l.teams} of {l.numTeams} teams · imported {ago(l.importedAt)}
                   {l.settingsSource === "default" ? " · default settings" : ""}
                 </div>
+                <ImportChangesLine id={l.id} importedAt={l.importedAt} />
               </div>
               <div className="row gap">
                 <button className={`btn small${isActive ? "" : " primary"}`} disabled={isActive} onClick={() => onChoose({ provider: "import", id: l.id })}>
@@ -240,6 +251,43 @@ function ImportList({
         })}
       </ul>
       {err && <ErrorBox error={err} />}
+    </div>
+  );
+}
+
+/** "Last import: 2 h ago · 3 roster changes since previous (show)" with the added / dropped list. */
+function ImportChangesLine({ id, importedAt }: { id: string; importedAt: string }) {
+  const ch = useAsync(() => api.importChanges(id), [id, importedAt]);
+  const [open, setOpen] = useState(false);
+  const c = ch.data;
+  return (
+    <div className="muted small">
+      Last import: {ago(importedAt)}
+      {c?.from && (
+        <>
+          {" · "}
+          {c.playersChanged} roster change{c.playersChanged === 1 ? "" : "s"} since previous
+          {c.teams.length > 0 && (
+            <>
+              {" "}
+              <button type="button" className="link-btn small" onClick={() => setOpen(!open)}>
+                ({open ? "hide" : "show"})
+              </button>
+            </>
+          )}
+        </>
+      )}
+      {open && c && (
+        <ul className="roster-changes">
+          {c.teams.map((t) => (
+            <li key={t.id}>
+              <b>{t.name}</b>
+              {t.added.length > 0 && <span className="pos"> + {t.added.join(", ")}</span>}
+              {t.dropped.length > 0 && <span className="neg"> − {t.dropped.join(", ")}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

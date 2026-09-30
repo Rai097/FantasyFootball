@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type Active, type Analysis, type AppState, type YahooLeague } from "../api";
+import { api, type Active, type Analysis, type AppState, type ImportResult, type YahooLeague } from "../api";
 import { ErrorBox, Loading } from "../components/common";
 import type { ApiError } from "../lib/errors";
 import { ago, record } from "../lib/format";
@@ -13,9 +13,11 @@ interface Props {
   justConnected: boolean;
   onChoose: (a: Active | null) => void;
   onGo: () => void;
+  /** After a successful import / re-import (the app refetches and moves to My Team). */
+  onImported: (r: ImportResult) => void;
 }
 
-export function ConnectTab({ state, active, analysis, justConnected, onChoose, onGo }: Props) {
+export function ConnectTab({ state, active, analysis, justConnected, onChoose, onGo, onImported }: Props) {
   return (
     <div className="stack">
       {justConnected && <div className="notice good">Yahoo connected. Pick your league below.</div>}
@@ -52,7 +54,7 @@ export function ConnectTab({ state, active, analysis, justConnected, onChoose, o
         </section>
       </div>
 
-      <ImportSection key={analysis.data?.league.fetchedAt ?? ""} active={active} onChoose={onChoose} onGo={onGo} onSettingsSaved={analysis.reload} />
+      <ImportSection key={analysis.data?.league.fetchedAt ?? ""} active={active} onChoose={onChoose} onImported={onImported} onSettingsSaved={analysis.reload} />
 
       {state.data && (
         <p className="muted small">

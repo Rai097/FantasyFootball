@@ -573,6 +573,39 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     assert.ok(w.json.freeAgents.length >= 10);
   });
 
+  test("re-importing the same league updates rosters in place and keeps settings", async () => {
+    const base = `/api/league/import/${id}`;
+    const put = await req("PUT", `/api/import/${id}/settings`, { scoring: { rec: 0.5 }, waiverPriority: 6, myTeamId: "5" });
+    assert.equal(put.status, 200, JSON.stringify(put.json));
+    const before = (await get(base)).json; // warms the league cache
+    const fa = (await get(`${base}/values`)).json.find((p: any) => !p.rostered && p.pos === "WR");
+    assert.ok(fa, "an unrostered WR");
+    const again = structuredClone(payload);
+    const dropped = again.teams[1].players.pop();
+    again.teams[1].players.push({ yahooId: fa.ids?.yahoo, name: fa.name, pos: fa.pos, team: fa.team });
+    const r = await post("/api/import", again);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(r.json.id, id);
+    assert.equal(r.json.updated, true);
+    assert.deepEqual(r.json.changes, { teams: 1, playersChanged: 1 });
+
+    const after = (await get(base)).json;
+    assert.ok(after.teams[1].playerIds.includes(fa.id), "new roster served (cache busted)");
+    assert.notDeepEqual(after.teams[1].playerIds, before.teams[1].playerIds);
+    assert.equal(after.settings.scoring.rec, 0.5);
+    assert.equal(after.myTeamId, "5");
+    assert.equal(after.import.waiverPriority, 6);
+    assert.equal(after.import.settingsSource, "user");
+    assert.equal((await get("/api/import")).json.filter((x: any) => x.id === id).length, 1);
+
+    const hist = (await get(`/api/import/${id}/history`)).json;
+    assert.equal(hist.length, 2);
+    assert.equal(hist[1].teams.length, 12);
+    const ch = (await get(`/api/import/${id}/changes`)).json;
+    assert.equal(ch.playersChanged, 1);
+    assert.deepEqual(ch.teams, [{ id: "2", name: again.teams[1].name, added: [fa.name], dropped: [dropped.name] }]);
+  });
+
   test("PUT settings, paste mode, delete", async () => {
     const put = await req("PUT", `/api/import/${id}/settings`, { scoring: { rec: 0 }, slots: "QB, RB x2, WR x2, TE, W/R/T, K, DEF, BN x6, IR", waiverPriority: 4, myTeamId: "2" });
     assert.equal(put.status, 200, JSON.stringify(put.json));

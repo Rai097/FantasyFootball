@@ -3,7 +3,21 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Player } from "../model/types.js";
 import { normName, normTeam } from "../data/names.js";
-import { applySettings, buildImportLeague, ImportError, mergeTeams, parseSlotList, validateImport, type StoredImport } from "./import.js";
+import {
+  appendSnapshot,
+  applySettings,
+  buildImportLeague,
+  diffSnapshots,
+  HISTORY_CAP,
+  ImportError,
+  latestChanges,
+  mergeTeams,
+  parseSlotList,
+  snapshotOf,
+  upsertImport,
+  validateImport,
+  type StoredImport,
+} from "./import.js";
 import { parseRosterText } from "./import-text.js";
 import type { PlayerFinder } from "./yahoo-parse.js";
 
@@ -148,4 +162,69 @@ test("mergeTeams replaces a team by name and appends new ones", () => {
   assert.equal(m.teams[1].id, "2");
   assert.equal(m.teams[1].players.length, 1);
   assert.equal(m.teams[2].id, "3");
+});
+
+// ------------------------------------------------------------------ re-import (upsert)
+test("upsertImport: new rosters, same id, user settings preserved, myTeamId re-resolved by name", () => {
+  const first = validateImport({ ...body(), leagueId: "1405188", settingsSource: "page" }, new Date("2026-09-20T00:00:00Z"));
+  const edited = applySettings(first, { scoring: { rec: 0.5 }, slots: "QB, RB x2, WR x3, TE, W/R/T, K, DEF, BN x5", waiverPriority: 7, myTeamId: "2", tradeDeadlineWeek: 11 });
+  // Yahoo renumbered the teams (B is now team 1) and team B dropped Chase for Mahomes.
+  const again = body();
+  again.id = "y1405188";
+  const [a, b] = again.teams;
+  a.id = "2";
+  b.id = "1";
+  b.players = b.players.filter((p) => p.name !== "Ja'Marr Chase");
+  b.players.push({ yahooId: "99999", name: "Tank Dell", pos: "WR", team: "HOU" } as (typeof b.players)[number]);
+  const incoming = validateImport({ ...again, leagueId: "1405188", settingsSource: "page", scoring: { rec: 1 }, id: "somethingelse" }, new Date("2026-09-30T00:00:00Z"));
+  const { stored, changes } = upsertImport(edited, incoming);
+  assert.equal(stored.id, first.id);
+  assert.equal(stored.importedAt, "2026-09-30T00:00:00.000Z");
+  assert.equal(stored.settingsSource, "user");
+  assert.equal(stored.scoring.rec, 0.5);
+  assert.equal(stored.slots.filter((x) => x === "WR").length, 3);
+  assert.equal(stored.waiverPriority, 7);
+  assert.equal(stored.tradeDeadlineWeek, 11);
+  assert.equal(stored.myTeamId, "1", "team B found by name under its new id");
+  assert.equal(stored.teams.find((t) => t.name === "B")!.players.some((p) => p.name === "Tank Dell"), true);
+  assert.deepEqual(changes, { teams: 1, playersChanged: 1, byTeam: [{ id: "1", name: "B", added: ["Tank Dell"], dropped: ["Ja'Marr Chase"] }] });
+});
+
+test("upsertImport takes freshly extracted settings only when the user never edited them", () => {
+  const first = validateImport({ ...body(), settingsSource: "default", scoring: undefined, slots: undefined }, new Date("2026-09-20T00:00:00Z"));
+  assert.equal(first.settingsSource, "default");
+  const fresh = validateImport({ ...body(), settingsSource: "page", scoring: { rec: 1 } });
+  const up = upsertImport({ ...first, waiverPriority: 3 }, fresh).stored;
+  assert.equal(up.settingsSource, "page");
+  assert.equal(up.scoring.rec, 1);
+  assert.equal(up.waiverPriority, 3);
+  // A payload without extracted settings keeps what was there.
+  const pageFirst = validateImport({ ...body(), settingsSource: "page", scoring: { rec: 0 } });
+  const noSettings = validateImport({ ...body(), settingsSource: "default", scoring: { rec: 1 } });
+  const kept = upsertImport(pageFirst, noSettings).stored;
+  assert.equal(kept.settingsSource, "page");
+  assert.equal(kept.scoring.rec, 0);
+  assert.deepEqual(upsertImport(pageFirst, noSettings).changes, { teams: 0, playersChanged: 0, byTeam: [] });
+});
+
+test("roster history: diff of the two latest snapshots, capped at 8", () => {
+  const s0 = validateImport(body(), new Date("2026-09-01T00:00:00Z"));
+  let h = [snapshotOf(s0)];
+  assert.equal(latestChanges(h), null);
+  for (let i = 1; i <= 10; i++) {
+    const s = validateImport(body(), new Date(Date.UTC(2026, 8, 1 + i)));
+    if (i === 10) s.teams[0].players = [s.teams[0].players[0], { name: "Josh Allen", pos: "QB", team: "BUF" }, { name: "Nobody Else", pos: "RB" }];
+    h = appendSnapshot(h, snapshotOf(s));
+  }
+  assert.equal(h.length, HISTORY_CAP);
+  assert.equal(h[0].importedAt, "2026-09-04T00:00:00.000Z");
+  const c = latestChanges(h)!;
+  assert.equal(c.to, "2026-09-11T00:00:00.000Z");
+  assert.equal(c.teams, 1);
+  assert.equal(c.playersChanged, 2, "one swap + one pure add");
+  assert.deepEqual(c.byTeam[0], { id: "1", name: "A", added: ["Josh Allen", "Nobody Else"], dropped: ["Nobody Known"] });
+  // A team missing from the new snapshot reports its players as dropped.
+  const gone = diffSnapshots(snapshotOf(s0), { ...snapshotOf(s0), teams: snapshotOf(s0).teams.slice(0, 1) });
+  assert.equal(gone.byTeam[0].name, "B");
+  assert.equal(gone.byTeam[0].dropped.length, 3);
 });

@@ -41,8 +41,31 @@ Each time you want fresh data:
    box: scoring, roster slots, your waiver priority and which team is yours.
    Click **Save settings** after any change.
 
-Importing the same league again replaces the old copy (same league, fresh
-rosters). Your edited settings are replaced by what Yahoo shows, so re-check them.
+### Updating rosters (re-import)
+
+After trades, adds and drops on Yahoo, run the bookmark again and paste the
+result the same way. **You do not need to delete the league first.** Trade
+Desk recognises the same Yahoo league (by its league number) and updates it
+in place:
+
+* Teams, rosters and the free-agent list are replaced with the fresh copy.
+* Your settings are kept: scoring, roster slots, playoff weeks, trade
+  deadline, waiver priority and which team is yours (found again by team name
+  if Yahoo renumbered the teams). If you never edited the settings and the
+  bookmark read them from Yahoo's settings page this time, the fresh values
+  are used instead.
+* All cached numbers for the league (analysis, trades, waivers, breakouts)
+  are recalculated, and you land on **My Team** with a message such as
+  "League updated: 2 roster changes" (or "no roster changes detected").
+* This browser's backup copy is replaced by the updated league.
+
+A roster change counts one move per team: a swap (one player in, one out)
+is 1 change, and so is a pure add or a pure drop. Under **Imported leagues**
+each league shows "Last import: … · N roster changes since previous"; click
+**show** for the players added and dropped per team.
+
+Trade Desk keeps the last 8 imports of each league (only the player lists,
+in `.data/import-<id>-history.json`) for this comparison.
 
 ### What the bookmark reads
 
@@ -120,7 +143,14 @@ no other team to trade with.
   forgets imports when it restarts (free hosting sleeps after ~15 idle
   minutes). When that happens this browser uploads the backup again
   automatically. On a different browser or device, import again.
-* Data is a snapshot. Re-import after trades, waivers, or when injuries change.
+* Data is a snapshot. Re-import after trades, waivers, or when injuries change
+  (see "Updating rosters" above: your settings are kept).
+* For developers: `POST /api/import` with a league already imported answers
+  `{ id, updated: true, changes: { teams, playersChanged } }`;
+  `GET /api/import/<id>/history` lists the stored snapshots
+  (`[{ importedAt, teams: [{ id, name, count }] }]`) and
+  `GET /api/import/<id>/changes` gives the added / dropped players per team
+  between the two most recent imports.
 * Limits per import: 1 MB, 20 teams, 40 players per team.
 
 ## Yahoo's terms

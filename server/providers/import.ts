@@ -223,7 +223,9 @@ const fileName = (id: string) => `import-${id}`;
 
 export async function readImport(id: string): Promise<StoredImport | null> {
   if (!isValidId(id)) return null;
-  return readJson<StoredImport>(fileName(id));
+  const s = await readJson<StoredImport>(fileName(id));
+  // import-<id>-history.json also matches import-*.json: it holds an array, not an import.
+  return s && !Array.isArray(s) && Array.isArray(s.teams) ? s : null;
 }
 
 export async function saveImport(s: StoredImport): Promise<void> {
@@ -408,4 +410,164 @@ export function newPasteImport(teams: ImportTeamRaw[], name: string, now = new D
     importedAt: now.toISOString(),
     settingsSource: "default",
   };
+}
+
+// ------------------------------------------------------------------ re-import (upsert) and history
+export const HISTORY_CAP = 8;
+
+/** One roster snapshot: player keys per team (Yahoo id, else name|pos) plus key → display name. */
+export interface ImportSnapshot {
+  importedAt: string;
+  teams: { id: string; name: string; playerIds: string[] }[];
+  names: Record<string, string>;
+}
+export interface TeamRosterChange {
+  id: string;
+  name: string;
+  added: string[];
+  dropped: string[];
+}
+export interface RosterChanges {
+  /** Teams whose roster changed. */
+  teams: number;
+  /** Roster moves: per team max(added, dropped), summed (a swap counts once). */
+  playersChanged: number;
+  byTeam: TeamRosterChange[];
+}
+
+export const playerKey = (p: ImportPlayerRaw): string => (p.yahooId ? `y${p.yahooId}` : `n${p.name.toLowerCase()}|${(p.pos || "").toUpperCase()}`);
+
+export function snapshotOf(s: StoredImport): ImportSnapshot {
+  const names: Record<string, string> = {};
+  const teams = s.teams.map((t) => {
+    const ids: string[] = [];
+    for (const p of t.players) {
+      const k = playerKey(p);
+      if (ids.includes(k)) continue;
+      ids.push(k);
+      names[k] = p.name;
+    }
+    return { id: t.id, name: t.name, playerIds: ids };
+  });
+  return { importedAt: s.importedAt, teams, names };
+}
+
+/** Pair teams of two snapshots: by name (case-insensitive) first, then by id. */
+function pairTeams<A extends { id: string; name: string }, B extends { id: string; name: string }>(prev: A[], next: B[]): Map<B, A | undefined> {
+  const out = new Map<B, A | undefined>();
+  const used = new Set<A>();
+  for (const t of next) {
+    const hit = prev.find((p) => !used.has(p) && p.name.toLowerCase() === t.name.toLowerCase());
+    if (hit) used.add(hit);
+    out.set(t, hit);
+  }
+  for (const t of next) {
+    if (out.get(t)) continue;
+    const hit = prev.find((p) => !used.has(p) && p.id === t.id);
+    if (hit) {
+      used.add(hit);
+      out.set(t, hit);
+    }
+  }
+  return out;
+}
+
+export function diffSnapshots(prev: ImportSnapshot, next: ImportSnapshot): RosterChanges {
+  const byTeam: TeamRosterChange[] = [];
+  const name = (k: string) => next.names[k] ?? prev.names[k] ?? k;
+  const pairs = pairTeams(prev.teams, next.teams);
+  const matched = new Set<unknown>();
+  for (const [t, p] of pairs) {
+    if (p) matched.add(p);
+    const before = new Set(p?.playerIds ?? []);
+    const after = new Set(t.playerIds);
+    const added = t.playerIds.filter((k) => !before.has(k)).map(name);
+    const dropped = (p?.playerIds ?? []).filter((k) => !after.has(k)).map(name);
+    if (added.length || dropped.length) byTeam.push({ id: t.id, name: t.name, added, dropped });
+  }
+  for (const p of prev.teams) if (!matched.has(p) && p.playerIds.length) byTeam.push({ id: p.id, name: p.name, added: [], dropped: p.playerIds.map(name) });
+  return { teams: byTeam.length, playersChanged: byTeam.reduce((n, t) => n + Math.max(t.added.length, t.dropped.length), 0), byTeam };
+}
+
+/** Append a snapshot, keeping the most recent `cap`. */
+export function appendSnapshot(history: ImportSnapshot[], snap: ImportSnapshot, cap = HISTORY_CAP): ImportSnapshot[] {
+  return [...history, snap].slice(-cap);
+}
+
+const historyFile = (id: string) => `import-${id}-history`;
+
+export async function readHistory(id: string): Promise<ImportSnapshot[]> {
+  if (!isValidId(id)) return [];
+  const h = await readJson<ImportSnapshot[]>(historyFile(id));
+  return Array.isArray(h) ? h : [];
+}
+
+/** Record `s` in its history file (seeding it with `previous` when the file is empty). */
+export async function recordHistory(s: StoredImport, previous?: StoredImport | null): Promise<ImportSnapshot[]> {
+  let h = await readHistory(s.id);
+  if (!h.length && previous) h = [snapshotOf(previous)];
+  h = appendSnapshot(h, snapshotOf(s));
+  await writeJson(historyFile(s.id), h);
+  return h;
+}
+
+export async function deleteHistory(id: string): Promise<void> {
+  if (isValidId(id)) await removeJson(historyFile(id));
+}
+
+/** Changes between the two most recent snapshots (null when there is only one). */
+export function latestChanges(h: ImportSnapshot[]): (RosterChanges & { from: string; to: string }) | null {
+  if (h.length < 2) return null;
+  const [prev, next] = h.slice(-2);
+  return { from: prev.importedAt, to: next.importedAt, ...diffSnapshots(prev, next) };
+}
+
+/** The stored import this payload updates: same Yahoo league id, else same import id. */
+export async function findExistingImport(incoming: StoredImport): Promise<StoredImport | null> {
+  if (incoming.leagueId) {
+    const same = await readImport(incoming.id);
+    if (same?.leagueId === incoming.leagueId) return same;
+    for (const x of await listImports()) {
+      const s = await readImport(x.id);
+      if (s?.leagueId === incoming.leagueId) return s;
+    }
+  }
+  return readImport(incoming.id);
+}
+
+/**
+ * Re-import of a league already stored: fresh teams / rosters / free agents,
+ * same import id, and the user's settings kept. Settings come from the new
+ * payload only when the user never edited them and the payload read them from Yahoo.
+ */
+export function upsertImport(existing: StoredImport, incoming: StoredImport): { stored: StoredImport; changes: RosterChanges } {
+  const takeNewSettings = existing.settingsSource !== "user" && (incoming.settingsSource === "page" || incoming.settingsSource === "partial");
+  const base = takeNewSettings ? incoming : existing;
+  const next: StoredImport = {
+    id: existing.id,
+    name: existing.settingsSource === "user" ? existing.name : incoming.name,
+    numTeams: Math.max(incoming.teams.length, incoming.numTeams),
+    slots: base.slots,
+    scoring: { ...base.scoring },
+    regularSeasonEnd: base.regularSeasonEnd,
+    finalWeek: base.finalWeek,
+    teams: incoming.teams,
+    importedAt: incoming.importedAt,
+    settingsSource: takeNewSettings ? incoming.settingsSource : existing.settingsSource,
+  };
+  if (base.tradeDeadlineWeek) next.tradeDeadlineWeek = base.tradeDeadlineWeek;
+  const wp = existing.waiverPriority ?? incoming.waiverPriority;
+  if (wp) next.waiverPriority = wp;
+  // My team: the previously chosen team, found by name when Yahoo's team ids changed.
+  const oldMine = existing.myTeamId ? existing.teams.find((t) => t.id === existing.myTeamId) : undefined;
+  const mine =
+    (oldMine && incoming.teams.find((t) => t.name.toLowerCase() === oldMine.name.toLowerCase())?.id) ??
+    (existing.myTeamId && incoming.teams.some((t) => t.id === existing.myTeamId) ? existing.myTeamId : undefined) ??
+    incoming.myTeamId;
+  if (mine) next.myTeamId = mine;
+  if (incoming.freeAgents) next.freeAgents = incoming.freeAgents;
+  const leagueId = incoming.leagueId ?? existing.leagueId;
+  if (leagueId) next.leagueId = leagueId;
+  if (incoming.diagnostics) next.diagnostics = incoming.diagnostics;
+  return { stored: next, changes: diffSnapshots(snapshotOf(existing), snapshotOf(next)) };
 }

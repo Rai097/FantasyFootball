@@ -9,16 +9,23 @@ import { buildDemoLeague, demoFreeAgents } from "./providers/demo.js";
 import {
   applySettings,
   buildImportLeague,
+  deleteHistory,
   deleteImport,
+  findExistingImport,
   importFreeAgents,
   isValidId,
+  latestChanges,
   listImports,
   MAX_BYTES,
   mergeTeams,
   newPasteImport,
+  readHistory,
   readImport,
+  recordHistory,
   saveImport,
+  upsertImport,
   validateImport,
+  type RosterChanges,
   type StoredImport,
 } from "./providers/import.js";
 import { parseRosterText } from "./providers/import-text.js";
@@ -53,7 +60,7 @@ interface Entry<T> {
   value: Promise<T>;
 }
 const cache = new Map<string, Entry<unknown>>();
-function cached<T>(key: string, refresh: boolean, make: () => Promise<T>): Promise<T> {
+export function cached<T>(key: string, refresh: boolean, make: () => Promise<T>): Promise<T> {
   const hit = cache.get(key) as Entry<T> | undefined;
   if (!refresh && hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
   const value = make();
@@ -66,6 +73,15 @@ function cached<T>(key: string, refresh: boolean, make: () => Promise<T>): Promi
 function invalidate(prefix: string) {
   for (const k of cache.keys()) if (k.startsWith(prefix)) cache.delete(k);
 }
+/**
+ * Drop every cached result for one league. All league caches (ctx = league + analysis,
+ * trades, trades2, bench, waivers, breakouts) are keyed `${provider}:${id}:…`.
+ */
+export function invalidateLeague(provider: string, id: string): void {
+  invalidate(`${provider}:${id}:`);
+}
+/** Cached keys (tests). */
+export const cacheKeys = (): string[] => [...cache.keys()];
 
 // ---------------------------------------------------------------- league loading
 type Provider = "demo" | "yahoo" | "import";
@@ -473,6 +489,8 @@ apiRouter.post(
     if (!body || typeof body !== "object") throw new HttpError(400, "Expected a JSON body", "Send the bookmarklet JSON, or { text, teamName } for pasted roster text.");
     if (JSON.stringify(body).length > MAX_BYTES) throw new HttpError(413, "Import is larger than 1 MB");
     let stored: StoredImport;
+    let previous: StoredImport | null = null;
+    let changes: RosterChanges | undefined;
     let skippedLines: number | undefined;
     if (typeof body.text === "string") {
       const teamName = typeof body.teamName === "string" && body.teamName.trim() ? body.teamName.trim().slice(0, 80) : "My Team";
@@ -480,24 +498,54 @@ apiRouter.post(
       skippedLines = parsed.skippedLines;
       if (!parsed.teams.length) throw new HttpError(400, "No players found in the pasted text", 'Each player line should look like "Patrick Mahomes KC - QB" or "Josh Allen (QB - BUF)".');
       const targetId = typeof body.id === "string" && body.id ? body.id : undefined;
-      const existing = targetId && parsed.teams.length === 1 ? await readImport(targetId) : null;
-      if (targetId && parsed.teams.length === 1 && !existing) throw new HttpError(404, `No imported league "${targetId}"`);
-      stored = existing ? mergeTeams(existing, parsed.teams) : newPasteImport(parsed.teams, parsed.teams.length > 1 ? "Pasted league" : `${teamName} (pasted)`);
+      previous = targetId && parsed.teams.length === 1 ? await readImport(targetId) : null;
+      if (targetId && parsed.teams.length === 1 && !previous) throw new HttpError(404, `No imported league "${targetId}"`);
+      stored = previous ? mergeTeams(previous, parsed.teams) : newPasteImport(parsed.teams, parsed.teams.length > 1 ? "Pasted league" : `${teamName} (pasted)`);
       for (const t of stored.teams) if (t.players.length > 40) throw new HttpError(400, `Team "${t.name}" has ${t.players.length} players; the limit is 40`);
       stored.importedAt = new Date().toISOString();
     } else {
-      stored = validateImport(body);
+      const incoming = validateImport(body);
+      // Same Yahoo league again: update rosters in place, keep the user's settings.
+      previous = await findExistingImport(incoming);
+      if (previous) ({ stored, changes } = upsertImport(previous, { ...incoming, importedAt: new Date().toISOString() }));
+      else stored = incoming;
     }
     await saveImport(stored);
-    invalidate(`import:${stored.id}:`);
+    await recordHistory(stored, previous);
+    invalidateLeague("import", stored.id);
     res.json({
       id: stored.id,
       name: stored.name,
       teams: stored.teams.map((t) => ({ id: t.id, name: t.name, players: t.players.length })),
       myTeamId: stored.myTeamId,
       settingsSource: stored.settingsSource,
+      importedAt: stored.importedAt,
+      updated: !!previous,
+      ...(changes ? { changes: { teams: changes.teams, playersChanged: changes.playersChanged } } : {}),
       ...(skippedLines !== undefined ? { skippedLines } : {}),
     });
+  }),
+);
+
+apiRouter.get(
+  "/api/import/:id/history",
+  h(async (req, res) => {
+    await mustReadImport(req.params.id);
+    const h = await readHistory(req.params.id);
+    res.json(h.map((x) => ({ importedAt: x.importedAt, teams: x.teams.map((t) => ({ id: t.id, name: t.name, count: t.playerIds.length })) })));
+  }),
+);
+
+apiRouter.get(
+  "/api/import/:id/changes",
+  h(async (req, res) => {
+    const s = await mustReadImport(req.params.id);
+    const c = latestChanges(await readHistory(req.params.id));
+    res.json(
+      c
+        ? { from: c.from, to: c.to, teamsChanged: c.teams, playersChanged: c.playersChanged, teams: c.byTeam }
+        : { from: null, to: s.importedAt, teamsChanged: 0, playersChanged: 0, teams: [] },
+    );
   }),
 );
 
@@ -514,7 +562,7 @@ apiRouter.put(
   h(async (req, res) => {
     const next = applySettings(await mustReadImport(req.params.id), req.body);
     await saveImport(next);
-    invalidate(`import:${next.id}:`);
+    invalidateLeague("import", next.id);
     const { diagnostics: _d, ...rest } = next;
     res.json(rest);
   }),
@@ -524,7 +572,8 @@ apiRouter.delete(
   "/api/import/:id",
   h(async (req, res) => {
     if (!isValidId(req.params.id) || !(await deleteImport(req.params.id))) throw new HttpError(404, `No imported league "${req.params.id}"`);
-    invalidate(`import:${req.params.id}:`);
+    await deleteHistory(req.params.id);
+    invalidateLeague("import", req.params.id);
     res.json({ ok: true });
   }),
 );

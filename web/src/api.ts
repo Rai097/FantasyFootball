@@ -82,6 +82,19 @@ export interface ImportResult {
   myTeamId?: string;
   settingsSource: SettingsSource;
   skippedLines?: number;
+  importedAt?: string;
+  /** true when the same league was imported before and was updated in place (settings kept). */
+  updated?: boolean;
+  changes?: { teams: number; playersChanged: number };
+}
+
+/** GET /api/import/:id/changes: roster moves between the two most recent imports. */
+export interface ImportChanges {
+  from: string | null;
+  to: string;
+  teamsChanged: number;
+  playersChanged: number;
+  teams: { id: string; name: string; added: string[]; dropped: string[] }[];
 }
 
 /** Stored import as returned by GET /api/import/:id (raw rosters, editable settings). */
@@ -209,6 +222,7 @@ export const api = {
   importGet: (id: string) => request<StoredImport>("GET", `/api/import/${encodeURIComponent(id)}`),
   /** Bookmarklet JSON (parsed object) or paste mode { text, teamName, id? }. */
   importPost: (body: unknown) => request<ImportResult>("POST", "/api/import", body),
+  importChanges: (id: string) => request<ImportChanges>("GET", `/api/import/${encodeURIComponent(id)}/changes`),
   importDelete: (id: string) => request<{ ok: true }>("DELETE", `/api/import/${encodeURIComponent(id)}`),
   importSettings: (id: string, patch: ImportSettingsPatch) => request<StoredImport>("PUT", `/api/import/${encodeURIComponent(id)}/settings`, patch),
   bookmarkletUrl: () => request<{ url: string }>("GET", "/api/import/bookmarklet.js?format=url"),

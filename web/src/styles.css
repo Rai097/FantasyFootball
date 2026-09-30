@@ -421,3 +421,8 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .price { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
 .strong-summary { font-weight: 600; font-size: 15px; }
 .empty-finder h3 { margin-top: 8px; }
+
+/* Import confirmation toast + roster changes list (Connect → Imported leagues) */
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50; max-width: calc(100vw - 32px); background: var(--card-2); color: var(--text); border: 1px solid rgba(62, 207, 122, 0.5); border-radius: var(--radius); padding: 10px 16px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); cursor: pointer; }
+.roster-changes { margin: 4px 0 0; padding-left: 18px; }
+.roster-changes li { margin: 2px 0; }
