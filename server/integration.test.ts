@@ -303,6 +303,51 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.equal(empty.status, 400);
   });
 
+  test("GET trades2 (v2 shape) and bench-upgrades", async () => {
+    const t0 = Date.now();
+    const { status, json } = await get(`${L}/trades2`);
+    const ms = Date.now() - t0;
+    assert.equal(status, 200);
+    assertClean(json, "trades2");
+    assert.ok(Array.isArray(json.trades) && json.trades.length > 0, "no trades");
+    assert.ok(Array.isArray(json.smallerEdges));
+    assert.ok(Array.isArray(json.nearMisses) && json.nearMisses.length <= 10);
+    assert.equal(json.mode, "balanced");
+    assert.equal(typeof json.summary, "string");
+    assert.ok(json.summary.length > 20);
+    assert.ok(ms < 15_000, `trades2 took ${ms}ms`);
+    for (const t of json.trades) {
+      for (const k of ["scoreDelta", "nowDelta", "seasonDelta", "playoffDelta", "depthDelta"]) {
+        assert.equal(typeof t.me[k], "number", `${t.key}: me.${k}`);
+        assert.equal(typeof t.them[k], "number", `${t.key}: them.${k}`);
+      }
+      assert.ok(t.acceptance >= 0.45, `${t.key}: acceptance ${t.acceptance}`);
+      assert.ok(t.me.scoreDelta >= 0.95, `${t.key}: me.scoreDelta ${t.me.scoreDelta}`);
+      assert.ok(t.me.gives.length <= 3 && t.them.gives.length <= 3);
+      for (const p of [...t.me.gives, ...t.them.gives]) assert.ok(p.pos !== "K" && p.pos !== "DEF");
+    }
+    for (const t of json.nearMisses) assert.equal(typeof t.reason, "string");
+    for (const mode of ["now", "playoffs"]) {
+      const r = await get(`${L}/trades2?mode=${mode}&maxGive=1&maxGet=1`);
+      assert.equal(r.status, 200);
+      assert.equal(r.json.mode, mode);
+      for (const t of r.json.trades) assert.ok(t.me.gives.length === 1 && t.them.gives.length === 1);
+    }
+    const bad = await get(`${L}/trades2?partner=nope`);
+    assert.equal(bad.status, 400);
+
+    const b = await get(`${L}/bench-upgrades`);
+    assert.equal(b.status, 200);
+    assertClean(b.json, "bench-upgrades");
+    assert.ok(Array.isArray(b.json) && b.json.length <= 15);
+    for (const t of b.json) {
+      assert.equal(t.me.gives.length, 1);
+      assert.equal(t.them.gives.length, 1);
+      assert.ok(t.fairness >= 0.9);
+      assert.ok(t.why.length > 0);
+    }
+  });
+
   test("GET waivers", async () => {
     const { status, json } = await get(`${L}/waivers`);
     assert.equal(status, 200);

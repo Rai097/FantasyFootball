@@ -24,9 +24,11 @@ import {
 import { parseRosterText } from "./providers/import-text.js";
 import { bookmarkletCode, bookmarkletUrl } from "./providers/import-bookmarklet.js";
 import { analyzeLeague, type LeagueContext } from "./model/analysis.js";
-import { evaluateTrade, findTrades } from "./model/trades.js";
+import { findTrades } from "./model/trades.js";
+import { evaluateTradeV2, findBenchUpgrades, findTradesV2 } from "./model/tradesV2.js";
+import { parseMode } from "./model/rosterScore.js";
 import { rankWaivers, type FreeAgentInput } from "./model/waivers.js";
-import type { League, Player, Trade, ValuedPlayer } from "./model/types.js";
+import type { League, Player, Trade, TradeFinderResult, ValuedPlayer } from "./model/types.js";
 
 const CACHE_TTL_MS = 60_000;
 
@@ -258,18 +260,53 @@ apiRouter.get(
   }),
 );
 
+// Trade Finder v2: roster-score trades + smaller edges + near misses + summary (UI uses this).
+apiRouter.get(
+  "/api/league/:provider/:id/trades2",
+  h(async (req, res) => {
+    const provider = parseProvider(req.params.provider);
+    const l = await loadContext(provider, req.params.id, isRefresh(req));
+    const team = teamParam(req, l.league);
+    const partner = req.query.partner ? String(req.query.partner) : undefined;
+    if (partner && !l.league.teams.some((t) => t.id === partner)) throw new HttpError(400, `Unknown partner "${partner}"`);
+    if (partner === team) throw new HttpError(400, "Partner must be a different team");
+    const wantPos = req.query.wantPos ? String(req.query.wantPos).toUpperCase() : undefined;
+    const maxGive = Number(req.query.maxGive ?? 2) || 2;
+    const maxGet = Number(req.query.maxGet ?? 2) || 2;
+    const mode = parseMode(req.query.mode);
+    const key = `${provider}:${req.params.id}:trades2:${team}:${mode}:${partner ?? ""}:${wantPos ?? ""}:${maxGive}:${maxGet}`;
+    const result = await cached<TradeFinderResult>(key, false, async () => {
+      const { simulated: _simulated, ...r } = findTradesV2(l.ctx, team, { partnerId: partner, wantPos, maxGive, maxGet, mode });
+      return r;
+    });
+    res.json(result);
+  }),
+);
+
+apiRouter.get(
+  "/api/league/:provider/:id/bench-upgrades",
+  h(async (req, res) => {
+    const provider = parseProvider(req.params.provider);
+    const l = await loadContext(provider, req.params.id, isRefresh(req));
+    const team = teamParam(req, l.league);
+    const mode = parseMode(req.query.mode);
+    const key = `${provider}:${req.params.id}:bench:${team}:${mode}`;
+    res.json(await cached<Trade[]>(key, false, async () => findBenchUpgrades(l.ctx, team, { mode })));
+  }),
+);
+
 apiRouter.post(
   "/api/league/:provider/:id/trade/evaluate",
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
     const l = await loadContext(provider, req.params.id, false);
-    const body = (req.body ?? {}) as { team?: string; partner?: string; give?: unknown; get?: unknown };
+    const body = (req.body ?? {}) as { team?: string; partner?: string; give?: unknown; get?: unknown; mode?: unknown };
     const team = teamParam(req, l.league);
     const partner = body.partner ? String(body.partner) : undefined;
     if (!partner || !l.league.teams.some((t) => t.id === partner)) throw new HttpError(400, `Unknown partner "${partner ?? ""}"`, "Pass { team, partner, give: string[], get: string[] }.");
     if (partner === team) throw new HttpError(400, "Partner must be a different team");
     const ids = (x: unknown) => (Array.isArray(x) ? x.map(String) : []);
-    res.json(evaluateTrade(l.ctx, team, partner, ids(body.give), ids(body.get)));
+    res.json(evaluateTradeV2(l.ctx, team, partner, ids(body.give), ids(body.get), parseMode(body.mode ?? req.query.mode)));
   }),
 );
 
