@@ -187,6 +187,20 @@ export interface TradeSide {
   lineupChanges: string[]; // human-readable slot changes
   /** Players this side must release to stay at roster size (lowest-value bench). */
   drops?: ValuedPlayer[];
+  /**
+   * Trade Finder v2 roster-score deltas (1 decimal). scoreDelta is the mode-weighted
+   * total for me and the "balanced" total for the partner. Set by trades2, bench-upgrades
+   * and evaluate; optional so older clients / fixtures stay valid.
+   */
+  scoreDelta?: number;
+  /** Optimal-lineup ppg change this week (= lineupDelta, 1 decimal). */
+  nowDelta?: number;
+  /** Mean weekly lineup points over all remaining weeks (byes / injuries applied). */
+  seasonDelta?: number;
+  /** Mean weekly lineup points over the playoff weeks. */
+  playoffDelta?: number;
+  /** Top bench players' ppg above replacement. */
+  depthDelta?: number;
 }
 
 export interface Trade {
@@ -200,6 +214,20 @@ export interface Trade {
   tags: string[];
   /** Explanation of deltas, fairness and acceptance. */
   why: string;
+  /** Trade Finder v2 mode the trade was scored under. */
+  mode?: "now" | "balanced" | "playoffs";
+  /** Near misses only: why the trade did not make the main list. */
+  reason?: string;
+}
+
+/** GET /trades2 response. */
+export interface TradeFinderResult {
+  trades: Trade[];
+  /** Up to 10 trades that just missed (partner would likely refuse, or marginal for me), each with `reason`. */
+  nearMisses: Trade[];
+  mode: "now" | "balanced" | "playoffs";
+  /** One or two sentences on what the finder found and why the list is short when it is. */
+  summary: string;
 }
 
 export interface WaiverTarget extends ValuedPlayer {

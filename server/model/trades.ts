@@ -37,8 +37,8 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const sum = (ps: ValuedPlayer[]) => ps.reduce((a, p) => a + p.value, 0);
-const fmtSigned = (x: number) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(1)}`;
-const tradeable = (p: ValuedPlayer) => p.pos !== "K" && p.pos !== "DEF" && p.remainingGames > 0;
+export const fmtSigned = (x: number) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(1)}`;
+export const tradeable = (p: ValuedPlayer) => p.pos !== "K" && p.pos !== "DEF" && p.remainingGames > 0;
 
 export function fairnessOf(valueReceived: number, valueGiven: number): number {
   return (valueReceived + FAIRNESS_CUSHION) / (valueGiven + FAIRNESS_CUSHION);
@@ -54,11 +54,11 @@ export function partnerWouldConsider(fairness: number, themDelta: number): boole
 }
 
 /** Why the partner would refuse (empty string when partnerWouldConsider is true). */
-export function partnerRefusalReason(fairness: number, themDelta: number): string {
+export function partnerRefusalReason(fairness: number, themDelta: number, what = "lineup"): string {
   if (partnerWouldConsider(fairness, themDelta)) return "";
   if (fairness < 0.85) return `value to them ${fairness.toFixed(2)} < 0.85`;
-  if (themDelta < -1.0) return `their lineup ${fmtSigned(themDelta)} ppg`;
-  return `their lineup ${fmtSigned(themDelta)} ppg without a value premium (fairness ${fairness.toFixed(2)} < 1.10)`;
+  if (themDelta < -1.0) return `their ${what} ${fmtSigned(themDelta)} ppg`;
+  return `their ${what} ${fmtSigned(themDelta)} ppg without a value premium (fairness ${fairness.toFixed(2)} < 1.10)`;
 }
 
 /** Players carrying a package: value ≥ 5 or ≥ 10% of the package value. */
@@ -74,7 +74,7 @@ export function piecesJustified(pkg: ValuedPlayer[], receiverLineup: LineupResul
 }
 
 /** Roster after a trade, dropping lowest-value bench players (never incoming or IR) to keep size. */
-function applyTrade(slots: League["settings"]["slots"], roster: ValuedPlayer[], gives: ValuedPlayer[], gets: ValuedPlayer[], irIds: Set<string>) {
+export function applyTrade(slots: League["settings"]["slots"], roster: ValuedPlayer[], gives: ValuedPlayer[], gets: ValuedPlayer[], irIds: Set<string>) {
   const giveIds = new Set(gives.map((p) => p.id));
   let after = roster.filter((p) => !giveIds.has(p.id)).concat(gets);
   let lu = optimalLineup(slots, after);
@@ -96,7 +96,7 @@ function applyTrade(slots: League["settings"]["slots"], roster: ValuedPlayer[], 
   return { roster: after, lineup: lu, drops };
 }
 
-function lineupChanges(before: LineupResult, after: LineupResult): string[] {
+export function lineupChanges(before: LineupResult, after: LineupResult): string[] {
   const labels = slotLabels(before.lineup);
   const out: string[] = [];
   before.lineup.forEach((l, i) => {
@@ -161,7 +161,7 @@ function simulate(
   };
 }
 
-const names = (ps: ValuedPlayer[]) => ps.map((p) => p.name).join(" + ") || "nothing";
+export const names = (ps: ValuedPlayer[]) => ps.map((p) => p.name).join(" + ") || "nothing";
 
 function buildTrade(ctx: TradeContext, sim: Sim, myAnalysis: TeamAnalysis | undefined, partner: Team): Trade {
   const acceptance = acceptanceOf(sim.fairness, sim.them.lineupDelta);
@@ -207,7 +207,7 @@ function buildTrade(ctx: TradeContext, sim: Sim, myAnalysis: TeamAnalysis | unde
   };
 }
 
-function* combos<T>(items: T[], maxSize: number): Generator<T[]> {
+export function* combos<T>(items: T[], maxSize: number): Generator<T[]> {
   const n = items.length;
   for (let i = 0; i < n; i++) {
     yield [items[i]];
@@ -218,7 +218,7 @@ function* combos<T>(items: T[], maxSize: number): Generator<T[]> {
   }
 }
 
-function teamState(ctx: TradeContext, teamId: string) {
+export function teamState(ctx: TradeContext, teamId: string) {
   const team = ctx.league.teams.find((t) => t.id === teamId);
   if (!team) throw Object.assign(new Error(`Unknown team ${teamId}`), { status: 404 });
   const roster = rosterOf(team, ctx.players);
@@ -306,11 +306,21 @@ export function findTrades(ctx: TradeContext, myTeamId: string, opts: TradeOptio
  * some value (VORP-based value understates players who replace sub-replacement
  * starters), mirroring the finder's rule that my total value may fall ≤ 20%.
  */
-export function verdictFor(myDelta: number, myFairness: number, myValueDrop = 0, partnerRefusal = ""): string {
-  const mine = myVerdict(myDelta, myFairness, myValueDrop);
+export function verdictFor(myDelta: number, myFairness: number, myValueDrop = 0, partnerRefusal = "", myScoreDelta?: number): string {
+  const mine = myScoreDelta === undefined ? myVerdict(myDelta, myFairness, myValueDrop) : myVerdictV2(myDelta, myScoreDelta, myFairness, myValueDrop);
   // Never tell me to accept something the partner would not plausibly consider.
   if (partnerRefusal && mine !== "Decline") return `They won't accept (${partnerRefusal})`;
   return mine;
+}
+
+/** v2: "Accept" when the roster score rises ≥ 0.5 or this week's lineup ≥ 0.75 (the finder's own bar). */
+export const MIN_SCORE_DELTA = 0.5;
+function myVerdictV2(nowDelta: number, scoreDelta: number, myFairness: number, myValueDrop: number): string {
+  const best = Math.max(nowDelta, scoreDelta);
+  const big = nowDelta >= MIN_MY_DELTA || scoreDelta >= MIN_SCORE_DELTA;
+  if (myValueDrop <= MAX_MY_VALUE_DROP && ((big && myFairness >= 0.5) || (best >= 0 && scoreDelta >= 0 && myFairness >= 1.15))) return "Accept";
+  if ((best >= 0.25 && myFairness >= 0.5) || (best >= -0.25 && myFairness >= 1.0)) return "Fair, lean accept";
+  return "Decline";
 }
 
 function myVerdict(myDelta: number, myFairness: number, myValueDrop: number): string {
