@@ -6,6 +6,7 @@ import { api, type Active, type ImportResult, type ImportSummary, type StoredImp
 import { ErrorBox, Loading } from "../components/common";
 import { ApiError } from "../lib/errors";
 import { ago } from "../lib/format";
+import { removeImportBackup, saveImportBackup } from "../lib/storage";
 import { toApiError, useAsync } from "../lib/useAsync";
 
 interface Props {
@@ -112,6 +113,7 @@ function PasteCard({ imports, activeImport, onImported }: { imports: ImportSumma
     setBusy(true);
     try {
       const r = await api.importPost(body);
+      await api.importGet(r.id).then(saveImportBackup, () => undefined);
       if (r.skippedLines) setNote(`${r.skippedLines} line(s) were not recognised as players and were skipped.`);
       setText("");
       onImported(r);
@@ -222,6 +224,7 @@ function ImportList({
                     if (!confirm(`Delete "${l.name}" from Trade Desk? (Nothing changes on Yahoo.)`)) return;
                     try {
                       await api.importDelete(l.id);
+                      removeImportBackup(l.id);
                       if (isActive) onChoose(null);
                       reload();
                     } catch (e) {
@@ -299,6 +302,7 @@ function SettingsForm({ s, active, onChoose, onSaved }: { s: StoredImport; activ
             waiverPriority: wp.trim() ? Number(wp) : null,
             myTeamId: myTeam,
           });
+          saveImportBackup(n);
           onChoose({ ...active, team: myTeam });
           setSaved(true);
           onSaved(n);

@@ -52,7 +52,7 @@ export function ConnectTab({ state, active, analysis, justConnected, onChoose, o
         </section>
       </div>
 
-      <ImportSection active={active} onChoose={onChoose} onGo={onGo} onSettingsSaved={analysis.reload} />
+      <ImportSection key={analysis.data?.league.fetchedAt ?? ""} active={active} onChoose={onChoose} onGo={onGo} onSettingsSaved={analysis.reload} />
 
       {state.data && (
         <p className="muted small">
@@ -66,7 +66,8 @@ export function ConnectTab({ state, active, analysis, justConnected, onChoose, o
 
 function CurrentLeague({ active, analysis, onChoose, onGo }: { active: Active; analysis: AsyncState<Analysis>; onChoose: Props["onChoose"]; onGo: () => void }) {
   // The team list comes from the League itself so the picker works even when analysis fails.
-  const league = useAsync(() => api.league(active), [active.provider, active.id]);
+  // fetchedAt dep: reload after an imported league is restored from the browser backup (App.tsx).
+  const league = useAsync(() => api.league(active), [active.provider, active.id, analysis.data?.league.fetchedAt]);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshErr, setRefreshErr] = useState<ApiError>();
   const teams = league.data?.teams ?? [];

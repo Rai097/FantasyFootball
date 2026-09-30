@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { api, MOCK, type Active, type Analysis } from "./api";
 import { ErrorBox, Loading } from "./components/common";
 import { ago } from "./lib/format";
-import { loadActive, saveActive } from "./lib/storage";
+import { loadActive, loadImportBackup, saveActive } from "./lib/storage";
 import { useAsync, type AsyncState } from "./lib/useAsync";
 import { ConnectTab } from "./tabs/ConnectTab";
 import { MyTeamTab } from "./tabs/MyTeamTab";
@@ -63,6 +63,16 @@ export function App() {
   const state = useAsync(() => api.state(), []);
   const activeKey = active ? `${active.provider}/${active.id}/${active.team ?? ""}` : "";
   const analysis = useAsync(() => (active ? api.analysis(active) : null), [activeKey]);
+
+  // Imported leagues live in the server's .data/, which hosted servers lose on restart:
+  // re-upload this browser's backup once when the server no longer knows the league.
+  const [restored, setRestored] = useState<string>();
+  useEffect(() => {
+    if (active?.provider !== "import" || analysis.error?.status !== 404 || restored === active.id) return;
+    const backup = loadImportBackup(active.id);
+    setRestored(active.id);
+    if (backup) api.importPost(backup).then(() => analysis.reload(), () => undefined);
+  }, [active, analysis.error, analysis, restored]);
 
   // Adopt the server's idea of "my team" when none was chosen yet.
   useEffect(() => {

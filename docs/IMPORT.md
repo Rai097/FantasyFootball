@@ -116,6 +116,10 @@ no other team to trade with.
 * **Players that could not be matched** to Trade Desk's player database
   (rare: brand-new signings, unusual name spellings) are listed at the top of
   My Team and left out of the numbers.
+* Your browser keeps a backup copy of each import. The hosted Trade Desk
+  forgets imports when it restarts (free hosting sleeps after ~15 idle
+  minutes). When that happens this browser uploads the backup again
+  automatically. On a different browser or device, import again.
 * Data is a snapshot. Re-import after trades, waivers, or when injuries change.
 * Limits per import: 1 MB, 20 teams, 40 players per team.
 

@@ -25,3 +25,33 @@ export function saveActive(a: Active | null): void {
     /* ignore */
   }
 }
+
+// Browser-side backup of imported leagues. Hosted servers (e.g. Render's free
+// plan) lose .data/ on restart, so the UI re-uploads the backup when the server
+// answers 404 for an imported league.
+const importKey = (id: string) => `tradeDesk.import.${id}`;
+
+export function saveImportBackup(s: { id: string }): void {
+  try {
+    localStorage.setItem(importKey(s.id), JSON.stringify(s));
+  } catch {
+    /* quota or storage unavailable: the server copy still works */
+  }
+}
+
+export function loadImportBackup(id: string): unknown | null {
+  try {
+    const raw = localStorage.getItem(importKey(id));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function removeImportBackup(id: string): void {
+  try {
+    localStorage.removeItem(importKey(id));
+  } catch {
+    /* ignore */
+  }
+}
