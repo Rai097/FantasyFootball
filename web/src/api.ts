@@ -1,6 +1,9 @@
 // Typed fetch wrappers for every endpoint in docs/DESIGN.md "HTTP API contract".
 // With `?mock=1` in the page URL all calls are answered by ./mock.ts instead.
-import type { League, Position, Scoring, SlotKind, TeamAnalysis, Trade, ValuedPlayer, WaiverTarget } from "../../server/model/types";
+import type { League, Position, Scoring, SlotKind, TeamAnalysis, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "../../server/model/types";
+
+export type TradeMode = "now" | "balanced" | "playoffs";
+export type { TradeFinderResult };
 import { ApiError } from "./lib/errors";
 
 export { ApiError };
@@ -112,6 +115,7 @@ export interface Active {
 }
 
 export interface TradeQuery {
+  mode?: TradeMode;
   partner?: string;
   wantPos?: string;
   maxGive?: number;
@@ -184,6 +188,13 @@ export const api = {
       "GET",
       `${base(a)}/trades${qs({ team: a.team, partner: q.partner, wantPos: q.wantPos, maxGive: q.maxGive ?? 2, maxGet: q.maxGet ?? 2 })}`,
     ),
+  /** Trade Finder v2: clear wins, smaller edges, near misses and a summary line. */
+  trades2: (a: Active, q: TradeQuery = {}) =>
+    request<TradeFinderResult>(
+      "GET",
+      `${base(a)}/trades2${qs({ team: a.team, mode: q.mode ?? "balanced", partner: q.partner, wantPos: q.wantPos, maxGive: q.maxGive ?? 2, maxGet: q.maxGet ?? 2 })}`,
+    ),
+  benchUpgrades: (a: Active, mode: TradeMode = "balanced") => request<Trade[]>("GET", `${base(a)}/bench-upgrades${qs({ team: a.team, mode })}`),
   evaluateTrade: (a: Active, partner: string, give: string[], get: string[]) =>
     request<Trade & { verdict: string }>("POST", `${base(a)}/trade/evaluate`, { team: a.team, partner, give, get }),
   waivers: (a: Active) => request<WaiversResponse>("GET", `${base(a)}/waivers${qs({ team: a.team })}`),

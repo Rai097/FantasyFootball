@@ -2,7 +2,7 @@
 // Shapes follow docs/DESIGN.md "HTTP API contract" exactly; the numbers are
 // invented (roughly plausible half-PPR values), and the model maths here is a
 // simplified stand-in for server/model/* so the screens behave realistically.
-import type { League, LineupSlot, Position, SlotKind, TeamAnalysis, Team, Trade, TradeSide, WaiverTarget } from "../../server/model/types";
+import type { League, LineupSlot, Position, SlotKind, TeamAnalysis, Team, Trade, TradeFinderResult, TradeSide, WaiverTarget } from "../../server/model/types";
 import type { Analysis, AppState, PlayerLite, ValueRow, VP, WaiversResponse, YahooLeague } from "./api";
 import { ApiError } from "./lib/errors";
 
@@ -455,7 +455,7 @@ function route(method: string, url: URL, body: unknown): unknown {
   if (method === "GET" && p === "/api/import") return [];
   if (method === "GET" && p === "/api/import/bookmarklet.js") return { url: "javascript:alert('Mock mode: run the real server to get the bookmarklet.')" };
   if (p.startsWith("/api/import")) throw new ApiError("Importing is not available in mock mode", 400, "Run the real server (npm run dev) to import a league.");
-  const m = p.match(/^\/api\/league\/(demo|yahoo|import)\/([^/]+)(?:\/(analysis|trades|trade\/evaluate|waivers|values))?$/);
+  const m = p.match(/^\/api\/league\/(demo|yahoo|import)\/([^/]+)(?:\/(analysis|trades|trades2|bench-upgrades|trade\/evaluate|waivers|values))?$/);
   if (!m) throw new ApiError(`Mock has no route for ${method} ${p}`, 404);
   const [, provider, id, sub] = m;
   if (provider === "yahoo" && !yahooConnected) throw new ApiError("Not connected to Yahoo", 401, "Reconnect on the Connect tab.");
@@ -470,6 +470,21 @@ function route(method: string, url: URL, body: unknown): unknown {
     const n = (k: string) => Number(url.searchParams.get(k) ?? 2) || 2;
     return findTrades(team, url.searchParams.get("partner") || undefined, url.searchParams.get("wantPos") || undefined, n("maxGive"), n("maxGet"));
   }
+  if (sub === "trades2") {
+    const n = (k: string) => Number(url.searchParams.get(k) ?? 2) || 2;
+    const all = findTrades(team, url.searchParams.get("partner") || undefined, url.searchParams.get("wantPos") || undefined, n("maxGive"), n("maxGet"));
+    const mode = (url.searchParams.get("mode") || "balanced") as TradeFinderResult["mode"];
+    const trades = all.filter((t) => t.me.lineupDelta >= 1);
+    const smallerEdges = all.filter((t) => t.me.lineupDelta < 1);
+    return {
+      trades,
+      smallerEdges,
+      nearMisses: [],
+      mode,
+      summary: `Mock data: ${trades.length} clear wins by this week's lineup only (the real server also scores season, playoffs and depth).`,
+    } satisfies TradeFinderResult;
+  }
+  if (sub === "bench-upgrades") return [];
   if (sub === "trade/evaluate") {
     const b = body as { team?: string; partner: string; give: string[]; get: string[] };
     if (!b?.partner || !b.give?.length || !b.get?.length) throw new ApiError("Pick a partner and at least one player each side", 400);

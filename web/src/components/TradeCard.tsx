@@ -33,14 +33,35 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
         <Side title="You get" players={them.gives} total={them.valueGiven} />
       </div>
 
-      <div className="trade-metrics">
-        <Metric label="Your lineup" value={me.lineupDelta} unit=" ppg" />
-        <Metric label="Their lineup" value={them.lineupDelta} unit=" ppg" />
-        <div className="metric" title="Value they receive ÷ value they give. Above 1.0 means they win on paper.">
-          <span className="metric-label">Fairness</span>
-          <span className="metric-value">{f1(trade.fairness)}</span>
+      {trade.reason && <div className="notice warn small">{trade.reason}</div>}
+
+      {me.scoreDelta != null ? (
+        <>
+          <div className="delta-row" aria-label="Your team, by component">
+            <SmallDelta label="Now" value={me.nowDelta} title="This week's optimal lineup, ppg" />
+            <SmallDelta label="Season" value={me.seasonDelta} title="Average weekly lineup over the rest of the season, with byes and injuries" />
+            <SmallDelta label="Playoffs" value={me.playoffDelta} title="Average lineup in the fantasy playoff weeks" />
+            <SmallDelta label="Depth" value={me.depthDelta} title="Top bench players' ppg above replacement" />
+          </div>
+          <div className="trade-metrics">
+            <Metric label="Your team" value={me.scoreDelta} unit="" title={`Weighted roster score for the ${trade.mode ?? "balanced"} mode`} />
+            <Metric label="Their team" value={them.scoreDelta ?? them.lineupDelta} unit="" title="Their roster score in balanced terms (what their manager cares about)" />
+            <div className="metric" title="Value they receive ÷ value they give. Above 1.0 means they win on paper.">
+              <span className="metric-label">Fairness</span>
+              <span className="metric-value">{f1(trade.fairness)}</span>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="trade-metrics">
+          <Metric label="Your lineup" value={me.lineupDelta} unit=" ppg" />
+          <Metric label="Their lineup" value={them.lineupDelta} unit=" ppg" />
+          <div className="metric" title="Value they receive ÷ value they give. Above 1.0 means they win on paper.">
+            <span className="metric-label">Fairness</span>
+            <span className="metric-value">{f1(trade.fairness)}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {trade.tags.length > 0 && (
         <div className="tags">
@@ -107,9 +128,18 @@ function Side({ title, players, total, drops }: { title: string; players: VP[]; 
   );
 }
 
-function Metric({ label, value, unit }: { label: string; value: number; unit: string }) {
+function SmallDelta({ label, value, title }: { label: string; value?: number; title: string }) {
   return (
-    <div className="metric">
+    <div className="small-delta" title={title}>
+      <span className="metric-label">{label}</span>
+      <span className={`delta ${deltaClass(value)}`}>{signed(value)}</span>
+    </div>
+  );
+}
+
+function Metric({ label, value, unit, title }: { label: string; value: number; unit: string; title?: string }) {
+  return (
+    <div className="metric" title={title}>
       <span className="metric-label">{label}</span>
       <span className={`metric-value delta ${deltaClass(value)}`}>
         {signed(value)}
