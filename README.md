@@ -35,12 +35,15 @@ Click **Use demo league** on the Connect tab to explore with a realistic
 12-team league drafted from current rankings. To use your own league, follow
 [docs/YAHOO_SETUP.md](docs/YAHOO_SETUP.md) (about five minutes: create a free
 Yahoo developer app, paste two values into `.env`, approve read access once).
+Waiting for Yahoo to approve your API app? Use **Import from Yahoo (browser)**:
+a bookmark copies your league from Yahoo's web pages and you paste it into
+Trade Desk. See [docs/IMPORT.md](docs/IMPORT.md).
 
 ## What it does
 
 | Tab | What you get |
 |---|---|
-| **Connect** | Yahoo login, league and team picker, or the demo league. |
+| **Connect** | Yahoo login, league and team picker, the demo league, or import from Yahoo's web pages ([docs/IMPORT.md](docs/IMPORT.md)). |
 | **My Team** | Optimal lineup, position-by-position strength ranked against the league, needs and surplus, bye and injury exposure, power rankings. |
 | **Trade Finder** | 1-for-1, 2-for-1 and 2-for-2 packages against every opponent, kept only when your lineup improves *and* the other side gets a deal they would plausibly accept. Each card explains both lineups' changes. Includes a builder to evaluate any offer. |
 | **Waivers** | Free agents ranked by how much they improve your lineup versus your most droppable player, with trend and injury flags, and a claim / wait / optional / pass call that accounts for your rolling-list priority (or FAAB). |

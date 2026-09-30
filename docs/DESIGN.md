@@ -204,7 +204,7 @@ POST /auth/yahoo/code  {code}         → { ok: true }       (exchange oob code)
 GET  /auth/yahoo/callback?code=       → redirects to /?connected=1 (redirect-uri mode)
 POST /auth/yahoo/disconnect           → { ok: true }
 GET  /api/yahoo/leagues               → [{ key, name, season, numTeams, currentWeek, myTeamKey? }]
-GET  /api/league/:provider/:id        → League   (provider = demo | yahoo; demo id = seed; ?refresh=1)
+GET  /api/league/:provider/:id        → League   (provider = demo | yahoo | import; demo id = seed; ?refresh=1)
 GET  /api/league/:provider/:id/analysis?team=ID
        → { league, players: Record<id, ValuedPlayer>, teams: TeamAnalysis[], replacement: Record<pos, number>, myTeamId }
 GET  /api/league/:provider/:id/trades?team=ID&partner=&wantPos=&maxGive=2&maxGet=2 → Trade[]
@@ -213,6 +213,30 @@ GET  /api/league/:provider/:id/waivers?team=ID → { freeAgents: WaiverTarget[],
        WaiverTarget = ValuedPlayer & { gain: number, benchGain: number, drop: ValuedPlayer|null, trend: number, recommendation: "claim"|"wait"|"optional"|"pass", why: string, onWaivers: boolean, percentOwned?: number }
 GET  /api/league/:provider/:id/values?team=ID  → ValuedPlayer[] sorted by value, rostered flag { ...ValuedPlayer, ownerTeamId?: string }
 ```
+
+Import provider (docs/IMPORT.md; leagues copied from Yahoo's web pages, no API):
+
+```
+POST   /api/import                    body = bookmarklet JSON { id?, name, numTeams, slots, scoring, regularSeasonEnd, finalWeek,
+                                        tradeDeadlineWeek?, myTeamId?, waiverPriority?, settingsSource?, teams: [{ id, name, owner?,
+                                        players: [{ yahooId?, name, pos, team?, status?, slot? }] }], freeAgents?, importedAt }
+                                      or paste mode { text, teamName?, id? } → { id, name, teams, myTeamId, settingsSource, skippedLines? }
+                                      limits: 1 MB, 20 teams, 40 players/team
+GET    /api/import                    → [{ id, name, importedAt, numTeams, teams, settingsSource }]
+GET    /api/import/:id                → stored import (raw rosters + settings)
+PUT    /api/import/:id/settings       { scoring?: Partial<Scoring>, slots?: "QB, WR x2, W/R/T, BN x6", waiverPriority?, myTeamId?, name?, tradeDeadlineWeek? }
+DELETE /api/import/:id                → { ok: true }
+GET    /api/import/bookmarklet.js     → minified bookmarklet (?format=url → { url: "javascript:…" })
+GET    /api/docs/import               → docs/IMPORT.md as text
+```
+
+Stored in `.data/import-<id>.json` (server/providers/import.ts). Players are
+resolved with `db.find` on every load; unmatched names go to `Team.unmatched`;
+Yahoo injury tags are applied to player copies (`playerOverrides`). Free agents
+= the imported list, else every ranked unrostered player. `League.import`
+carries `settingsSource` ("page" | "partial" | "default" | "user"); the UI warns on "default".
+The bookmarklet (web/src/import/bookmarklet.ts) shares its pure HTML parsing
+(web/src/import/yahooHtml.ts) with node tests; the server bundles it with esbuild.
 
 `ValuedPlayer` (types.ts) gains `why: string` and `trend: number`.
 Web reads `myTeamId` from the analysis response and stores the active
