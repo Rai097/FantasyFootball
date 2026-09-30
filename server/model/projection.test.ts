@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CONSENSUS_WEIGHT, curveAt, injuryKind, replacementRanks, smooth, valuePlayers, WEIGHTS } from "./projection.js";
+import { CONSENSUS_WEIGHT, CONVEXITY, curveAt, injuryKind, replacementRanks, smooth, valuePlayers, WEIGHTS } from "./projection.js";
 import { league, line, rawPlayer, team } from "./testkit.js";
 import type { Player, WeekLine } from "./types.js";
 
@@ -174,4 +174,25 @@ test("consensus anchor: ECR overall #3 with a cold start still lands in the top 
   assert.match(c.why, /consensus #3 \(implies [\d.]+, 35%\) pulls to/);
   assert.equal(ranked[0].value, 100, "rescaled so the max is 100");
   assert.equal(CONSENSUS_WEIGHT, 0.35);
+});
+
+test("star premium: value exponent 1.35 (half the surplus is worth ~39%, not 45%)", () => {
+  assert.equal(CONVEXITY, 1.35);
+  // 12-team 1-QB league, RBs only, no ECR: value = 100·(surplus/max)^1.35.
+  const v = valuePlayers(league(Array.from({ length: 12 }, (_, i) => team(String(i + 1), []))), field);
+  const repl = v.replacement.RB;
+  const surplus = (id: string) => v.players.get(id)!.vorp * v.players.get(id)!.remainingGames;
+  const top = v.players.get("rb1")!;
+  assert.equal(top.value, 100);
+  for (const id of ["rb3", "rb6"]) {
+    const expected = 100 * Math.pow(surplus(id) / surplus("rb1"), 1.35);
+    assert.ok(Math.abs(v.players.get(id)!.value - expected) < 0.06, `${id}: ${v.players.get(id)!.value} vs ${expected} (repl ${repl})`);
+  }
+});
+
+test("backup QBs in 1-QB leagues carry a '~0 trade value' hint", () => {
+  const qbs = Array.from({ length: 20 }, (_, i) => ({ ...steadyRb(`qb${i + 1}`, 25 - i, 3, 17), pos: "QB" as const }));
+  const v = valuePlayers(league(Array.from({ length: 12 }, (_, i) => team(String(i + 1), []))), qbs);
+  assert.match(v.players.get("qb16")!.why, /Backup QB in a 1-QB league: ~0 trade value/);
+  assert.doesNotMatch(v.players.get("qb3")!.why, /Backup QB/);
 });
