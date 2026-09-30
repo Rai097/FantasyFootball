@@ -1,5 +1,34 @@
 # Connecting your Yahoo Fantasy league
 
+> **Read this first (September 2026).** Since July 22, 2026 Yahoo only serves
+> the Fantasy Sports API to apps it has approved. An unapproved app can log in
+> and receive a token, but every API call, even public ones, returns
+> `403 This application is not authorized to perform this action`. Ticking
+> "Fantasy Sports - Read" on the app is no longer enough. You must:
+>
+> 1. Create the app as described below (you need its Client ID).
+> 2. Apply at <https://sports.yahoo.com/developer/access/> (form: name,
+>    business title, email, phone, business name and address, product name,
+>    company description, website, intended use case, expected users, Client
+>    ID, notes). Personal or single-league use is an accepted category; say so
+>    explicitly. Yahoo reviews every submission and closes vague ones, so be
+>    concrete. No turnaround time is published.
+> 3. When Yahoo sends the API Access and Use Agreement, sign it, then confirm
+>    your Client ID at <https://sports.yahoo.com/developer/application-confirmation/>.
+>    Access is provisioned after that.
+>
+> Until approval arrives, use the demo league. The app needs no changes once
+> the Client ID is approved. Background: yfpy issue #84,
+> <https://github.com/uberfastman/yfpy/issues/84>.
+>
+> **Draft use-case text** (edit the bracketed parts):
+> *"Personal, non-commercial fantasy football assistant for my own team in a
+> single private league (league ID [1405188]). The app reads league settings,
+> rosters, standings and free agents for that one league to suggest trades
+> and waiver pickups to me. Read-only; no data is stored beyond a 15-minute
+> cache on my own server; one user (me). Product name: Trade Desk. Hosted at
+> [https://fantasy-trade-desk.onrender.com], password protected."*
+
 Fantasy Trade Desk reads your league (settings, scoring, rosters, standings,
 free agents) straight from Yahoo's Fantasy Sports API. It only ever **reads** —
 it can't make moves for you. Setup takes about five minutes and only has to be

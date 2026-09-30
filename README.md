@@ -80,6 +80,8 @@ All free and keyless, refreshed automatically by their maintainers:
 
 ## Troubleshooting
 
+* **Yahoo returns 403 "not authorized" on everything**: since July 2026 Yahoo requires app approval for the Fantasy API. See the top of [docs/YAHOO_SETUP.md](docs/YAHOO_SETUP.md).
+
 * **Stale numbers**: delete `.cache/` to force a data refresh.
 * **Yahoo says reconnect / 401**: delete `.data/yahoo-tokens.json` and connect again.
 * **Yahoo 999**: rate limited; wait a few minutes. The app caches league imports for 15 minutes to avoid this.
