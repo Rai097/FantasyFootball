@@ -47,10 +47,6 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
           <Metric label="Your lineup" value={me.seasonDelta ?? 0} unit=" /wk" title="Your weekly lineup points over the rest of the season (byes and injuries included)" />
           <Metric label="Their lineup" value={them.seasonDelta ?? 0} unit=" /wk" title="Their weekly lineup points over the rest of the season, by our projections" />
           <Metric label="Your team" value={me.scoreDelta ?? 0} unit="" title={`Weighted roster score for the ${trade.mode ?? "balanced"} mode (now / season / playoffs / depth)`} />
-          <div className="metric" title="Market package value they receive ÷ what they give (best + 0.85·2nd + 0.70·3rd, net of any player they must drop)">
-            <span className="metric-label">To them</span>
-            <span className="metric-value">{signed(trade.fairnessPct ?? 0)}%</span>
-          </div>
         </div>
       ) : me.scoreDelta != null ? (
         <>

@@ -422,10 +422,13 @@ function byeNotes(S: LeagueSettings, j: Judged3, myAfter: LineupResult): string[
 function tradePitch(j: Judged3, their: TeamV3): string {
   const w = their.weakest;
   const deal = `my ${names(j.give)} for your ${names(j.get)}`;
-  const gains = `you gain ${fmtSigned(j.theirLineup)} pts/week in your lineup, I gain ${fmtSigned(j.myParts.season)}`;
+  const Deal = `${deal[0].toUpperCase()}${deal.slice(1)}`;
+  const theirs = r1(j.theirLineup);
+  const mine = r1(j.myParts.season);
+  const gains = theirs > 0 ? `you gain ${fmtSigned(theirs)} pts/week in your lineup, I gain ${fmtSigned(mine)}` : `your lineup holds steady and I gain ${fmtSigned(mine)} pts/week`;
   if (w && j.fixesWorst) return `Your ${w.slot} slot is your weakest; ${deal} — ${gains}.`;
-  if (j.fairness >= 1 + V3.fairBand) return `${deal[0].toUpperCase()}${deal.slice(1)} — you win on value (${fmtSigned((j.fairness - 1) * 100)}% by market) and ${gains}.`;
-  return `${deal[0].toUpperCase()}${deal.slice(1)} — fair by market value; ${gains}.`;
+  if (j.fairness >= 1 + V3.fairBand) return `${Deal} — you win on value (+${Math.round((j.fairness - 1) * 100)}% by market) and ${gains}.`;
+  return `${Deal} — fair by market value; ${gains}.`;
 }
 
 function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, mode: TradeMode): Trade {

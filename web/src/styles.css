@@ -407,11 +407,15 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 /* ---- Trade finder v3: fairness band, pitch, notes, partners */
 .band { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--card-2); }
 .band-fair { background: var(--pos-bg); border-color: rgba(62, 207, 122, 0.4); color: var(--pos); }
-.band-slightly-favors-them, .band-slightly-favors-you { background: var(--warn-bg); border-color: rgba(245, 184, 65, 0.4); color: var(--warn); }
-.band-favors-them, .band-favors-you { background: var(--neg-bg); border-color: rgba(255, 107, 107, 0.4); color: var(--neg); }
+.band-slightly-favors-them, .band-slightly-favors-you, .band-favors-them { background: var(--warn-bg); border-color: rgba(245, 184, 65, 0.4); color: var(--warn); }
+.band-favors-you { background: var(--neg-bg); border-color: rgba(255, 107, 107, 0.4); color: var(--neg); }
 .pitch { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; background: var(--bg-2); border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin: 10px 0; font-size: 13px; }
 .pitch-text { font-style: italic; min-width: 0; overflow-wrap: anywhere; }
 .trade-notes { margin: 8px 0 0; padding-left: 18px; }
 .tag.tag-good { background: var(--pos-bg); border-color: rgba(62, 207, 122, 0.4); }
 .tag.tag-warn { background: var(--warn-bg); border-color: rgba(245, 184, 65, 0.4); }
 .partner-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.tier-title { margin: 4px 0 2px; }
+.tier-sub { margin: 0; }
+.cheap-toggle { cursor: pointer; white-space: nowrap; }
+.price { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
