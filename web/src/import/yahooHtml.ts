@@ -168,7 +168,7 @@ export function teamNameCandidates(html: string): string[] {
   return out;
 }
 
-const GENERIC_NAME = /^(yahoo|fantasy|football|nfl|roster|my team|team|league|players?|home)\b|fantasy football|yahoo sports/i;
+const GENERIC_NAME = /^(yahoo!?( sports)?|(yahoo )?fantasy( football| sports)?|football|nfl|roster|my team|team|league|players?|home|matchups?)$|fantasy football|yahoo!? sports/i;
 
 /** First candidate that does not look like a generic page heading. */
 export function pickTeamName(cands: string[]): string | undefined {

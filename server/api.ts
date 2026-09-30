@@ -1,4 +1,6 @@
 // HTTP route handlers (thin). Contract: docs/DESIGN.md "HTTP API contract".
+import fs from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { getPlayerDb, type PlayerDb } from "./data/players.js";
 import { getNflState } from "./data/nfl.js";
@@ -335,6 +337,14 @@ apiRouter.get(
   h(async (req, res) => {
     if (req.query.format === "url") return res.json({ url: await bookmarkletUrl() });
     res.type("application/javascript").set("Cache-Control", "no-cache").send(await bookmarkletCode());
+  }),
+);
+
+const IMPORT_DOC = fileURLToPath(new URL("../docs/IMPORT.md", import.meta.url));
+apiRouter.get(
+  "/api/docs/import",
+  h(async (_req, res) => {
+    res.type("text/plain; charset=utf-8").send(await fs.readFile(IMPORT_DOC, "utf8"));
   }),
 );
 

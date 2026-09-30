@@ -39,6 +39,13 @@ test("roster page: players, positions, teams, status, slots, de-duplication", ()
   assert.ok(r.diag.sampleRows.length > 0);
 });
 
+test("team names starting with 'Team' are kept; generic headings are skipped", () => {
+  const r = parsePlayersHtml(`<title>Team Kofi | Sunday Funday | Yahoo! Sports</title><a href="/nfl/players/1">A B</a> KC - QB`);
+  assert.equal(r.teamName, "Team Kofi");
+  const g = parsePlayersHtml(`<title>Yahoo Fantasy Football</title><h1>Fantasy Football</h1><h2>Flea Flickers</h2><a href="/nfl/players/1">A B</a> KC - QB`);
+  assert.equal(g.teamName, "Flea Flickers");
+});
+
 test("my team id from navigation", () => {
   assert.equal(parseMyTeamId(html("yahoo-web-roster.html"), "1405188"), "7");
   assert.equal(parseMyTeamId("<a href='/f1/1/3'>Team 3</a>", "1"), undefined);
