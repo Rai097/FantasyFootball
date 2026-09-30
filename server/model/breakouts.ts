@@ -16,7 +16,13 @@ import { score } from "./scoring.js";
 import { injuryKind } from "./projection.js";
 
 export const BREAKOUT_POS: Position[] = ["RB", "WR", "TE"];
-export const WEIGHTS = { roleTrend: 0.3, oppTrend: 0.25, gap: 0.15, situation: 0.2, cheap: 0.1 } as const;
+export const WEIGHTS = { roleTrend: 0.25, oppTrend: 0.25, oppLevel: 0.2, gap: 0.15, situation: 0.15 } as const;
+/** "Rising starters": expected pts/g over the last 2 weeks at least this (RB/WR 7, TE 4.5) or latest snaps ≥ 50%. */
+export const RISING = { expPts: { RB: 7, WR: 7, TE: 4.5 } as Partial<Record<Position, number>>, snaps: 0.5 };
+/** A player ahead who fell under 15% snaps last week after ≥ 50% before most likely left the game hurt (Jefferson wk 3: 100% → 12%). */
+export const LEFT_EARLY = { last: 0.15, before: 0.5 };
+/** Snaps overrule the depth chart when the player out-snaps someone listed ahead of him by this much. */
+export const CHART_OVERRULE = 0.15;
 /** Already a weekly starter: at least this snap share AND this actual ppg (league scoring). */
 export const ESTABLISHED = { snaps: 0.75, ppg: 14 };
 /** Experts already rank him a weekly RB1 / WR1 / TE1 (positional ECR at or better than this). */
@@ -52,7 +58,10 @@ export interface BreakoutInput {
   /** Waiver-module rows for free agents (used in the FA "ask"). */
   waivers?: Map<string, Pick<WaiverTarget, "recommendation" | "drop">>;
   pos?: "RB" | "WR" | "TE" | "all";
+  /** Per tier. */
   limit?: number;
+  /** Only players with market value < 15 (our value < 12 without a market). */
+  cheapOnly?: boolean;
 }
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
@@ -137,6 +146,8 @@ export function isPathStatus(status: string | undefined): boolean {
 export interface Situation {
   depth?: number;
   depthLabel?: string;
+  /** Depth-chart slot when snaps overruled it ("TE4"). */
+  chartSays?: string;
   ahead: BreakoutAhead[];
   tags: string[];
   /** 0 / 0.5 / 1 */
@@ -156,26 +167,49 @@ const snapsNow = (p: ValuedPlayer) => {
  * Depth-chart slot, who is ahead (with injury + snap trend), and role tags.
  * `teammates` = every valued player at the same NFL team and position (including `p`).
  */
+/** Earlier-weeks mean and latest share; `leftEarly` = latest < 15% after ≥ 50% before. */
+function snapShape(t: ValuedPlayer): { now: number; before: number; leftEarly: boolean; role: number; trend: number } {
+  const sh = snapSeries(t).shares;
+  const now = sh.length ? sh[sh.length - 1] : 0;
+  const before = sh.length > 1 ? mean(sh.slice(0, -1)) : now;
+  const leftEarly = sh.length > 1 && now < LEFT_EARLY.last && before >= LEFT_EARLY.before;
+  // Role for ordering: latest share, except a left-early game keeps his usual share.
+  return { now, before, leftEarly, role: leftEarly ? before : now, trend: lastVsEarlier(sh) };
+}
+
 export function situationOf(p: ValuedPlayer, teammates: ValuedPlayer[], depth: DepthLike | null | undefined, m: Pick<RoleMetrics, "roleNow" | "roleTrend">): Situation {
   const byId = new Map(teammates.map((t) => [t.id, t]));
-  let order: string[];
+  const shape = new Map(teammates.map((t) => [t.id, snapShape(t)]));
+  const role = (id: string) => shape.get(id)?.role ?? 0;
+  const snapOrder = [...teammates]
+    .sort((a, b) => role(b.id) - role(a.id) || (a.ecrPos ?? 999) - (b.ecrPos ?? 999) || a.id.localeCompare(b.id))
+    .map((t) => t.id);
   const chart = depth?.byTeamPos.get(`${p.team}|${p.pos}`);
-  if (chart && chart.includes(p.id)) order = chart;
-  else order = [...teammates].sort((a, b) => snapsNow(b) - snapsNow(a) || (a.ecrPos ?? 999) - (b.ecrPos ?? 999) || a.id.localeCompare(b.id)).map((t) => t.id);
+  let order = snapOrder;
+  let chartSays: string | undefined;
+  if (chart && chart.includes(p.id)) {
+    const ci = chart.indexOf(p.id);
+    // Trust snaps when he clearly out-snaps someone the chart lists ahead of him.
+    const overruled = chart.slice(0, ci).some((id) => byId.has(id) && m.roleNow - role(id) >= CHART_OVERRULE);
+    if (overruled) {
+      if (snapOrder.indexOf(p.id) !== ci) chartSays = `${p.pos}${ci + 1}`;
+    } else order = chart;
+  }
   const idx = order.indexOf(p.id);
   const d = idx >= 0 ? idx + 1 : undefined;
   const aheadIds = idx > 0 ? order.slice(Math.max(0, idx - 3), idx) : [];
   const ahead: BreakoutAhead[] = aheadIds.map((id, i) => {
     const a = byId.get(id);
-    const { shares } = a ? snapSeries(a) : { shares: [] as number[] };
+    const sh = shape.get(id);
     return {
       id,
       name: a?.name ?? id,
       depth: Math.max(1, idx - aheadIds.length + i + 1),
       status: a?.injury?.status,
       detail: a?.injury?.detail,
-      snapTrend: r2(lastVsEarlier(shares)),
-      snapsNow: shares.length ? r2(shares[shares.length - 1]) : undefined,
+      snapTrend: r2(sh?.trend ?? 0),
+      snapsNow: sh ? r2(sh.now) : undefined,
+      leftEarly: sh?.leftEarly || undefined,
     };
   });
 
@@ -184,11 +218,13 @@ export function situationOf(p: ValuedPlayer, teammates: ValuedPlayer[], depth: D
   // Only the player(s) directly ahead open a path: the next one for RB / TE, the next two for WR.
   const near = ahead.slice(p.pos === "WR" ? -2 : -1);
   const hurt = near.find((a) => isPathStatus(a.status));
-  const slipping = near.find((a) => a.snapTrend <= SLIP);
+  const leftEarly = near.find((a) => a.leftEarly && a !== hurt);
+  const slipping = near.find((a) => a.snapTrend <= SLIP && !a.leftEarly);
   const who = (a: BreakoutAhead) => ((a.depth ?? 99) <= (p.pos === "WR" ? 3 : 1) ? "starter" : "ahead");
   if (hurt) tags.push(`${who(hurt)} hurt`);
   if (slipping && slipping !== hurt) tags.push(`${who(slipping)} slipping`);
-  // Promotion: first on the chart now, but a part-timer in every earlier week (< 50% snaps) and rising.
+  if (leftEarly) tags.push("left early / injury?");
+  // Promotion: first now, but a part-timer in every earlier week (< 50% snaps) and rising.
   const earlier = snapSeries(p).shares.slice(0, -1);
   const promoted = d === 1 && earlier.length > 0 && Math.max(...earlier) < 0.5 && m.roleTrend >= 0.1;
   if (promoted) tags.push(`promoted to ${p.pos}1`);
@@ -197,17 +233,17 @@ export function situationOf(p: ValuedPlayer, teammates: ValuedPlayer[], depth: D
   if (p.pos === "RB") {
     const lead = ahead[ahead.length - 1];
     const leadP = lead ? byId.get(lead.id) : undefined;
-    if (d === 2 && leadP && (snapsNow(leadP) >= 0.55 || (leadP.ecrPos ?? 999) <= 24)) tags.push("handcuff");
-    if (m.roleNow >= 0.4 && teammates.some((t) => t.id !== p.id && snapsNow(t) >= 0.4)) tags.push("committee");
+    if (d === 2 && leadP && (role(leadP.id) >= 0.55 || (leadP.ecrPos ?? 999) <= 24)) tags.push("handcuff");
+    if (m.roleNow >= 0.4 && teammates.some((t) => t.id !== p.id && (shape.get(t.id)?.now ?? 0) >= 0.4)) tags.push("committee");
   } else if (p.pos === "WR") {
     if (d === 3 && m.roleTrend >= 0.05) tags.push("WR3 rising");
   } else if (p.pos === "TE") {
     if (d !== undefined && d >= 2 && (m.roleTrend >= 0.05 || m.roleNow >= 0.4)) tags.push("TE1 in waiting");
   }
-  if (!bonus && tags.some((t) => ["handcuff", "committee", "WR3 rising", "TE1 in waiting"].includes(t))) bonus = 0.5;
+  if (!bonus && (leftEarly || tags.some((t) => ["handcuff", "committee", "WR3 rising", "TE1 in waiting"].includes(t)))) bonus = 0.5;
 
-  const cite = hurt ?? slipping ?? ahead[ahead.length - 1];
-  return { depth: d, depthLabel: d ? `${p.pos}${d}` : undefined, ahead, tags, bonus, cite, pathOpen: !!(hurt || slipping || promoted) };
+  const cite = hurt ?? slipping ?? leftEarly ?? ahead[ahead.length - 1];
+  return { depth: d, depthLabel: d ? `${p.pos}${d}` : undefined, chartSays, ahead, tags, bonus, cite, pathOpen: !!(hurt || slipping || promoted) };
 }
 
 /** Cheapest bench offer from my team for a target of value v (one player, else two). */
@@ -230,15 +266,20 @@ const fmtTrail = (xs: number[], f: (x: number) => string, n = 4) => xs.slice(-n)
 
 function aheadText(a: BreakoutAhead): string {
   if (isPathStatus(a.status)) return `${a.name} (${a.status}${a.detail ? `, ${a.detail.toLowerCase()}` : ""})`;
+  if (a.leftEarly) return `${a.name} (${Math.round((a.snapsNow ?? 0) * 100)}% snaps last week: left early / injury?)`;
   if (a.snapTrend <= SLIP) return `${a.name} (snaps ${a.snapTrend >= 0 ? "+" : "−"}${Math.abs(Math.round(a.snapTrend * 100))} pts)`;
   return a.name;
 }
 
 export function thesisOf(p: ValuedPlayer, m: RoleMetrics, sit: Situation, price: { value: number; market?: number }): string {
+  // Price is shown separately (not scored) but kept in the sentence for context.
   const parts: string[] = [];
-  if (sit.tags.some((t) => t.startsWith("promoted"))) parts.push(`Now ${p.pos}1 on the depth chart`);
-  else if (sit.depthLabel && sit.cite) parts.push(`${sit.depthLabel} behind ${aheadText(sit.cite)}`);
-  else if (sit.depthLabel) parts.push(sit.depthLabel);
+  if (sit.tags.some((t) => t.startsWith("promoted"))) parts.push(sit.chartSays ? `Now ${p.pos}1 by snaps (depth chart says ${sit.chartSays})` : `Now ${p.pos}1 on the depth chart`);
+  else {
+    const label = sit.depthLabel && sit.chartSays ? `${sit.depthLabel} by snaps (depth chart says ${sit.chartSays})` : sit.depthLabel;
+    if (label && sit.cite) parts.push(`${label} behind ${aheadText(sit.cite)}`);
+    else if (label) parts.push(label);
+  }
   if (m.snaps.length) parts.push(`snaps ${fmtTrail(m.snaps, pct)}`);
   if (m.touches && m.touches.some((x) => x > 0)) parts.push(`${p.pos === "RB" ? "touch opps" : "targets"} ${fmtTrail(m.touches, (x) => String(x))}`);
   parts.push(`${p.ppgExp26.toFixed(1)} expected vs ${p.ppg26.toFixed(1)} actual ppg`);
@@ -297,23 +338,33 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
     cands.push({ p, m, sit, cheap, market: mv });
   }
 
-  const nRole = normalizer(cands.map((c) => c.m.roleTrend));
-  const nOpp = normalizer(cands.map((c) => c.m.oppTrend));
-  const nGap = normalizer(cands.map((c) => c.m.gap));
+  // Normalise within position (RB, WR and TE usage live on different scales).
+  const byPosNorm = (f: (c: Cand) => number) => {
+    const m = new Map<Position, (x: number) => number>();
+    for (const pos of BREAKOUT_POS) m.set(pos, normalizer(cands.filter((c) => c.p.pos === pos).map(f)));
+    return (c: Cand) => m.get(c.p.pos)!(f(c));
+  };
+  const nRole = byPosNorm((c) => c.m.roleTrend);
+  const nOpp = byPosNorm((c) => c.m.oppTrend);
+  const nLvl = byPosNorm((c) => c.m.oppLevel);
+  const nGap = byPosNorm((c) => c.m.gap);
   const myBench = teams.find((t) => t.team.id === myTeamId)?.bench.filter((p) => !(myTeam.irPlayerIds ?? []).includes(p.id)) ?? [];
 
-  const out: BreakoutTarget[] = cands.map(({ p, m, sit, cheap, market: mv }) => {
-    const nr = nRole(m.roleTrend);
-    const no = nOpp(m.oppTrend);
-    const ng = nGap(m.gap);
+  const out: BreakoutTarget[] = cands.map((c) => {
+    const { p, m, sit, cheap, market: mv } = c;
+    const nr = nRole(c);
+    const no = nOpp(c);
+    const nl = nLvl(c);
+    const ng = nGap(c);
     const parts = {
       roleTrend: r3(WEIGHTS.roleTrend * nr),
       oppTrend: r3(WEIGHTS.oppTrend * no),
+      oppLevel: r3(WEIGHTS.oppLevel * nl),
       gap: r3(WEIGHTS.gap * ng),
       situation: r3(WEIGHTS.situation * sit.bonus),
-      cheap: cheap ? WEIGHTS.cheap : 0,
     };
-    const total = parts.roleTrend + parts.oppTrend + parts.gap + parts.situation + parts.cheap;
+    const total = parts.roleTrend + parts.oppTrend + parts.oppLevel + parts.gap + parts.situation;
+    const tier: BreakoutTarget["tier"] = m.oppLevel >= (RISING.expPts[p.pos] ?? 7) || m.roleNow >= RISING.snaps ? "rising" : "stash";
     const pr = prodRank.get(p.id) ?? 999;
     const ecrEdge = p.ecrPos !== undefined ? Math.round(pr - p.ecrPos) : undefined;
     const young = p.age !== undefined && p.age <= 26;
@@ -340,6 +391,7 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
       upside,
       nRoleTrend: r2(nr),
       nOppTrend: r2(no),
+      nOppLevel: r2(nl),
       nGap: r2(ng),
       parts,
     };
@@ -355,6 +407,7 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
     return {
       player: p,
       where: own ? { type: "roster", teamId: own.id, teamName: own.name } : { type: "fa" },
+      tier,
       score: r1(100 * total),
       components,
       weeks: m.weeks,
@@ -363,6 +416,7 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
       actPpg: m.actPpg,
       touches: m.touches,
       depthLabel: sit.depthLabel,
+      chartSays: sit.chartSays,
       ahead: sit.ahead,
       tags,
       thesis: thesisOf(p, m, sit, { value: p.value, market: mv }),
@@ -371,16 +425,18 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
   });
 
   const want = input.pos && input.pos !== "all" ? input.pos : null;
-  const targets = out
-    .filter((t) => !want || t.player.pos === want)
-    .sort((a, b) => b.score - a.score || b.components.upside - a.components.upside || b.components.oppLevel - a.components.oppLevel || a.player.id.localeCompare(b.player.id))
-    .slice(0, Math.max(1, input.limit ?? 30));
+  const limit = Math.max(1, input.limit ?? 30);
+  const sorted = out
+    .filter((t) => (!want || t.player.pos === want) && (!input.cheapOnly || t.components.cheap))
+    .sort((a, b) => b.score - a.score || b.components.upside - a.components.upside || b.components.oppLevel - a.components.oppLevel || a.player.id.localeCompare(b.player.id));
+  // Rising starters first, then deep stashes; `limit` applies to each tier.
+  const targets = [...sorted.filter((t) => t.tier === "rising").slice(0, limit), ...sorted.filter((t) => t.tier === "stash").slice(0, limit)];
 
   const notes: string[] = [];
   notes.push(
-    `Score = 30% snap trend + 25% expected-points trend + 15% usage-vs-output gap (each scaled 0–1 over ${cands.length} candidates) + 20% situation + 10% cheap. Excludes your roster, ${established} established starters (≥ ${pct(ESTABLISHED.snaps)} snaps and ≥ ${ESTABLISHED.ppg} ppg, or ECR RB/WR top 12, TE top 6) and long-term injuries.`,
+    `Score = 25% snap trend + 25% expected-points trend + 20% expected pts/g last 2 weeks + 15% usage-vs-output gap (each scaled 0–1 within position over ${cands.length} candidates) + 15% situation. Price is not scored. Rising starters: ≥ 7 expected pts/g last 2 weeks (TE 4.5) or ≥ 50% snaps; the rest are deep stashes. Excludes your roster, ${established} established starters (≥ ${pct(ESTABLISHED.snaps)} snaps and ≥ ${ESTABLISHED.ppg} ppg, or ECR RB/WR top 12, TE top 6) and long-term injuries.`,
   );
   notes.push(depth ? `Depth chart: nflverse/ESPN${depth.asOf ? ` as of ${depth.asOf.slice(0, 10)}` : ""}.` : "Depth chart unavailable: “ahead of him” uses snap-share order.");
-  notes.push(market ? "Cheap = market value < 15." : `No market values connected: cheap = our value < ${CHEAP.ours}.`);
+  notes.push(market ? "Price = FantasyCalc market value (#1 = 100) and our value; cheap = market < 15." : `No market values connected: cheap = our value < ${CHEAP.ours}.`);
   return { targets, notes };
 }

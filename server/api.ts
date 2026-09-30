@@ -397,7 +397,8 @@ apiRouter.get(
     if (!["RB", "WR", "TE", "ALL"].includes(rawPos)) throw new HttpError(400, `Unknown pos "${req.query.pos}"`, "Use pos=RB, WR, TE or all.");
     const pos = rawPos === "ALL" ? "all" : (rawPos as "RB" | "WR" | "TE");
     const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 30) || 30));
-    const key = `${provider}:${req.params.id}:breakouts:${team}:${pos}:${limit}`;
+    const cheapOnly = req.query.cheap === "1" || req.query.cheap === "true";
+    const key = `${provider}:${req.params.id}:breakouts:${team}:${pos}:${limit}:${cheapOnly ? 1 : 0}`;
     const result = await cached<BreakoutResult>(key, refresh, async () => {
       const [depth, market, fa] = await Promise.all([
         getDepthChart(l.db.season),
@@ -412,7 +413,7 @@ apiRouter.get(
         const w = rankWaivers({ ...l.ctx, league: fa.league }, team, fa.input, { myPriority: fa.myPriority, limit: fa.input.length });
         waivers = new Map(w.freeAgents.map((x) => [x.id, x]));
       }
-      return findBreakouts({ league: l.league, players: l.ctx.players, teams: l.ctx.teams, myTeamId: team, depth, market, waivers, pos, limit });
+      return findBreakouts({ league: l.league, players: l.ctx.players, teams: l.ctx.teams, myTeamId: team, depth, market, waivers, pos, limit, cheapOnly });
     });
     res.json(result);
   }),

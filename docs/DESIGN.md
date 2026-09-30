@@ -409,17 +409,22 @@ relevant (latest snaps ≥ 35%, or ≥ 4.5 expected pts/g over the last 2 weeks,
 
 **Metrics** (league scoring): roleNow = latest snap share; roleTrend = last − mean(earlier) snaps; oppTrend = last −
 mean(earlier) expected points; oppLevel = mean expected points last 2 weeks; gap = expected − actual ppg.
-Situation: players directly ahead (the next one for RB/TE, next two for WR) with injury status (Q/D/O/IR) or a snap
-drop ≥ 15 points, or a promotion to #1 on the chart from < 50% snaps in every earlier week → bonus 1; tags
-handcuff (RB2 behind an RB with ≥ 55% snaps or ECR ≤ 24), committee (two RBs ≥ 40%), WR3 rising (WR3, +5 pts
-snaps), TE1 in waiting (TE2+, rising or ≥ 40%) → 0.5. Cheap = market < 15 (or our value < 12 without a market).
-**Score** = 100 × (0.30·n(roleTrend) + 0.25·n(oppTrend) + 0.15·n(gap) + 0.20·situation + 0.10·cheap), n() = 2nd–98th
-percentile min-max over the pool. Upside (0.7·clamp((production rank − ECR rank)/24) + 0.3·age ≤ 26) breaks ties.
+**Order / ahead**: depth chart, unless the player out-snaps someone listed ahead of him by ≥ 15 points; then
+teammates are ordered by latest snap share and the thesis says "depth chart says TE4". A player ahead who fell
+under 15% snaps after ≥ 50% before is tagged "left early / injury?" (ordered by his usual share, situation 0.5).
+**Situation**: the player(s) directly ahead (next one for RB/TE, next two for WR) with injury status (Q/D/O/IR) or
+a snap drop ≥ 15 points, or a promotion to #1 from < 50% snaps in every earlier week → 1; handcuff (RB2 behind an
+RB with ≥ 55% snaps or ECR ≤ 24), committee (two RBs ≥ 40%), WR3 rising, TE1 in waiting, left early → 0.5.
+**Score** = 100 × (0.25·n(roleTrend) + 0.25·n(oppTrend) + 0.20·n(oppLevel) + 0.15·n(gap) + 0.15·situation),
+n() = 2nd–98th percentile min-max **within position**. Price is not scored: market (FantasyCalc) and our value are
+shown; cheap = market < 15 (our value < 12 without a market) drives the "Cheap only" toggle (`?cheap=1`).
+**Tiers**: "rising" (oppLevel ≥ 7, TE ≥ 4.5, or roleNow ≥ 50%) listed before "stash"; `limit` applies per tier.
+Upside (0.7·clamp((production rank − ECR rank)/24) + 0.3·age ≤ 26) breaks ties.
 **Ask**: rostered → the lowest-value bench player of mine with value ≥ 0.9 × target value, else the cheapest bench
 pair; FA → "Free agent — claim/add" + the waivers module's call.
 
 ```
-GET /api/league/:provider/:id/breakouts?team=&pos=RB|WR|TE|all&limit=30
-  → { targets: BreakoutTarget[], notes: string[] }   (types.ts BreakoutTarget: player, where, score, components,
+GET /api/league/:provider/:id/breakouts?team=&pos=RB|WR|TE|all&limit=30&cheap=0|1
+  → { targets: BreakoutTarget[], notes: string[] }   (types.ts BreakoutTarget: player, where, tier, score, components, chartSays?,
       weeks, snaps, expPpg, actPpg, touches?, depthLabel?, ahead[], tags[], thesis, ask)
 ```

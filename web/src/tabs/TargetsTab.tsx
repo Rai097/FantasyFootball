@@ -11,7 +11,12 @@ const POSITIONS = ["RB", "WR", "TE"];
 /** Breakout Targets: role rising before fantasy points (FA or on other rosters). */
 export function TargetsTab({ active }: { analysis: Analysis; active: Active & { team: string } }) {
   const [pos, setPos] = useState("");
+  const [cheapOnly, setCheapOnly] = useState(false);
   const res = useAsync(() => api.breakouts(active, pos || "all"), [active.provider, active.id, active.team, pos]);
+  // Cheap filter is client-side on components.cheap (market < 15, or our value < 12 without a market).
+  const shown = (res.data?.targets ?? []).filter((t) => !cheapOnly || t.components.cheap);
+  const rising = shown.filter((t) => t.tier === "rising");
+  const stash = shown.filter((t) => t.tier !== "rising");
 
   return (
     <div className="stack">
@@ -19,9 +24,15 @@ export function TargetsTab({ active }: { analysis: Analysis; active: Active & { 
         <div className="row between wrap">
           <div>
             <h2>Breakout targets</h2>
-            <p className="muted small targets-sub">Players whose snaps and expected points are rising before their fantasy points have: cheap now, with a path to a bigger role.</p>
+            <p className="muted small targets-sub">Players whose snaps and expected points are rising before their fantasy points have, with a path to a bigger role.</p>
           </div>
-          <PosFilter value={pos} onChange={setPos} options={POSITIONS} />
+          <div className="row gap wrap">
+            <label className="row gap small cheap-toggle">
+              <input type="checkbox" checked={cheapOnly} onChange={(e) => setCheapOnly(e.target.checked)} />
+              Cheap only (market &lt; 15)
+            </label>
+            <PosFilter value={pos} onChange={setPos} options={POSITIONS} />
+          </div>
         </div>
         {res.data?.notes.map((n) => (
           <p key={n} className="muted small targets-note">
@@ -34,16 +45,34 @@ export function TargetsTab({ active }: { analysis: Analysis; active: Active & { 
         <ErrorBox error={res.error} onRetry={res.reload} />
       ) : !res.data ? (
         <Loading label="Scanning depth charts and snap trends…" />
-      ) : res.data.targets.length === 0 ? (
-        <Empty>No breakout targets{pos ? ` at ${pos}` : ""} right now.</Empty>
+      ) : shown.length === 0 ? (
+        <Empty>No breakout targets{pos ? ` at ${pos}` : ""}{cheapOnly ? " under the cheap filter" : ""} right now.</Empty>
       ) : (
-        <div className="targets-grid">
-          {res.data.targets.map((t, i) => (
-            <TargetCard key={t.player.id} t={t} rank={i + 1} />
-          ))}
-        </div>
+        <>
+          <TierSection title="Rising starters" sub="≥ 7 expected pts/g over the last 2 weeks (TE 4.5) or ≥ 50% snaps: the role is already here." list={rising} />
+          <TierSection title="Deep stashes" sub="Smaller role today, but trending up or a door is opening ahead of him." list={stash} />
+        </>
       )}
     </div>
+  );
+}
+
+function TierSection({ title, sub, list }: { title: string; sub: string; list: BreakoutTarget[] }) {
+  if (!list.length) return null;
+  return (
+    <section className="stack-sm">
+      <div>
+        <h3 className="tier-title">
+          {title} <span className="muted">({list.length})</span>
+        </h3>
+        <p className="muted small tier-sub">{sub}</p>
+      </div>
+      <div className="targets-grid">
+        {list.map((t, i) => (
+          <TargetCard key={t.player.id} t={t} rank={i + 1} />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -54,10 +83,11 @@ function componentsText(t: BreakoutTarget): string {
   return [
     `Score ${f1(t.score)} = snap trend ${pts(p.roleTrend)} (${signed(c.roleTrend * 100)} pts, scaled ${f1(c.nRoleTrend)})`,
     `+ exp-pts trend ${pts(p.oppTrend)} (${signed(c.oppTrend)}/g, scaled ${f1(c.nOppTrend)})`,
+    `+ exp pts level ${pts(p.oppLevel)} (${f1(c.oppLevel)}/g last 2 wks, scaled ${f1(c.nOppLevel)})`,
     `+ usage gap ${pts(p.gap)} (${signed(c.gap)} exp − act ppg, scaled ${f1(c.nGap)})`,
-    `+ situation ${pts(p.situation)} (${c.situation === 1 ? "path open" : c.situation === 0.5 ? "role tag" : "none"})`,
-    `+ cheap ${pts(p.cheap)} (${c.marketValue != null ? `market ${f1(c.marketValue)}` : `our value ${f1(c.value)}`}).`,
-    `Snaps now ${f1(c.roleNow * 100)}%, exp ${f1(c.oppLevel)} pts/g last 2 wks. Production ${t.player.pos}${c.prodRank}${c.ecrPos != null ? ` vs ECR ${t.player.pos}${Math.round(c.ecrPos)}` : ""}${c.age != null ? `, age ${f1(c.age)}` : ""}.`,
+    `+ situation ${pts(p.situation)} (${c.situation === 1 ? "path open" : c.situation === 0.5 ? "role tag / starter left early" : "none"}).`,
+    `Scaled within ${t.player.pos}s; price is not scored.`,
+    `Snaps now ${f1(c.roleNow * 100)}%. Production ${t.player.pos}${c.prodRank}${c.ecrPos != null ? ` vs ECR ${t.player.pos}${Math.round(c.ecrPos)}` : ""}${c.age != null ? `, age ${f1(c.age)}` : ""}.`,
   ].join(" ");
 }
 
@@ -78,9 +108,14 @@ function TargetCard({ t, rank }: { t: BreakoutTarget; rank: number }) {
 
       <div className="row gap wrap small">
         {t.where.type === "fa" ? <span className="tag fa-tag">Free agent</span> : <span className="tag owner-tag">{t.where.teamName}</span>}
-        {t.depthLabel && <span className="tag">{t.depthLabel}</span>}
+        {t.depthLabel && (
+          <span className="tag" title={t.chartSays ? `Depth chart says ${t.chartSays}; snaps say ${t.depthLabel}` : "Depth chart slot"}>
+            {t.depthLabel}
+            {t.chartSays ? ` (chart ${t.chartSays})` : ""}
+          </span>
+        )}
         {t.tags.map((g) => (
-          <span key={g} className={`tag${/hurt|slipping|promoted/.test(g) ? " path-tag" : ""}`}>
+          <span key={g} className={`tag${/hurt|slipping|promoted|left early/.test(g) ? " path-tag" : ""}`}>
             {g}
           </span>
         ))}
@@ -94,7 +129,8 @@ function TargetCard({ t, rank }: { t: BreakoutTarget; rank: number }) {
               {a.name}
               {a.status && <InjuryDot player={{ injury: { status: a.status, detail: a.detail, week: 0 } }} />}
               {a.status && <span className="muted"> {a.status}</span>}
-              {Math.abs(a.snapTrend) >= 0.05 && (
+              {a.leftEarly && <span className="delta neg"> left early?</span>}
+              {!a.leftEarly && Math.abs(a.snapTrend) >= 0.05 && (
                 <span className={`delta ${a.snapTrend < 0 ? "neg" : "pos"}`}> {signed(a.snapTrend * 100)} snaps</span>
               )}
               {i < t.ahead.length - 1 && <span className="muted">,</span>}
@@ -110,6 +146,16 @@ function TargetCard({ t, rank }: { t: BreakoutTarget; rank: number }) {
       </div>
 
       <p className="thesis">{t.thesis}</p>
+      <div className="price small">
+        <span className="muted">Price</span>
+        <span>
+          market <b>{t.components.marketValue != null ? f1(t.components.marketValue) : "–"}</b>
+        </span>
+        <span>
+          our value <b>{f1(t.components.value)}</b>
+        </span>
+        {t.components.cheap && <span className="tag small-tag fa-tag">cheap</span>}
+      </div>
       {t.ask && <div className={`ask${t.where.type === "fa" ? " ask-fa" : ""}`}>{t.ask}</div>}
     </article>
   );

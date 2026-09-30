@@ -300,6 +300,8 @@ export interface BreakoutAhead {
   snapTrend: number;
   /** Latest snap share (0..1). */
   snapsNow?: number;
+  /** Under 15% snaps last week after ≥ 50% before: probably left the game hurt. */
+  leftEarly?: boolean;
 }
 
 export interface BreakoutComponents {
@@ -313,8 +315,9 @@ export interface BreakoutComponents {
   oppLevel: number;
   /** Expected ppg − actual ppg this season (positive = producing less than usage suggests). */
   gap: number;
-  /** 0, 0.5 (structural path: handcuff / committee / WR3 rising / TE1 in waiting) or 1 (starter hurt / slipping / promoted). */
+  /** 0, 0.5 (handcuff / committee / WR3 rising / TE1 in waiting / starter left early) or 1 (starter hurt / slipping / promoted). */
   situation: number;
+  /** Market value < 15 (our value < 12 without a market). Not scored; used by the "cheap only" filter. */
   cheap: boolean;
   /** Our trade value (0-100) and the market value when a market source is connected. */
   value: number;
@@ -326,18 +329,21 @@ export interface BreakoutComponents {
   age?: number;
   /** Tie-break only: 0.7·clamp(ecrEdge/24) + 0.3·(age ≤ 26). */
   upside: number;
-  /** Normalised (0..1 over the candidate pool) trend and gap inputs. */
+  /** Normalised (0..1 within position over the candidate pool) inputs. */
   nRoleTrend: number;
   nOppTrend: number;
+  nOppLevel: number;
   nGap: number;
-  /** Weighted contributions to the score (sum = score). */
-  parts: { roleTrend: number; oppTrend: number; gap: number; situation: number; cheap: number };
+  /** Weighted contributions to the score (sum × 100 = score). */
+  parts: { roleTrend: number; oppTrend: number; oppLevel: number; gap: number; situation: number };
 }
 
 export interface BreakoutTarget {
   player: ValuedPlayer;
   where: { type: "fa" } | { type: "roster"; teamId: string; teamName: string };
-  /** 0..100 = 100 × (0.30·nRoleTrend + 0.25·nOppTrend + 0.15·nGap + 0.20·situation + 0.10·cheap). */
+  /** "rising": ≥ 7 expected pts/g last 2 weeks (TE 4.5) or ≥ 50% snaps; "stash": everyone else in the pool. */
+  tier: "rising" | "stash";
+  /** 0..100 = 100 × (0.25·nRoleTrend + 0.25·nOppTrend + 0.20·nOppLevel + 0.15·nGap + 0.15·situation). */
   score: number;
   components: BreakoutComponents;
   /** Week labels for the per-week arrays below (weeks the player appeared). */
@@ -349,6 +355,8 @@ export interface BreakoutTarget {
   touches?: number[];
   /** "RB2", "WR3" … from the depth chart (or snap order when the chart is missing). */
   depthLabel?: string;
+  /** Depth-chart slot when snap shares overruled it (e.g. listed "TE4" but out-snapping the TE ahead). */
+  chartSays?: string;
   ahead: BreakoutAhead[];
   tags: string[];
   thesis: string;

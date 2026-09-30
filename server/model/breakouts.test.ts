@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findBreakouts, isPathStatus, lastVsEarlier, normalizer, roleMetrics, situationOf, suggestAsk } from "./breakouts.js";
+import { findBreakouts, isPathStatus, lastVsEarlier, normalizer, roleMetrics, situationOf, suggestAsk, thesisOf } from "./breakouts.js";
 import { DepthReducer, buildDepthChart } from "../data/depthCharts.js";
 import { analyzeTeams } from "./analysis.js";
 import { HALF_PPR } from "./scoring.js";
@@ -154,7 +154,51 @@ test("findBreakouts: excludes my roster, established starters, QBs and long-term
   assert.match(t.thesis, /^RB2 behind Star RB \(Out, ankle\); snaps 20%→35%→55%;/);
   assert.match(t.ask ?? "", /^Offer myBN \(value 6\.0\)/); // 6 ≥ 0.9 × 3
   const c = t.components.parts;
-  assert.equal(t.score, Math.round(1000 * (c.roleTrend + c.oppTrend + c.gap + c.situation + c.cheap)) / 10);
+  assert.equal(t.score, Math.round(1000 * (c.roleTrend + c.oppTrend + c.oppLevel + c.gap + c.situation)) / 10);
+  assert.equal(t.tier, "rising"); // 55% snaps / 10.5 exp pts last 2 weeks
+  // cheap-only filter (our value 3 < 12 for both; nothing rises above 12 here)
+  assert.equal(findBreakouts({ league: L, players, teams, myTeamId: "me", cheapOnly: true }).targets.length, r.targets.length);
   assert.ok(r.targets.find((x) => x.player.id === "flat")!.score < t.score);
   assert.equal(findBreakouts({ league: L, players, teams, myTeamId: "me", pos: "WR" }).targets.length, 0);
+});
+
+test("tiers: rising starters (≥ 7 exp pts or ≥ 50% snaps) come before deep stashes", () => {
+  const rise = rb("rise", [0.3, 0.35, 0.45], [5, 7, 9], [4, 5, 6], { team: "BUF" }); // exp last 2 = 8 → rising
+  const stash = rb("stash", [0.1, 0.25, 0.4], [1, 2, 6], [0, 1, 2], { team: "DAL" }); // 4.0 exp, 40% → stash
+  const ps = [rise, stash];
+  const players = new Map(ps.map((p) => [p.id, p]));
+  const L = league([team("me", []), team("o", [])], undefined, { numTeams: 12 });
+  const teams = analyzeTeams(L, players, { QB: 15, RB: 8, WR: 8, TE: 6, K: 7, DEF: 6 });
+  const r = findBreakouts({ league: L, players, teams, myTeamId: "me" });
+  assert.deepEqual(r.targets.map((t) => [t.player.id, t.tier]), [["rise", "rising"], ["stash", "stash"]]);
+});
+
+test("a starter who left early (< 15% after ≥ 50%) is tagged, counts 0.5, and still ranks ahead", () => {
+  const starter = rb("st", [0.8, 0.82, 0.05], [14, 14, 1], [14, 14, 1], { name: "Big Starter" });
+  const back = rb("bk", [0.2, 0.18, 0.7], [3, 3, 12], [2, 2, 8], { name: "Backup" });
+  const s = situationOf(back, [starter, back], null, roleMetrics(back, HALF_PPR));
+  assert.equal(s.depthLabel, "RB2"); // starter keeps his usual 81% role for ordering
+  assert.ok(s.tags.includes("left early / injury?"));
+  assert.ok(!s.tags.some((t) => t.includes("slipping")));
+  assert.equal(s.bonus, 0.5);
+  assert.match(thesisOf(back, roleMetrics(back, HALF_PPR), s, { value: 1 }), /Big Starter \(5% snaps last week: left early \/ injury\?\)/);
+});
+
+test("snaps overrule a depth chart that lists a clear part-timer ahead", () => {
+  const te = (id: string, snaps: number[]) => ({ ...rb(id, snaps, [4, 4, 6], [4, 4, 5]), pos: "TE" as const, name: id });
+  const t1 = te("T1", [0.6, 0.55, 0.3]);
+  const t2 = te("T2", [0.3, 0.3, 0.2]);
+  const t3 = te("T3", [0.2, 0.2, 0.15]);
+  const me = te("ME", [0.2, 0.26, 0.71]);
+  const depth = { byPlayer: new Map(), byTeamPos: new Map([["KC|TE", ["T1", "T2", "T3", "ME"]]]) };
+  const m = roleMetrics(me, HALF_PPR);
+  const s = situationOf(me, [t1, t2, t3, me], depth, m);
+  assert.equal(s.depthLabel, "TE1");
+  assert.equal(s.chartSays, "TE4");
+  assert.equal(s.ahead.length, 0);
+  assert.match(thesisOf(me, m, s, { value: 1 }), /^Now TE1 by snaps \(depth chart says TE4\)/);
+  // a chart that agrees with snaps is kept
+  const s2 = situationOf(t2, [t1, t2, t3, me], { byPlayer: new Map(), byTeamPos: new Map([["KC|TE", ["T1", "T2"]]]) }, roleMetrics(t2, HALF_PPR));
+  assert.equal(s2.depthLabel, "TE2");
+  assert.equal(s2.chartSays, undefined);
 });
