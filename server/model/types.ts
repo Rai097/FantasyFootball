@@ -38,6 +38,8 @@ export interface WeekLine {
   team: string;
   actual: StatLine;
   expected: StatLine;
+  /** Raw opportunity that week (ffopportunity): targets (rec_attempt), carries (rush_attempt), receiving air yards. */
+  opp?: { targets: number; carries: number; airYards: number };
 }
 
 export interface PlayerIds {

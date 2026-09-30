@@ -14,6 +14,8 @@ export const sources = {
   roster: (season: number) => `${NFLVERSE}/rosters/roster_${season}.csv`,
   injuries: (season: number) => `${NFLVERSE}/injuries/injuries_${season}.csv`,
   snaps: (season: number) => `${NFLVERSE}/snap_counts/snap_counts_${season}.csv`,
+  /** ~55 MB, daily ESPN depth-chart snapshots (2025+ format: dt, team, gsis_id, pos_abb, pos_slot, pos_rank). */
+  depthCharts: (season: number) => `${NFLVERSE}/depth_charts/depth_charts_${season}.csv`,
   epWeekly: (season: number) => `${FFOPP}/ep_weekly_${season}.csv`,
   playerIds: `${DP}/db_playerids.csv`,
   ecr: `${DP}/db_fpecr_latest.csv`,

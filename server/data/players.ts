@@ -36,6 +36,11 @@ function lineFrom(r: Record<string, string>, suffix: "" | "_exp"): StatLine {
   };
 }
 
+/** Weekly raw opportunity columns of ep_weekly (targets are `rec_attempt`). */
+export function oppFrom(r: Record<string, string>): NonNullable<WeekLine["opp"]> {
+  return { targets: num(r.rec_attempt), carries: num(r.rush_attempt), airYards: num(r.rec_air_yards) };
+}
+
 export function addLines(a: StatLine, b: StatLine): StatLine {
   const o = { ...a };
   for (const k of Object.keys(o) as (keyof StatLine)[]) o[k] = a[k] + b[k];
@@ -218,7 +223,7 @@ async function buildPlayerDb(): Promise<PlayerDb> {
       if (!p) continue;
       // Prior-season totals are regular season only (the file also carries playoff weeks 19-22).
       if (isPrior && (r.season_type ? r.season_type !== "REG" : num(r.week) > 18)) continue;
-      const line: WeekLine = { season: num(r.season), week: num(r.week), team: normTeam(r.posteam), actual: lineFrom(r, ""), expected: lineFrom(r, "_exp") };
+      const line: WeekLine = { season: num(r.season), week: num(r.week), team: normTeam(r.posteam), actual: lineFrom(r, ""), expected: lineFrom(r, "_exp"), opp: oppFrom(r) };
       if (isPrior) {
         const agg = priorAgg.get(p.id) ?? { games: 0, line: emptyLine() };
         agg.games += 1;
