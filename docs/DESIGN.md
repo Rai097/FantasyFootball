@@ -324,13 +324,13 @@ first, capped at 6000 per partner. My delta uses the mode weights; the partner's
 
 **Rules** (V2 config in tradesV2.ts):
 * Keep for me: team Δ ≥ 0.5 or now Δ ≥ 0.75; +0.5 on both when I receive more players than I give (my
-  fairness nets the player I drop). Giving my #1/#2 most valuable player needs Δ ≥ 2.0 (now Δ in "now"); tag "moving a star".
+  fairness nets the player I drop). Giving my #1/#2 most valuable player (value ≥ 20) needs Δ ≥ 2.0 (now Δ in "now"); tag "moving a star".
 * Throw-ins (value < 3) in a multi-player package must add ≥ 1.0 to the receiver's score by themselves, else the
   package is dropped (the version without them is searched anyway); tag "throw-in: fills their QB slot".
   Any low-value player adds at most +1.0 to the partner's Δ.
 * Players I receive with Questionable / Doubtful / Out count at 0.85 / 0.70 / 0.55 of their ppg in my deltas
   (not in theirs); tag "injury risk".
-* Partner: (Δ ≥ −0.25 and fairness ≥ 0.85) or (fairness ≥ 1.10 and Δ ≥ −1.0). Asking for their #1/#2 player
+* Partner: (Δ ≥ −0.25 and fairness ≥ 0.85) or (fairness ≥ 1.10 and Δ ≥ −1.0). Asking for their #1/#2 player (value ≥ 20)
   also needs fairness ≥ 1.05 and Δ ≥ 0, and acceptance × 0.8; tag "asks for their star".
 * Main list ("clear wins"): acceptance ≥ 0.45 and my Δ ≥ 1.0, sorted by Δ × acceptance. `smallerEdges`: the rest
   that pass. `nearMisses` (≤ 10): "They'd likely refuse" (partner filter, fairness ≥ 0.7, their Δ ≥ −3),

@@ -50,6 +50,8 @@ export const V2 = {
   /** A: giving my #1/#2 most valuable player needs this team-score gain (nowDelta in "now" mode). */
   starMinDelta: 2.0,
   starCount: 2,
+  /** A top-2 player only counts as a "star" at this value or more (a weak roster's #2 at 15 is not). */
+  starMinValue: 20,
   /** A: receiving more players than I give (a roster spot plus a drop) raises my bar by this. */
   rosterSpotExtra: 0.5,
   /** B: a throw-in (value < MIN_PIECE_VALUE) must add this much to its receiver's score by himself. */
@@ -82,7 +84,13 @@ export interface State2 {
 
 export function state2(ctx: TradeContext, teamId: string): State2 {
   const s = teamState(ctx, teamId);
-  const stars = new Set([...s.roster].sort((a, b) => b.value - a.value).slice(0, V2.starCount).map((p) => p.id));
+  const stars = new Set(
+    [...s.roster]
+      .sort((a, b) => b.value - a.value)
+      .slice(0, V2.starCount)
+      .filter((p) => p.value >= V2.starMinValue)
+      .map((p) => p.id),
+  );
   return { ...s, parts: rosterParts(ctx.league.settings, s.roster, ctx.replacement).parts, irIds: new Set(s.team.irPlayerIds ?? []), stars, total: sum(s.roster) };
 }
 
