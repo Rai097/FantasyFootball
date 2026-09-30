@@ -30,6 +30,7 @@ import { parseMode } from "./model/rosterScore.js";
 import { rankWaivers, type FreeAgentInput } from "./model/waivers.js";
 import { findBreakouts, type MarketValue } from "./model/breakouts.js";
 import { getDepthChart } from "./data/depthCharts.js";
+import { getMarketData, pprBucket } from "./data/fantasycalc.js";
 import type { BreakoutResult, League, Player, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "./model/types.js";
 
 const CACHE_TTL_MS = 60_000;
@@ -213,19 +214,12 @@ async function freeAgentInputs(
   return { input, myPriority, league };
 }
 
-/**
- * MARKET VALUE HOOK: server/data/fantasycalc.ts (owned by the trade-finder rewrite) is expected to
- * export `getMarketValues(): Promise<Map<playerId, { value, trend30, tradeFreq }>>`. It is loaded
- * lazily by path so this file compiles before it exists; until then breakouts use our value only.
- */
-async function loadMarketValues(): Promise<Map<string, MarketValue> | null> {
-  const spec = "./data/fantasycalc.js";
-  try {
-    const mod = (await import(spec)) as { getMarketValues?: () => Promise<Map<string, MarketValue>> };
-    return mod.getMarketValues ? await mod.getMarketValues() : null;
-  } catch {
-    return null;
-  }
+/** FantasyCalc market values for this league's format (null when unavailable). */
+async function loadMarketValues(league: League): Promise<Map<string, MarketValue> | null> {
+  const S = league.settings;
+  const qbSlots = S.slots.filter((x) => x === "QB" || x === "SFLEX").length;
+  const d = await getMarketData({ numQbs: qbSlots >= 2 ? 2 : 1, numTeams: S.numTeams || 12, ppr: pprBucket(S.scoring.rec), dynasty: S.isDynasty });
+  return d.source === "fantasycalc" && d.values.size ? d.values : null;
 }
 
 // ---------------------------------------------------------------- routes
@@ -398,7 +392,7 @@ apiRouter.get(
     const result = await cached<BreakoutResult>(key, refresh, async () => {
       const [depth, market, fa] = await Promise.all([
         getDepthChart(l.db.season),
-        loadMarketValues(),
+        loadMarketValues(l.league).catch(() => null),
         freeAgentInputs(l, provider, req.params.id, team, refresh).catch((e) => {
           console.warn(`[breakouts] free agents unavailable: ${(e as Error).message}`);
           return null;

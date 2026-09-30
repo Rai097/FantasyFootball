@@ -35,7 +35,7 @@ export interface DepthLike {
   byTeamPos: Map<string, string[]>;
 }
 
-/** Market value hook (server/data/fantasycalc.ts `getMarketValues()` when present). */
+/** Market value (server/data/fantasycalc.ts `getMarketValues()`: #1 player = 100). */
 export interface MarketValue {
   value: number;
   trend30?: number;
@@ -181,10 +181,13 @@ export function situationOf(p: ValuedPlayer, teammates: ValuedPlayer[], depth: D
 
   const tags: string[] = [];
   let bonus = 0;
-  const hurt = ahead.find((a) => isPathStatus(a.status));
-  const slipping = ahead.find((a) => a.snapTrend <= SLIP);
-  if (hurt) tags.push("starter hurt");
-  if (slipping && slipping !== hurt) tags.push("starter slipping");
+  // Only the player(s) directly ahead open a path: the next one for RB / TE, the next two for WR.
+  const near = ahead.slice(p.pos === "WR" ? -2 : -1);
+  const hurt = near.find((a) => isPathStatus(a.status));
+  const slipping = near.find((a) => a.snapTrend <= SLIP);
+  const who = (a: BreakoutAhead) => ((a.depth ?? 99) <= (p.pos === "WR" ? 3 : 1) ? "starter" : "ahead");
+  if (hurt) tags.push(`${who(hurt)} hurt`);
+  if (slipping && slipping !== hurt) tags.push(`${who(slipping)} slipping`);
   // Promotion: first on the chart now, but a part-timer in every earlier week (< 50% snaps) and rising.
   const earlier = snapSeries(p).shares.slice(0, -1);
   const promoted = d === 1 && earlier.length > 0 && Math.max(...earlier) < 0.5 && m.roleTrend >= 0.1;
@@ -239,7 +242,7 @@ export function thesisOf(p: ValuedPlayer, m: RoleMetrics, sit: Situation, price:
   if (m.snaps.length) parts.push(`snaps ${fmtTrail(m.snaps, pct)}`);
   if (m.touches && m.touches.some((x) => x > 0)) parts.push(`${p.pos === "RB" ? "touch opps" : "targets"} ${fmtTrail(m.touches, (x) => String(x))}`);
   parts.push(`${p.ppgExp26.toFixed(1)} expected vs ${p.ppg26.toFixed(1)} actual ppg`);
-  if (price.market !== undefined) parts.push(`market value ${Math.round(price.market)}`);
+  if (price.market !== undefined) parts.push(`market value ${price.market < 0.5 ? "~0" : Math.round(price.market)}`);
   else parts.push(price.value < 0.5 ? "value ~0 (waiver-level)" : `our value ${price.value.toFixed(1)}`);
   return `${parts.join("; ")}.`;
 }
@@ -288,7 +291,8 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
     const sit = situationOf(p, groups.get(`${p.team}|${p.pos}`) ?? [p], depth, m);
     // Relevance: a real role now, real expected points, or the next man up with a door opening.
     if (m.roleNow < RELEVANT.snaps && m.oppLevel < RELEVANT.expPts && !(sit.pathOpen && (sit.depth ?? 99) <= 2)) continue;
-    const mv = market?.get(p.id)?.value;
+    // With a market connected, a player outside its list has ~0 market value.
+    const mv = market ? (market.get(p.id)?.value ?? 0) : undefined;
     const cheap = mv !== undefined ? mv < CHEAP.market : p.value < CHEAP.ours;
     cands.push({ p, m, sit, cheap, market: mv });
   }
