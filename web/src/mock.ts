@@ -150,7 +150,7 @@ for (const pos of Object.keys(REPL_RANK) as Position[]) {
 for (const p of PLAYERS) p.vorp = r1(Math.max(0, p.ppg - replacement[p.pos]));
 const maxRaw = Math.max(...PLAYERS.map((p) => p.vorp * p.remainingGames));
 PLAYERS.sort((a, b) => b.vorp * b.remainingGames - a.vorp * a.remainingGames).forEach((p, i) => {
-  p.value = r1(100 * Math.pow((p.vorp * p.remainingGames) / maxRaw, 1.15));
+  p.value = r1(100 * Math.pow((p.vorp * p.remainingGames) / maxRaw, 1.35));
   p.ecrOverall = i + 1;
   p.ecrPos = p.posRank;
   p.why =

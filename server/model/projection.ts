@@ -32,7 +32,8 @@ export const BENCH_DEPTH: Record<Position, number> = { QB: 2, RB: 6, WR: 6, TE: 
 export const PLAYOFF_WEIGHT = 1.25;
 /** Weight of the overall-ECR implied value in the final value (model value gets the rest). */
 export const CONSENSUS_WEIGHT = 0.35;
-const CONVEXITY = 1.15;
+/** Value exponent (star premium): value = 100·(surplus / max)^CONVEXITY. Raised 1.15 → 1.35 so stars outweigh depth. */
+export const CONVEXITY = 1.35;
 const LONG_TERM_RE = /ACL|Achilles|season|\bIR\b|^NA\b/i;
 const RETURN_RE = /return designation/i;
 
@@ -132,6 +133,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
   const fmt = recFormat(scoring);
   const all = [...pool];
   const playoffStart = S.regularSeasonEnd + 1;
+  // 1-QB league: QBs ranked below the starters (posRank > numTeams) are backups with ~0 trade value.
+  const oneQb = S.slots.filter((s) => s === "QB").length === 1 && !S.slots.includes("SFLEX");
 
   const stats = (p: Player) => {
     const weeks = [...p.weeks].sort((a, b) => a.week - b.week);
@@ -356,7 +359,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
       posRank,
       remainingGames: r1(b.remainingGames),
       trend: r2(b.trend),
-      why: explain(b, replacement[p.pos], vorp, value, anchor, scale),
+      why: explain(b, replacement[p.pos], vorp, value, anchor, scale) + (oneQb && p.pos === "QB" && posRank > S.numTeams && value < 3 ? " Backup QB in a 1-QB league: ~0 trade value." : ""),
     };
   };
 

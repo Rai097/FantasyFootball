@@ -91,7 +91,7 @@ For a league `L` with scoring `S` and every player `p`:
    replacement rank = `numTeams × dedicatedStarters(pos) + flexShare(pos) × numTeams × flexSlots + round(numTeams × 0.5)`
    where flexShare defaults RB .45 / WR .45 / TE .10 for FLEX, QB 0.7 of SFLEX
    slots, WR .6 / TE .4 for RFLEX. `replPpg(pos)` = ppg at that rank.
-7. `vorp = max(0, ppg − replPpg(pos))`; `value = 100 × (vorp × remainingGames / maxAcrossLeague)^1.15`
+7. `vorp = max(0, ppg − replPpg(pos))`; `value = 100 × (vorp × remainingGames / maxAcrossLeague)^1.35` (star premium; was 1.15)
    rounded to 1 decimal. Convex so studs are worth more than two mid players.
 8. `posRank` = rank by ppg within position.
 
