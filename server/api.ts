@@ -4,6 +4,23 @@ import { getPlayerDb, type PlayerDb } from "./data/players.js";
 import { getNflState } from "./data/nfl.js";
 import { yahoo } from "./providers/yahoo.js";
 import { buildDemoLeague, demoFreeAgents } from "./providers/demo.js";
+import {
+  applySettings,
+  buildImportLeague,
+  deleteImport,
+  importFreeAgents,
+  isValidId,
+  listImports,
+  MAX_BYTES,
+  mergeTeams,
+  newPasteImport,
+  readImport,
+  saveImport,
+  validateImport,
+  type StoredImport,
+} from "./providers/import.js";
+import { parseRosterText } from "./providers/import-text.js";
+import { bookmarkletCode, bookmarkletUrl } from "./providers/import-bookmarklet.js";
 import { analyzeLeague, type LeagueContext } from "./model/analysis.js";
 import { evaluateTrade, findTrades } from "./model/trades.js";
 import { rankWaivers, type FreeAgentInput } from "./model/waivers.js";
@@ -42,10 +59,16 @@ function invalidate(prefix: string) {
 }
 
 // ---------------------------------------------------------------- league loading
-type Provider = "demo" | "yahoo";
+type Provider = "demo" | "yahoo" | "import";
 function parseProvider(p: string): Provider {
-  if (p === "demo" || p === "yahoo") return p;
-  throw new HttpError(404, `Unknown provider "${p}"`, "Use provider demo or yahoo.");
+  if (p === "demo" || p === "yahoo" || p === "import") return p;
+  throw new HttpError(404, `Unknown provider "${p}"`, "Use provider demo, yahoo or import.");
+}
+
+async function mustReadImport(id: string): Promise<StoredImport> {
+  const s = await readImport(id);
+  if (!s) throw new HttpError(404, `No imported league "${id}"`, "Import it again on the Connect tab.");
+  return s;
 }
 
 function demoSeed(id: string): number {
@@ -62,6 +85,10 @@ async function loadLeague(provider: Provider, id: string, refresh: boolean): Pro
     const state = await getNflState();
     const league = buildDemoLeague({ season: db.season, currentWeek: state.currentWeek, players: db.players.values(), builtAt: db.builtAt }, demoSeed(id));
     return { db, league };
+  }
+  if (provider === "import") {
+    const [stored, state] = await Promise.all([mustReadImport(id), getNflState()]);
+    return { db, league: buildImportLeague(db, stored, { season: db.season, currentWeek: state.currentWeek }) };
   }
   const league = await yahoo.getLeague(db, id, { refresh });
   return { db, league };
@@ -260,6 +287,11 @@ apiRouter.get(
         const d = demoFreeAgents({ ...l.league, myTeamId: team }, l.db.players.values());
         fas = d.freeAgents;
         myPriority = d.myPriority;
+      } else if (provider === "import") {
+        const stored = await mustReadImport(req.params.id);
+        const d = importFreeAgents(l.league, l.db, stored, l.league.settings.currentWeek);
+        fas = d.freeAgents;
+        myPriority = team === l.league.myTeamId ? d.myPriority : undefined;
       } else {
         const y = await yahoo.getFreeAgents(l.db, req.params.id, { refresh });
         fas = y.freeAgents;
@@ -294,6 +326,85 @@ apiRouter.get(
       .sort((a, b) => b.value - a.value || b.ppg - a.ppg || a.name.localeCompare(b.name))
       .map((p) => ({ ...p, ownerTeamId: owner.get(p.id), rostered: owner.has(p.id) }));
     res.json(rows);
+  }),
+);
+
+// ---------------------------------------------------------------- import (Yahoo web pages, no API)
+apiRouter.get(
+  "/api/import/bookmarklet.js",
+  h(async (req, res) => {
+    if (req.query.format === "url") return res.json({ url: await bookmarkletUrl() });
+    res.type("application/javascript").set("Cache-Control", "no-cache").send(await bookmarkletCode());
+  }),
+);
+
+apiRouter.get(
+  "/api/import",
+  h(async (_req, res) => {
+    res.json(await listImports());
+  }),
+);
+
+apiRouter.post(
+  "/api/import",
+  h(async (req, res) => {
+    const body = req.body as Record<string, unknown> | undefined;
+    if (!body || typeof body !== "object") throw new HttpError(400, "Expected a JSON body", "Send the bookmarklet JSON, or { text, teamName } for pasted roster text.");
+    if (JSON.stringify(body).length > MAX_BYTES) throw new HttpError(413, "Import is larger than 1 MB");
+    let stored: StoredImport;
+    let skippedLines: number | undefined;
+    if (typeof body.text === "string") {
+      const teamName = typeof body.teamName === "string" && body.teamName.trim() ? body.teamName.trim().slice(0, 80) : "My Team";
+      const parsed = parseRosterText(body.text, teamName);
+      skippedLines = parsed.skippedLines;
+      if (!parsed.teams.length) throw new HttpError(400, "No players found in the pasted text", 'Each player line should look like "Patrick Mahomes KC - QB" or "Josh Allen (QB - BUF)".');
+      const targetId = typeof body.id === "string" && body.id ? body.id : undefined;
+      const existing = targetId && parsed.teams.length === 1 ? await readImport(targetId) : null;
+      if (targetId && parsed.teams.length === 1 && !existing) throw new HttpError(404, `No imported league "${targetId}"`);
+      stored = existing ? mergeTeams(existing, parsed.teams) : newPasteImport(parsed.teams, parsed.teams.length > 1 ? "Pasted league" : `${teamName} (pasted)`);
+      for (const t of stored.teams) if (t.players.length > 40) throw new HttpError(400, `Team "${t.name}" has ${t.players.length} players; the limit is 40`);
+      stored.importedAt = new Date().toISOString();
+    } else {
+      stored = validateImport(body);
+    }
+    await saveImport(stored);
+    invalidate(`import:${stored.id}:`);
+    res.json({
+      id: stored.id,
+      name: stored.name,
+      teams: stored.teams.map((t) => ({ id: t.id, name: t.name, players: t.players.length })),
+      myTeamId: stored.myTeamId,
+      settingsSource: stored.settingsSource,
+      ...(skippedLines !== undefined ? { skippedLines } : {}),
+    });
+  }),
+);
+
+apiRouter.get(
+  "/api/import/:id",
+  h(async (req, res) => {
+    const { diagnostics: _d, ...rest } = await mustReadImport(req.params.id);
+    res.json(rest);
+  }),
+);
+
+apiRouter.put(
+  "/api/import/:id/settings",
+  h(async (req, res) => {
+    const next = applySettings(await mustReadImport(req.params.id), req.body);
+    await saveImport(next);
+    invalidate(`import:${next.id}:`);
+    const { diagnostics: _d, ...rest } = next;
+    res.json(rest);
+  }),
+);
+
+apiRouter.delete(
+  "/api/import/:id",
+  h(async (req, res) => {
+    if (!isValidId(req.params.id) || !(await deleteImport(req.params.id))) throw new HttpError(404, `No imported league "${req.params.id}"`);
+    invalidate(`import:${req.params.id}:`);
+    res.json({ ok: true });
   }),
 );
 

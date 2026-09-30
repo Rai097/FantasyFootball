@@ -365,3 +365,121 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.deepEqual(disc.json, { ok: true });
   });
 });
+
+// Import provider: a 12-team league re-created from the demo rosters as plain
+// names / positions / teams (what the bookmarklet sends), then every endpoint.
+describe("server integration (import provider)", { timeout: 300_000 }, () => {
+  let id = "";
+  let payload: any;
+
+  test("POST /api/import (bookmarklet JSON) → id; GET /api/import lists it", async () => {
+    const a = (await get(`${L}/analysis`)).json;
+    payload = {
+      id: "itest",
+      name: "Imported Test League",
+      numTeams: 12,
+      slots: ["QB", "WR", "WR", "RB", "RB", "TE", "W/R/T", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN", "IR"],
+      scoring: { rec: 1 },
+      regularSeasonEnd: 14,
+      finalWeek: 17,
+      myTeamId: "3",
+      settingsSource: "page",
+      teams: a.league.teams.map((t: any, i: number) => ({
+        id: String(i + 1),
+        name: t.name,
+        players: t.playerIds.map((pid: string) => {
+          const p = a.players[pid];
+          return { yahooId: p.ids?.yahoo, name: p.name, pos: p.pos, team: p.team };
+        }),
+      })),
+      importedAt: new Date().toISOString(),
+    };
+    payload.teams[0].players.push({ name: "Zzzz Nosuchplayer", pos: "WR", team: "NYJ" });
+    const r = await post("/api/import", payload);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    id = r.json.id;
+    assert.equal(id, "itest");
+    const list = await get("/api/import");
+    assert.ok(list.json.some((x: any) => x.id === id && x.numTeams === 12));
+  });
+
+  test("league / analysis / values / trades / waivers work with provider=import", async () => {
+    const base = `/api/league/import/${id}`;
+    const league = await get(base);
+    assert.equal(league.status, 200);
+    assert.equal(league.json.provider, "import");
+    assert.equal(league.json.myTeamId, "3");
+    assert.equal(league.json.settings.scoring.rec, 1);
+    assert.equal(league.json.import.settingsSource, "page");
+    assert.deepEqual(league.json.teams[0].unmatched, ["Zzzz Nosuchplayer (WR, NYJ)"]);
+    const demo = (await get(L)).json;
+    for (let i = 0; i < 12; i++) assert.equal(league.json.teams[i].playerIds.length, demo.teams[i].playerIds.length, `team ${i + 1} resolution`);
+
+    const an = await get(`${base}/analysis`);
+    assert.equal(an.status, 200);
+    assertClean(an.json, "import analysis");
+    assert.equal(an.json.teams.length, 12);
+    assert.equal(an.json.myTeamId, "3");
+
+    const values = await get(`${base}/values`);
+    assert.equal(values.status, 200);
+    assert.ok(values.json[0].value >= 99);
+
+    const trades = await get(`${base}/trades`);
+    assert.equal(trades.status, 200);
+    assert.ok(Array.isArray(trades.json) && trades.json.length > 0, "no trades");
+    assertClean(trades.json, "import trades");
+
+    const w = await get(`${base}/waivers`);
+    assert.equal(w.status, 200);
+    assertClean(w.json, "import waivers");
+    assert.ok(w.json.freeAgents.length >= 10);
+  });
+
+  test("PUT settings, paste mode, delete", async () => {
+    const put = await req("PUT", `/api/import/${id}/settings`, { scoring: { rec: 0 }, slots: "QB, RB x2, WR x2, TE, W/R/T, K, DEF, BN x6, IR", waiverPriority: 4, myTeamId: "2" });
+    assert.equal(put.status, 200, JSON.stringify(put.json));
+    assert.equal(put.json.settingsSource, "user");
+    const league = (await get(`/api/league/import/${id}`)).json;
+    assert.equal(league.settings.scoring.rec, 0);
+    assert.equal(league.myTeamId, "2");
+    const w = (await get(`/api/league/import/${id}/waivers`)).json;
+    assert.equal(w.myPriority, 4);
+    const bad = await req("PUT", `/api/import/${id}/settings`, { slots: "QB, NOPE" });
+    assert.equal(bad.status, 400);
+
+    // Paste mode: replace team 1's roster by name.
+    const t1 = payload.teams[0];
+    const text = t1.players.slice(0, 5).map((p: any) => `${p.name} ${p.team} - ${p.pos}`).join("\n");
+    const paste = await post("/api/import", { id, text, teamName: t1.name });
+    assert.equal(paste.status, 200, JSON.stringify(paste.json));
+    assert.equal(paste.json.id, id);
+    const after = (await get(`/api/league/import/${id}`)).json;
+    assert.equal(after.teams.length, 12);
+    assert.equal(after.teams[0].playerIds.length, 5);
+
+    const fresh = await post("/api/import", { text: "=== A ===\n" + text + "\n=== B ===\n" + text, teamName: "x" });
+    assert.equal(fresh.status, 200);
+    assert.equal(fresh.json.teams.length, 2);
+    const none = await post("/api/import", { text: "hello world" });
+    assert.equal(none.status, 400);
+    const tooMany = await post("/api/import", { teams: Array.from({ length: 21 }, () => ({ players: [] })) });
+    assert.equal(tooMany.status, 400);
+
+    assert.equal((await req("DELETE", `/api/import/${fresh.json.id}`)).status, 200);
+    assert.equal((await req("DELETE", `/api/import/${id}`)).status, 200);
+    assert.equal((await get(`/api/league/import/${id}`)).status, 404);
+    assert.equal((await req("DELETE", `/api/import/${id}`)).status, 404);
+  });
+
+  test("GET /api/import/bookmarklet.js", async () => {
+    const res = await fetch(`${base}/api/import/bookmarklet.js`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /javascript/);
+    const code = await res.text();
+    assert.ok(code.length > 2000 && code.length < 60_000, `size ${code.length}`);
+    assert.ok(!/\bimport\s*[{(*]|\brequire\(/.test(code), "must be self-contained");
+    const url = (await get("/api/import/bookmarklet.js?format=url")).json.url as string;
+    assert.ok(url.startsWith("javascript:"));
+  });
+});

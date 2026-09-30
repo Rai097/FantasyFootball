@@ -133,13 +133,25 @@ export interface Team {
   faabRemaining?: number;
 }
 
+/** Extra facts about a league imported from Yahoo's web pages (provider "import"). */
+export interface ImportMeta {
+  /** Where settings came from: read from Yahoo's page, partly read, Yahoo defaults, or edited by the user. */
+  settingsSource: "page" | "partial" | "default" | "user";
+  importedAt: string;
+  waiverPriority?: number;
+  /** Yahoo league number, when imported by the bookmarklet. */
+  leagueId?: string;
+}
+
 export interface League {
-  provider: "yahoo" | "sleeper" | "demo";
+  provider: "yahoo" | "sleeper" | "demo" | "import";
   id: string;
   settings: LeagueSettings;
   teams: Team[];
   myTeamId?: string;
   fetchedAt: string;
+  /** Present for provider "import" only. */
+  import?: ImportMeta;
 }
 
 export interface LineupSlot {
