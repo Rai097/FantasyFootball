@@ -4,7 +4,9 @@ import {
   V3,
   acceptCurve,
   acceptanceV3,
+  benchUpgradeFilter,
   benchUpgradeOk,
+  qbRuleNote,
   bestQbRank,
   dropCost,
   evaluateTradeV3,
@@ -199,6 +201,7 @@ test("evaluate: v3 verdict, band and acceptance; flags pieces outside the rules"
   assert.match(k.why, /Outside the finder's rules: mK/);
   const qb = evaluateTradeV3(ctx, "me", "them", ["mQB"], ["tWR3"]);
   assert.match(qb.why, /QB rule/);
+  assert.equal(qb.verdict, "Decline — QB rule");
 });
 
 test("market attachment: quantile-mapped true value, edge, missing-but-ranked players", () => {
@@ -219,11 +222,24 @@ test("market attachment: quantile-mapped true value, edge, missing-but-ranked pl
   assert.equal(g("a").edge, undefined);
 });
 
-test("bench-upgrade rule: both players worth ≥ 3 and my season lineup +0.8", () => {
-  const a = vp("a", "WR", 9, 4, G);
-  const b = vp("b", "WR", 10, 5, G);
+test("bench-upgrade rule: both players market ≥ 3 AND value ≥ 3, received player a real asset, my season +0.8", () => {
+  const a = vp("a", "WR", 9, 4, { ...G, market: 5 });
+  const b = vp("b", "WR", 10, 6, { ...G, market: 6 });
   assert.equal(benchUpgradeOk(a, b, 1), true);
   assert.equal(benchUpgradeOk(a, b, 0.5), false);
-  assert.equal(benchUpgradeOk(vp("z", "WR", 5, 1, { ...G, market: 1 }), b, 2), false);
-  assert.equal(benchUpgradeOk(vp("z", "WR", 5, 1, { ...G, market: 3.5 }), b, 2), true);
+  assert.equal(benchUpgradeOk(vp("z", "RB", 5, 0, { ...G, market: 12 }), b, 2), false, "our value 0 (the Kamara case)");
+  assert.equal(benchUpgradeOk(a, vp("q", "QB", 15, 0.2, { ...G, market: 12 }), 2), false, "our value 0.2");
+  assert.equal(benchUpgradeOk(a, vp("s", "WR", 8, 4, { ...G, market: 4 }), 2), false, "received player not a real asset");
+  assert.equal(benchUpgradeOk(a, vp("s", "WR", 8, 4, { ...G, market: 9 }), 2), true);
+});
+
+test("bench-upgrade filter applies eligibility and the QB rule", () => {
+  const ok = benchUpgradeFilter(ctx, "me");
+  // Their QB24 is not a spare (one QB); my QB2 may only go to them because they need a QB.
+  assert.equal(ok(P("mRB4"), P("tQB"), 2, "them"), false);
+  assert.equal(ok(P("mK"), P("tWR4"), 2, "them"), false);
+  assert.equal(ok(P("mRB4"), P("tWR4"), 2, "them"), true);
+  assert.equal(ok(P("mQB"), P("tWR4"), 2, "them"), false, "my starting QB never moves");
+  const notes = qbRuleNote(ctx, "me", "them", [P("mQB2")], [P("tWR5")]);
+  assert.match(notes!.join(" "), /QB rule: mQB2 .* allowed/);
 });

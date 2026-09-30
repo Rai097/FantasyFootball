@@ -561,7 +561,7 @@ function upgradeWhy(ctx: TradeContext, j: Judged, mine: ValuedPlayer, theirs: Va
 export function findBenchUpgrades(
   ctx: TradeContext,
   myTeamId: string,
-  opts: { mode?: TradeMode; limit?: number; partnerId?: string; accept?: (mine: ValuedPlayer, theirs: ValuedPlayer, j: Judged) => boolean } = {},
+  opts: { mode?: TradeMode; limit?: number; partnerId?: string; accept?: (mine: ValuedPlayer, theirs: ValuedPlayer, j: Judged, partnerId: string) => boolean } = {},
 ): Trade[] {
   const mode = opts.mode ?? "balanced";
   if (tradeDeadlinePassed(ctx.league)) return [];
@@ -588,7 +588,7 @@ export function findBenchUpgrades(
         if (j.sim.fairness < V2.benchUpgradeFairness || !j.valueOk) continue;
         if (!(j.sim.myParts.season > 0.05 || j.sim.myParts.playoffs > 0.05)) continue;
         if (j.myDelta <= 0.05) continue;
-        if (opts.accept && !opts.accept(m, g, j)) continue;
+        if (opts.accept && !opts.accept(m, g, j, partner.id)) continue;
         scored.push({ j, their, m, g });
       }
     }

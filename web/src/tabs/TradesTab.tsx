@@ -112,11 +112,35 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
             {data.valueSource === "model" && (
               <div className="notice warn small">Market values (FantasyCalc) are unavailable right now, so "what the other manager thinks" uses our own values: fairness and acceptance are rougher, and buy-low / sell-high edges are not shown.</div>
             )}
-            <div className="notice finder-summary">{data.summary}</div>
             {data.trades.length === 0 ? (
-              <Empty>No clear win right now. Check the smaller edges, near misses and bench upgrades below, or try another mode.</Empty>
+              <section className="card stack-sm empty-finder">
+                <div className="notice warn finder-summary strong-summary">{data.summary}</div>
+                {(data.partners?.length ?? 0) > 0 && (
+                  <>
+                    <h3>Best-fit partners — where a plausible ask starts</h3>
+                    <ol className="partner-list">
+                      {data.partners!.slice(0, 3).map((p) => (
+                        <li key={p.teamId}>
+                          <span className="strong">{names.get(p.teamId) ?? p.teamId}</span> <span className="muted small">fit {f1(p.complementarity)}</span>
+                          <div className="small">{p.pitch}</div>
+                        </li>
+                      ))}
+                    </ol>
+                  </>
+                )}
+                {data.nearMisses.length > 0 && (
+                  <>
+                    <h3>Closest near misses</h3>
+                    {data.nearMisses.slice(0, 3).map((t) => (
+                      <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} defaultOpen />
+                    ))}
+                  </>
+                )}
+                <p className="muted small">Also check the smaller edges and bench upgrades below, or try another mode.</p>
+              </section>
             ) : (
               <>
+                <div className="notice finder-summary">{data.summary}</div>
                 <p className="muted small">
                   {data.trades.length} trade{data.trades.length > 1 ? "s" : ""} a manager would plausibly accept (your team +1.0 or more, fair or better for them by market value, their lineup not worse), best first by min(your gain, theirs + 2) × acceptance.
                 </p>
@@ -145,8 +169,12 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
                 <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} />
               ))}
             </Fold>
-            <Fold title="Near misses" count={data.nearMisses.length} hint="good for you, but they'd likely refuse — or only marginal for you">
-              {data.nearMisses.map((t) => (
+            <Fold
+              title={data.trades.length === 0 ? "More near misses" : "Near misses"}
+              count={data.trades.length === 0 ? Math.max(0, data.nearMisses.length - 3) : data.nearMisses.length}
+              hint="good for you, but they'd likely refuse — or only marginal for you"
+            >
+              {data.nearMisses.slice(data.trades.length === 0 ? 3 : 0).map((t) => (
                 <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} />
               ))}
             </Fold>
@@ -154,7 +182,7 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
         )}
 
         <h2 className="section-title">Bench upgrades</h2>
-        <p className="muted small">1-for-1 swaps of a bench player (or your weakest starter) for someone else's bench player that add 0.8+ pts/week to your rest-of-season lineup; both players must be worth something (market or our value 3+).</p>
+        <p className="muted small">1-for-1 swaps of a bench player (or your weakest starter) for someone else's bench player that add 0.8+ pts/week to your rest-of-season lineup; same eligibility and QB rule as the finder; both players worth 3+ by market and by our value, and the one you get is a real asset (market 8+ or our value 5+).</p>
         {bench.loading && <Loading label="Looking for bench upgrades…" />}
         {bench.error && <ErrorBox error={bench.error} onRetry={bench.reload} />}
         {!bench.loading && bench.data && bench.data.length === 0 && <Empty>No bench swap raises your season or playoff lineup at a price the other side would take.</Empty>}

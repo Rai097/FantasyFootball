@@ -419,3 +419,5 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .tier-sub { margin: 0; }
 .cheap-toggle { cursor: pointer; white-space: nowrap; }
 .price { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
+.strong-summary { font-weight: 600; font-size: 15px; }
+.empty-finder h3 { margin-top: 8px; }

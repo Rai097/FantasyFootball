@@ -258,6 +258,49 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.equal(typeof self.json.error, "string");
   });
 
+  test("QB rule holds in every v3 list (trades, smaller edges, near misses, bench upgrades) for 3 teams", async () => {
+    const analysis = (await get(`${L}/analysis`)).json;
+    const P = analysis.players;
+    const rank = (p: any) => (typeof p.market === "number" ? (p.marketPosRank ?? 99) : p.posRank);
+    const qbsOf = (teamId: string) =>
+      analysis.teams
+        .find((t: any) => t.team.id === teamId)
+        .team.playerIds.map((id: string) => P[id])
+        .filter((p: any) => p && p.pos === "QB" && p.remainingGames > 0 && p.ppg > 0);
+    const bestRank = (teamId: string) => Math.min(99, ...qbsOf(teamId).map(rank));
+    const ruleOk = (qb: any, from: string, to: string) => {
+      const qbs = qbsOf(from).sort((a: any, b: any) => (b.effPpg ?? b.ppg) - (a.effPpg ?? a.ppg) || rank(a) - rank(b));
+      return qbs.length >= 2 && rank(qbs[0]) <= 14 && rank(qbs[1]) <= 14 && qbs[1].id === qb.id && bestRank(to) > 18;
+    };
+    let checked = 0;
+    for (const team of analysis.teams.slice(0, 3).map((t: any) => t.team.id)) {
+      const r = (await get(`${L}/trades2?team=${team}`)).json;
+      const bench = (await get(`${L}/bench-upgrades?team=${team}`)).json;
+      for (const t of [...r.trades, ...r.smallerEdges, ...r.nearMisses, ...bench]) {
+        checked++;
+        const sides: [any[], string, string][] = [
+          [t.me.gives, t.me.teamId, t.them.teamId],
+          [t.them.gives, t.them.teamId, t.me.teamId],
+        ];
+        for (const [ps, from, to] of sides) {
+          for (const p of ps) {
+            assert.ok(p.pos !== "K" && p.pos !== "DEF", `${t.key}: ${p.pos}`);
+            if (p.pos !== "QB") continue;
+            assert.ok(ruleOk(p, from, to), `${t.key}: QB ${p.name} moves ${from}→${to} without the QB rule`);
+            assert.ok((t.notes ?? []).some((n: string) => n.startsWith("QB rule:") && /allowed/.test(n) && !/NOT allowed/.test(n)), `${t.key}: QB rule not logged`);
+          }
+        }
+      }
+      for (const t of bench) {
+        for (const p of [...t.me.gives, ...t.them.gives]) assert.ok((p.market ?? p.value) >= 3 && p.value >= 3, `${t.key}: bench piece ${p.name} market ${p.market} value ${p.value}`);
+        const g = t.them.gives[0];
+        assert.ok((g.market ?? g.value) >= 8 || g.value >= 5, `${t.key}: received ${g.name} is not a real asset`);
+        assert.ok(t.me.seasonDelta >= 0.75, `${t.key}: season ${t.me.seasonDelta}`);
+      }
+    }
+    assert.ok(checked > 0);
+  });
+
   test("POST trade/evaluate", async () => {
     const analysis = (await get(`${L}/analysis`)).json;
     const me = analysis.teams.find((t: any) => t.team.id === analysis.myTeamId);
@@ -368,7 +411,7 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
       assert.ok(t.fairness >= 0.9);
       assert.ok(t.why.length > 0);
       assert.ok((t.me.seasonDelta ?? 0) >= 0.75, `${t.key}: bench upgrade season ${t.me.seasonDelta}`);
-      for (const p of [...t.me.gives, ...t.them.gives]) assert.ok((p.market ?? 0) >= 3 || p.value >= 3, `${t.key}: worthless ${p.name}`);
+      for (const p of [...t.me.gives, ...t.them.gives]) assert.ok((p.market ?? p.value) >= 3 && p.value >= 3, `${t.key}: worthless ${p.name}`);
     }
   });
 

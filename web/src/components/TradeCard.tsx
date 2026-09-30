@@ -125,13 +125,15 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
   );
 }
 
-function Side({ title, players, total, drops, market }: { title: string; players: VP[]; total: number; drops?: VP[]; market?: boolean }) {
+function Side({ title, players, total, drops, market: marketTotals }: { title: string; players: VP[]; total: number; drops?: VP[]; market?: boolean }) {
+  // Per-player market + our value whenever market values exist (bench-upgrade cards too), not only on v3 cards.
+  const market = marketTotals || players.some((p) => p.market !== undefined);
   return (
     <div className="trade-side">
       <div className="side-title">
         {title}{" "}
-        <span className="muted small" title={market ? "Market package value: best + 0.85·2nd + 0.70·3rd" : undefined}>
-          {market ? "market" : "value"} {f1(total)}
+        <span className="muted small" title={marketTotals ? "Market package value: best + 0.85·2nd + 0.70·3rd" : "Sum of our values"}>
+          {marketTotals ? "market" : "value"} {f1(total)}
         </span>
       </div>
       {players.map((p) => (
@@ -145,10 +147,10 @@ function Side({ title, players, total, drops, market }: { title: string; players
             {market && (
               <span
                 className="muted small"
-                title={`Market ${p.marketEstimated ? "(not in the market list: our estimate) " : ""}${f1(p.market ?? p.value)}${p.marketRank ? `, #${p.marketRank} overall` : ""}. True = our value ${f1(p.value)} on the model scale, ${f1(p.trueMarket ?? p.value)} on the market scale.`}
+                title={`Market ${p.marketEstimated ? "(not in the market list: our estimate) " : ""}${f1(p.market ?? p.value)}${p.marketRank ? `, #${p.marketRank} overall` : ""}. Ours = our value ${f1(p.value)} (0–100 model scale); ${f1(p.trueMarket ?? p.value)} on the market scale.`}
               >
                 mkt {f1(p.market ?? p.value)}
-                {p.marketEstimated ? "*" : ""} · true {f1(p.trueMarket ?? p.value)}
+                {p.marketEstimated ? "*" : ""} · ours {f1(p.value)}
               </span>
             )}
             <Why text={p.why} />

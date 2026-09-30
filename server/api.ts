@@ -26,7 +26,7 @@ import { bookmarkletCode, bookmarkletUrl } from "./providers/import-bookmarklet.
 import { analyzeLeague, type LeagueContext } from "./model/analysis.js";
 import { findTrades } from "./model/trades.js";
 import { findBenchUpgrades } from "./model/tradesV2.js";
-import { benchUpgradeOk, evaluateTradeV3, findTradesV3 } from "./model/tradesV3.js";
+import { benchUpgradeFilter, evaluateTradeV3, findTradesV3, qbRuleNote } from "./model/tradesV3.js";
 import { attachMarket, marketQuery, type ValueSource } from "./model/market.js";
 import { parseMode } from "./model/rosterScore.js";
 import { rankWaivers, type FreeAgentInput } from "./model/waivers.js";
@@ -349,8 +349,16 @@ apiRouter.get(
     const team = teamParam(req, l.league);
     const mode = parseMode(req.query.mode);
     const key = `${provider}:${req.params.id}:bench:${team}:${mode}`;
-    // v3: no worthless-for-worthless swaps (both players worth ≥ 3, my season lineup +0.8 pts/week).
-    res.json(await cached<Trade[]>(key, false, async () => findBenchUpgrades(l.ctx, team, { mode, accept: (m, g, j) => benchUpgradeOk(m, g, j.sim.myParts.season) })));
+    // v3: same eligibility and QB rule as the finder; both players market ≥ 3 and value ≥ 3, the one I get market ≥ 8 or value ≥ 5; my season lineup +0.8 pts/week.
+    res.json(
+      await cached<Trade[]>(key, false, async () => {
+        const ok = benchUpgradeFilter(l.ctx, team);
+        return findBenchUpgrades(l.ctx, team, { mode, accept: (m, g, j, partnerId) => ok(m, g, j.sim.myParts.season, partnerId) }).map((t) => {
+          const qb = qbRuleNote(l.ctx, team, t.them.teamId, t.me.gives, t.them.gives);
+          return qb ? { ...t, notes: [...(t.notes ?? []), ...qb] } : t;
+        });
+      }),
+    );
   }),
 );
 

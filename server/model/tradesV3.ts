@@ -431,6 +431,16 @@ function tradePitch(j: Judged3, their: TeamV3): string {
   return `${Deal} — fair by market value; ${gains}.`;
 }
 
+function qbNote(my: TeamV3, their: TeamV3, give: ValuedPlayer[], get: ValuedPlayer[]): string[] | null {
+  const qbs = [...give, ...get].filter((p) => p.pos === "QB");
+  if (!qbs.length) return null;
+  return qbs.map((q) => {
+    const [from, to] = give.includes(q) ? [my, their] : [their, my];
+    const ok = qbTradeable(from.roster, to.roster)?.id === q.id;
+    return `QB rule: ${q.name} is ${from.team.name}'s second QB (QB${qbRank(q)}, both top-${V3.qbDepthRank}) and ${to.team.name}'s best QB ranks ${bestQbRank(to.roster)} (> ${V3.qbNeedRank}) → ${ok ? "allowed" : "NOT allowed"}.`;
+  });
+}
+
 function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, mode: TradeMode): Trade {
   const S = ctx.league.settings;
   const { give, get } = j;
@@ -478,7 +488,7 @@ function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, m
     bandLabel: band.label,
     fairnessPct: band.pct,
     pitch: tradePitch(j, their),
-    notes: byeNotes(S, j, meAfter.lineup),
+    notes: [...byeNotes(S, j, meAfter.lineup), ...(qbNote(my, their, give, get) ?? [])],
     packages: { marketGive: r1(j.marketGive), marketGet: r1(j.marketGet), trueGive: r1(j.trueGive), trueGet: r1(j.trueGet), myTrueChange: r1(j.myTrueChange), theirMarketChange: r1(j.theirMarketChange) },
   };
 }
@@ -630,19 +640,31 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
     const t = build(c);
     return { ...t, reason: reasonOf(c), tags: [...t.tags, c.cls === "marginal" ? "marginal" : "they'd likely refuse"] };
   });
-  const summary = summarize(my, ranked.slice(0, 3).map((r) => r.their), trades, smallerEdges, valueSource, mode);
+  const summary = summarize(my, ranked, trades, smallerEdges, valueSource, mode);
   return { trades, smallerEdges, nearMisses, mode, valueSource, partners, summary, simulated };
 }
 
-function summarize(my: TeamV3, best: TeamV3[], trades: Trade[], edges: Trade[], source: ValueSource, mode: TradeMode): string {
+function summarize(my: TeamV3, ranked: { their: TeamV3; c: number }[], trades: Trade[], edges: Trade[], source: ValueSource, mode: TradeMode): string {
   const src = source === "fantasycalc" ? "Perceived values are FantasyCalc market values" : "Market values are unavailable, so perceived values fall back to our model (edges are not shown)";
   const n = trades.length;
-  const first = n
-    ? `${n} trade${n > 1 ? "s" : ""} another manager would plausibly accept in ${mode} mode${edges.length ? ` (+${edges.length} smaller edge${edges.length > 1 ? "s" : ""})` : ""}.`
-    : `No ${mode} trade clears both sides' bars right now${edges.length ? ` (${edges.length} smaller edge${edges.length > 1 ? "s" : ""} below)` : ""}.`;
+  const best = ranked.slice(0, 3).map((r) => r.their);
   const weak = my.weakest && my.weakest.deficit > 0.02 ? ` Your weakest spot: ${my.weakest.slot}.` : "";
   const fits = best.length ? ` Best fits: ${best.map((t) => t.team.name).join(", ")}.` : "";
-  return `${first}${weak}${fits} ${src}.`;
+  if (n) {
+    return `${n} trade${n > 1 ? "s" : ""} another manager would plausibly accept in ${mode} mode${edges.length ? ` (+${edges.length} smaller edge${edges.length > 1 ? "s" : ""})` : ""}.${weak}${fits} ${src}.`;
+  }
+  // Empty main list: say why.
+  const why: string[] = [];
+  const groups = my.analysis?.groups ?? {};
+  const top3 = (["QB", "RB", "WR", "TE"] as const).filter((g) => groups[g] && groups[g].rank <= 3);
+  if (!weak) why.push(`your starters are at or above the league average at every slot${top3.length ? ` (top-3 at ${top3.join("/")})` : ""}, so few players would start for you`);
+  else if (top3.length) why.push(`your starters rank top-3 at ${top3.join("/")}; your weakest spot is ${my.weakest!.slot}`);
+  else why.push(`your weakest spot is ${my.weakest!.slot}`);
+  const topC = ranked[0]?.c ?? 0;
+  if (topC < 5) why.push("nobody has a bench surplus where you need help, and nobody needs what you have spare");
+  else why.push(`the best fit is ${ranked[0].their.team.name} (fit ${topC.toFixed(1)}), but no package there is fair by market value and raises both lineups`);
+  const txt = why.join("; ");
+  return `No ${mode} trade clears both sides' bars right now${edges.length ? ` (${edges.length} smaller edge${edges.length > 1 ? "s" : ""} below)` : ""}: ${txt}. See the best-fit partners and near misses for a plausible ask. ${src}.`;
 }
 
 // ---------------------------------------------------------------- evaluate
@@ -681,6 +703,8 @@ export function evaluateTradeV3(
   else if (j.myOk) verdict = `They won't accept (${j.theirFail})`;
   else if (j.myDelta >= 0 && j.partnerOk) verdict = "Fair, lean decline";
   else verdict = "Decline";
+  // The QB rule applies to hand-built trades too: a starting QB for a non-needy team is not a trade chip.
+  if (flagged.some(([p, r]) => p.pos === "QB" && r.startsWith("QB rule"))) verdict = "Decline — QB rule";
   notes.unshift(
     `Verdict "${verdict}": ${trade.bandLabel}, ~${Math.round(j.acceptance * 100)}% accept. You: ${j.myOk ? `team ${fmtSigned(j.myDelta)}, true value ${fmtSigned(j.myTrueChange)}` : j.myFail}.`,
   );
@@ -688,12 +712,39 @@ export function evaluateTradeV3(
   return { ...trade, why: `${notes.join(" ")} ${trade.why}`, verdict };
 }
 
-// ---------------------------------------------------------------- bench upgrade filter
+// ---------------------------------------------------------------- QB rule note / bench upgrades
 
-/** v3 bench-upgrade rule: both players worth ≥ 3 (market or true) and my season lineup +0.8 pts/week. */
-export const BENCH_MIN_SEASON = 0.8;
-export function benchUpgradeOk(mine: ValuedPlayer, theirs: ValuedPlayer, mySeasonDelta: number): boolean {
-  const worth = (p: ValuedPlayer) => marketOf(p) >= V3.minPieceValue || p.value >= V3.minPieceValue;
-  return worth(mine) && worth(theirs) && mySeasonDelta >= BENCH_MIN_SEASON;
+/** "QB rule: …" notes when a QB moves (null when none does); used for bench-upgrade cards. */
+export function qbRuleNote(ctx: TradeContext, myTeamId: string, partnerId: string, give: ValuedPlayer[], get: ValuedPlayer[]): string[] | null {
+  if (![...give, ...get].some((p) => p.pos === "QB")) return null;
+  return qbNote(teamV3(ctx, myTeamId), teamV3(ctx, partnerId), give, get);
 }
 
+/**
+ * v3 bench-upgrade filter: both players pass the finder's eligibility (no K/DEF, not hurt long-term,
+ * QB rule) and are real assets — market ≥ 3 AND our value ≥ 3 — the player I receive has market ≥ 8 or
+ * value ≥ 5, and my rest-of-season weekly lineup rises ≥ 0.8.
+ */
+export const BENCH_MIN_SEASON = 0.8;
+export const BENCH_GET_MARKET = 8;
+export const BENCH_GET_VALUE = 5;
+export function benchUpgradeOk(mine: ValuedPlayer, theirs: ValuedPlayer, mySeasonDelta: number): boolean {
+  const worth = (p: ValuedPlayer) => marketOf(p) >= V3.minPieceValue && p.value >= V3.minPieceValue;
+  const asset = marketOf(theirs) >= BENCH_GET_MARKET || theirs.value >= BENCH_GET_VALUE;
+  return worth(mine) && worth(theirs) && asset && mySeasonDelta >= BENCH_MIN_SEASON;
+}
+
+/** Full bench-upgrade acceptance for findBenchUpgrades(…, { accept }): eligibility + QB rule + benchUpgradeOk. */
+export function benchUpgradeFilter(ctx: TradeContext, myTeamId: string) {
+  const S = ctx.league.settings;
+  const my = teamV3(ctx, myTeamId);
+  const teams = new Map<string, TeamV3>();
+  return (mine: ValuedPlayer, theirs: ValuedPlayer, mySeasonDelta: number, partnerId: string): boolean => {
+    let their = teams.get(partnerId);
+    if (!their) teams.set(partnerId, (their = teamV3(ctx, partnerId)));
+    if (ineligibleReason(mine, S, my.irIds) || ineligibleReason(theirs, S, their.irIds)) return false;
+    if (mine.pos === "QB" && qbTradeable(my.roster, their.roster)?.id !== mine.id) return false;
+    if (theirs.pos === "QB" && qbTradeable(their.roster, my.roster)?.id !== theirs.id) return false;
+    return benchUpgradeOk(mine, theirs, mySeasonDelta);
+  };
+}
