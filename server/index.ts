@@ -44,7 +44,11 @@ async function start() {
     const index = path.join(dist, "index.html");
     if (fs.existsSync(index)) {
       app.use(express.static(dist, { index: false, maxAge: "1h" }));
-      app.get(/^(?!\/(api|auth)\/).*/, (_req, res) => res.sendFile(index));
+      app.get(/^(?!\/(api|auth)\/).*/, (_req, res) => {
+        // Hashed assets may be cached; the shell must always be fresh so deploys show up immediately.
+        res.set("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.sendFile(index);
+      });
     } else console.warn(`[server] ${index} not found: run \`npm run build\` first`);
   }
 
