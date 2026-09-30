@@ -349,7 +349,8 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
     else {
       const w = waivers?.get(p.id);
       ask = "Free agent — claim/add";
-      if (w) ask += ` (waivers: ${w.recommendation}${w.drop && (w.recommendation === "claim" || w.recommendation === "optional") ? `, drop ${w.drop.name}` : ""})`;
+      if (w?.recommendation === "pass") ask += " (waivers model: pass, his projection is not above your bench yet: a speculative add)";
+      else if (w) ask += ` (waivers: ${w.recommendation}${w.drop && (w.recommendation === "claim" || w.recommendation === "optional") ? `, drop ${w.drop.name}` : ""})`;
     }
     return {
       player: p,

@@ -7,6 +7,7 @@ import { useAsync, type AsyncState } from "./lib/useAsync";
 import { ConnectTab } from "./tabs/ConnectTab";
 import { MyTeamTab } from "./tabs/MyTeamTab";
 import { TradesTab } from "./tabs/TradesTab";
+import { TargetsTab } from "./tabs/TargetsTab";
 import { ValuesTab } from "./tabs/ValuesTab";
 import { WaiversTab } from "./tabs/WaiversTab";
 
@@ -15,6 +16,7 @@ const TABS = [
   { id: "team", label: "My Team" },
   { id: "trades", label: "Trade Finder" },
   { id: "waivers", label: "Waivers" },
+  { id: "targets", label: "Targets" },
   { id: "values", label: "Values" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -154,6 +156,8 @@ export function App() {
                 <TradesTab analysis={a} active={act} />
               ) : tab === "waivers" ? (
                 <WaiversTab analysis={a} active={act} />
+              ) : tab === "targets" ? (
+                <TargetsTab analysis={a} active={act} />
               ) : (
                 <ValuesTab analysis={a} active={act} />
               )

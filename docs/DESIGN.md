@@ -340,3 +340,36 @@ first, capped at 6000 per partner. My delta uses the mode weights; the partner's
   to them ≥ 0.9, my season or playoff score up; ranked by my Δ; why cites ppg, trend, expected > actual, playoff byes.
 * Value exponent raised 1.15 → 1.35 (star premium); 1-QB leagues: QBs ranked below numTeams get a
   "Backup QB … ~0 trade value" hint in their why.
+
+## Breakout Targets (server/model/breakouts.ts, web/src/tabs/TargetsTab.tsx)
+
+Why: find RB / WR / TE whose ROLE is rising before their fantasy points have (cheap now, path to a bigger role).
+
+**Data**: nflverse `depth_charts/depth_charts_<season>.csv` (~55 MB, daily ESPN snapshots since 2025: `dt, team,
+gsis_id, pos_abb, pos_slot, pos_rank`; ≤ 2024: `week, depth_team, position`) is streamed once by
+`server/data/depthCharts.ts`; only the newest snapshot's QB/RB/WR/TE rows are kept and cached as
+`.cache/depth-<season>.json` (12 h). `getDepthChart(season)` → `byPlayer` (order within team + position; WR orders
+by slot rank then formation slot) and `byTeamPos` lists; null when unavailable (snap order is used instead).
+ffopportunity weekly rows add `WeekLine.opp = { targets: rec_attempt, carries: rush_attempt, airYards: rec_air_yards }`.
+Market values: `getMarketData()` from server/data/fantasycalc.ts (league format); none → our value only.
+
+**Pool**: RB/WR/TE with ≥ 1 game, not on my roster, not long-term injured (IR / ACL … / return designation /
+remainingGames 0), not established (latest snaps ≥ 75% and actual ppg ≥ 14, or ECR RB/WR ≤ 12, TE ≤ 6), and
+relevant (latest snaps ≥ 35%, or ≥ 4.5 expected pts/g over the last 2 weeks, or next man up with a path open).
+
+**Metrics** (league scoring): roleNow = latest snap share; roleTrend = last − mean(earlier) snaps; oppTrend = last −
+mean(earlier) expected points; oppLevel = mean expected points last 2 weeks; gap = expected − actual ppg.
+Situation: players directly ahead (the next one for RB/TE, next two for WR) with injury status (Q/D/O/IR) or a snap
+drop ≥ 15 points, or a promotion to #1 on the chart from < 50% snaps in every earlier week → bonus 1; tags
+handcuff (RB2 behind an RB with ≥ 55% snaps or ECR ≤ 24), committee (two RBs ≥ 40%), WR3 rising (WR3, +5 pts
+snaps), TE1 in waiting (TE2+, rising or ≥ 40%) → 0.5. Cheap = market < 15 (or our value < 12 without a market).
+**Score** = 100 × (0.30·n(roleTrend) + 0.25·n(oppTrend) + 0.15·n(gap) + 0.20·situation + 0.10·cheap), n() = 2nd–98th
+percentile min-max over the pool. Upside (0.7·clamp((production rank − ECR rank)/24) + 0.3·age ≤ 26) breaks ties.
+**Ask**: rostered → the lowest-value bench player of mine with value ≥ 0.9 × target value, else the cheapest bench
+pair; FA → "Free agent — claim/add" + the waivers module's call.
+
+```
+GET /api/league/:provider/:id/breakouts?team=&pos=RB|WR|TE|all&limit=30
+  → { targets: BreakoutTarget[], notes: string[] }   (types.ts BreakoutTarget: player, where, score, components,
+      weeks, snaps, expPpg, actPpg, touches?, depthLabel?, ahead[], tags[], thesis, ask)
+```
