@@ -657,3 +657,18 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     assert.ok(url.startsWith("javascript:"));
   });
 });
+
+test("production without APP_PASSWORD refuses to start (fail closed)", { timeout: 60_000 }, async () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "ftd-noauth-"));
+  const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), path.join(ROOT, "server/index.ts")], {
+    cwd: workDir,
+    // Empty APP_PASSWORD: dotenv never overwrites a variable that is already set.
+    env: { ...process.env, NODE_ENV: "production", APP_PASSWORD: "", PORT: "0" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let log = "";
+  child.stderr!.on("data", (d) => (log += d));
+  const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
+  assert.equal(code, 1, log);
+  assert.match(log, /refusing to start/);
+});

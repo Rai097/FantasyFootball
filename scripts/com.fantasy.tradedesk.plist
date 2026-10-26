@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.fantasy.tradedesk</string>
+
+  <!-- Trade Desk on the Mac mini (127.0.0.1:5070, exposed at https://ff.raibot.us via the raibot-dashboard tunnel).
+       PINNED: code and the built UI (web/dist) come from the release worktree /Users/raitsai/FantasyFootball-run
+       (git worktree of ~/FantasyFootball, detached at the release commit). League imports persist in its .data/;
+       APP_PASSWORD lives in its .env (owner-written, never committed).
+       Install: cp scripts/com.fantasy.tradedesk.plist ~/Library/LaunchAgents/ &&
+         launchctl load ~/Library/LaunchAgents/com.fantasy.tradedesk.plist
+       Stop: launchctl unload ~/Library/LaunchAgents/com.fantasy.tradedesk.plist -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/raitsai/FantasyFootball-run/node_modules/.bin/tsx</string>
+    <string>server/index.ts</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <key>PORT</key>
+    <string>5070</string>
+    <key>HOST</key>
+    <string>127.0.0.1</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/raitsai/FantasyFootball-run</string>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/raitsai/FantasyFootball-run/server.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/raitsai/FantasyFootball-run/server.log</string>
+</dict>
+</plist>
