@@ -8,6 +8,7 @@ import { ago } from "./lib/format";
 import { loadActive, loadImportBackup, saveActive } from "./lib/storage";
 import { useAsync, type AsyncState } from "./lib/useAsync";
 import { ConnectTab } from "./tabs/ConnectTab";
+import { LeagueTab } from "./tabs/LeagueTab";
 import { MyTeamTab } from "./tabs/MyTeamTab";
 import { TradesTab } from "./tabs/TradesTab";
 import { TargetsTab } from "./tabs/TargetsTab";
@@ -23,6 +24,7 @@ function staleDays(iso: string | undefined): number {
 const TABS = [
   { id: "connect", label: "Connect" },
   { id: "team", label: "My Team" },
+  { id: "league", label: "League" },
   { id: "trades", label: "Trade Finder" },
   { id: "waivers", label: "Waivers" },
   { id: "targets", label: "Targets" },
@@ -297,7 +299,9 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
           <NeedLeague active={active} analysis={analysis} onConnect={() => setTab("connect")}>
             {(a, act) =>
               tab === "team" ? (
-                <MyTeamTab analysis={a} />
+                <MyTeamTab analysis={a} onOpenLeague={() => setTab("league")} />
+              ) : tab === "league" ? (
+                <LeagueTab analysis={a} active={act} />
               ) : tab === "trades" ? (
                 <TradesTab analysis={a} active={act} />
               ) : tab === "waivers" ? (

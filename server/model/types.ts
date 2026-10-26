@@ -216,8 +216,10 @@ export interface TeamAnalysis {
   needs: string[];
   surplus: string[];
   powerRank: number;
-  /** Power-rank score: 0.7*starterPpg + 0.3*(sum of top-3 bench vorp). */
+  /** Power-rank score: 0.7*starterPpg + 0.3*benchStrength. */
   powerScore: number;
+  /** Sum of the top-3 playable bench players' VORP (the bench part of the power score). */
+  benchStrength: number;
   /** Remaining week -> number of current starters on bye. */
   byeExposure: Record<number, number>;
   /** Human-readable injury notes for rostered players. */

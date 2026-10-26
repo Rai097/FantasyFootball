@@ -4,10 +4,11 @@ import type { BreakoutResult, BreakoutTarget, DetailItem, WaiverRow, League, Pos
 
 export type TradeMode = "now" | "balanced" | "playoffs";
 export type { TradeFinderResult };
+import type { LeagueView } from "../../server/model/league";
 import { ApiError } from "./lib/errors";
 
 export { ApiError };
-export type { WaiverTarget, WaiverRow, BreakoutTarget, BreakoutResult, DetailItem };
+export type { WaiverTarget, WaiverRow, BreakoutTarget, BreakoutResult, DetailItem, LeagueView };
 
 /** ValuedPlayer as served by the API. */
 export type VP = ValuedPlayer;
@@ -264,6 +265,8 @@ export const api = {
   benchUpgrades: (a: Active, mode: TradeMode = "balanced") => request<Trade[]>("GET", `${base(a)}/bench-upgrades${qs({ team: a.team, mode })}`),
   evaluateTrade: (a: Active, partner: string, give: string[], get: string[]) =>
     request<Trade & { verdict: string }>("POST", `${base(a)}/trade/evaluate`, { team: a.team, partner, give, get }),
+  /** League tab: standings, power-score parts, who is above me and why. */
+  leagueView: (a: Active) => request<LeagueView>("GET", `${base(a)}/league${qs({ team: a.team })}`),
   waivers: (a: Active) => request<WaiversResponse>("GET", `${base(a)}/waivers${qs({ team: a.team })}`),
   values: (a: Active) => request<ValueRow[]>("GET", `${base(a)}/values${qs({ team: a.team })}`),
   /** Breakout Targets: rising role before rising points (RB / WR / TE). */

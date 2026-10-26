@@ -598,3 +598,28 @@ Before: every imported team's record showed "—" and waiver priority was "unkno
 * **UI**: My Team "Record" shows "6-1" with "1,043.2 PF" (tooltip says where it came from), "—" when unknown; the
   Waivers header shows "Waiver priority #N of 12" from the team's rank. The League tab (release 3) builds on these.
 
+## League tab (2026-10-26) — release 3; overrides "Team analysis" on the power formula
+
+Owner: "who's ranked above me and why … NO large texts, key information and expand for details; graphs, charts and
+tables first." Power rankings moved here from My Team.
+
+* **Power score** (analysis.ts, the one formula): `POWER_WEIGHTS.starter (0.7) × starterPpg + POWER_WEIGHTS.bench
+  (0.3) × benchStrength`, where `benchStrength(bench)` = summed VORP of the 3 best playable bench players (now on
+  `TeamAnalysis.benchStrength`). The "0.3·benchValue/10" in "Team analysis" is stale. Ties by record.
+* **Model** (`server/model/league.ts`, pure): `buildLeagueView(teams, myTeamId)` → `{ myTeamId, numTeams, weights,
+  standingsKnown, teams, above, below, summary }`. `teams` rows (by power rank): power score and its two parts,
+  starter ppg, bench strength, `standingsRank` (the import's `record.rank` when every recorded team has one, else win%
+  with ties = ½ then PF; null without a record), `record` ("6-1", "—" unknown), PF / PA (null unknown, never 0).
+  `above` / `below`: per other team, gaps theirs − mine (power, starter, bench, and the weighted parts that sum to the
+  power gap), per-group ppg in GROUPS order, their top-2 starters at the (≤ 2) groups they lead most (id, name, pos,
+  ppg only), and a ≤ 255-char summary ("+4.9 starter pts/wk, partly offset by your deeper bench (+9.1): stronger WR
+  (+5.1) and TE (+3.4); you're better at FLEX and RB." / "Deeper bench (…) outweighs your … starter pts/wk" / below:
+  "-0.6 starter pts/wk vs you: weaker RB (-9.5)…"). Team and player names stay out of the summary.
+* **API**: `GET /api/league/:provider/:id/league?team=` — same league guard and pinned team as the other league
+  routes (a user's `team` is forced; another league or team → 403). Demo payload ≈ 13 KB (test: < 60 KB).
+* **UI** (`web/src/tabs/LeagueTab.tsx`): stat cards (power rank, standings place, power score = parts, teams above);
+  a stacked horizontal bar chart from zero (starter part, bench part; my row highlighted) beside the standings table
+  (#, team, W-L, PF, PA, power rank; PA hidden at phone width), equal height at 1280 px; "Who's above you" and
+  "Below you" as collapsed `ExpandableRow`s (rank, team, summary, power gap) that open a mini grouped-bar chart (their
+  vs my group ppg) and bullet details. Column headers carry a tappable "?". My Team's Power rank stat opens this tab.
+

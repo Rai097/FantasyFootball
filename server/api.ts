@@ -31,6 +31,7 @@ import {
 import { parseRosterText } from "./providers/import-text.js";
 import { bookmarkletCode, bookmarkletUrl } from "./providers/import-bookmarklet.js";
 import { analyzeLeague, analyzeTeams, type LeagueContext } from "./model/analysis.js";
+import { buildLeagueView } from "./model/league.js";
 import { attachFloor, attachRisers } from "./model/signals.js";
 import { getPriorWeeks } from "./data/priorWeeks.js";
 import { findTrades } from "./model/trades.js";
@@ -367,6 +368,17 @@ apiRouter.get(
     const players: Record<string, ValuedPlayer> = {};
     for (const p of relevantPlayers(l)) players[p.id] = p;
     res.json({ league: leagueFor(req, provider, l.league), players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes, valueSource: l.valueSource });
+  }),
+);
+
+// League tab: standings, power rankings (starter vs bench parts) and "who is above me and why" (DESIGN.md "League tab").
+apiRouter.get(
+  "/api/league/:provider/:id/league",
+  h(async (req, res) => {
+    const provider = parseProvider(req.params.provider);
+    const l = await loadContext(provider, req.params.id, isRefresh(req));
+    const team = teamParam(req, l.league, provider);
+    res.json(buildLeagueView(l.ctx.teams, team));
   }),
 );
 

@@ -8,7 +8,7 @@ Release plan (in order; each = build → adversarial test → review → deploy 
    from team names everywhere.
 2. Import enabler: bookmarklet captures standings (W-L-T, points for/against, rank) and waiver priority; parser
    fixtures + defensive diagnostics. Needs the owner's next re-import to show real data.
-3. League tab (new): standings table, power rankings with a chart, "who is above me and why" (per-team position-group
+3. League tab (BUILT 2026-10-26, not yet deployed; DESIGN.md "League tab"): standings table, power rankings with a chart, "who is above me and why" (per-team position-group
    deltas vs mine, starter ppg vs bench), all collapsed rows + bullets on tap. Power rankings MOVE here from My Team.
 4. Trade Finder + Targets cleanup (collapsed cards/rows, bullet details, one-line notices) + tappable column help on
    every table, Values first (Edge "—" when market missing).

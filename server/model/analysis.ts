@@ -14,8 +14,22 @@ export interface LeagueContext {
 }
 
 export const GROUPS = ["QB", "RB", "WR", "TE", "FLEX", "K", "DEF"] as const;
-const groupOf = (slot: SlotKind): string | null =>
+/** Position group a lineup slot counts toward (FLEX-type slots → "FLEX"; bench / IR → null). */
+export const groupOf = (slot: SlotKind): string | null =>
   FLEX_SLOTS.includes(slot) ? "FLEX" : slot === "BN" || slot === "IR" ? null : slot;
+
+/** Power score = starter × starter ppg + bench × bench strength (docs/DESIGN.md "League tab"). */
+export const POWER_WEIGHTS = { starter: 0.7, bench: 0.3 } as const;
+
+/** Bench strength: summed VORP of the 3 best playable bench players (points per game above a waiver-level player). */
+export function benchStrength(bench: ValuedPlayer[]): number {
+  return bench
+    .filter(usable)
+    .map((p) => p.vorp)
+    .sort((a, b) => b - a)
+    .slice(0, 3)
+    .reduce((a, b) => a + b, 0);
+}
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -57,14 +71,9 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
     }
     const benchValue = bench.reduce((a, p) => a + p.value, 0);
     const totalValue = roster.reduce((a, p) => a + p.value, 0);
-    const topBenchVorp = bench
-      .filter(usable)
-      .map((p) => p.vorp)
-      .sort((a, b) => b - a)
-      .slice(0, 3)
-      .reduce((a, b) => a + b, 0);
-    const powerScore = 0.7 * starterPpg + 0.3 * topBenchVorp;
-    return { team, roster, lineup, bench, starterPpg, groups, benchValue, totalValue, powerScore };
+    const topBenchVorp = benchStrength(bench);
+    const powerScore = POWER_WEIGHTS.starter * starterPpg + POWER_WEIGHTS.bench * topBenchVorp;
+    return { team, roster, lineup, bench, starterPpg, groups, benchValue, totalValue, powerScore, topBenchVorp };
   });
 
   // League ranks / averages per group.
@@ -130,6 +139,7 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
       surplus,
       powerRank: powerRank.get(b.team.id)!,
       powerScore: r2(b.powerScore),
+      benchStrength: r2(b.topBenchVorp),
       byeExposure,
       injuryFlags,
     };

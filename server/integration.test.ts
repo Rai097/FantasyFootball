@@ -447,6 +447,35 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     }
   });
 
+  test("GET league (League tab): standings, power parts, who is above me", async () => {
+    const { status, json } = await get(`${L}/league?team=1`);
+    assert.equal(status, 200);
+    const bytes = JSON.stringify(json).length;
+    assert.ok(bytes < 60_000, `league payload ${bytes} bytes`);
+    assertClean(json, "league");
+    assert.equal(json.myTeamId, "1");
+    assert.equal(json.teams.length, 12);
+    assert.deepEqual(summaryProblems(json.summary), [], json.summary);
+    const me = json.teams.find((t: any) => t.mine);
+    assert.equal(me.id, "1");
+    assert.equal(json.above.length, me.powerRank - 1);
+    assert.equal(json.above.length + json.below.length, 11);
+    for (const t of json.teams) {
+      assert.ok(Math.abs(t.starterPart + t.benchPart - t.powerScore) <= 0.02, `${t.id}: power parts`);
+      assert.ok(Number.isInteger(t.standingsRank), "demo has records");
+      assert.equal(t.pointsAgainst, null, "demo has no PA: unknown, not 0");
+    }
+    for (const c of [...json.above, ...json.below]) {
+      assert.notEqual(c.teamId, "1");
+      assert.deepEqual(summaryProblems(c.summary), [], c.summary);
+      assert.ok(c.groups.length >= 5);
+      for (const k of c.keyPlayers) for (const p of k.players) assert.deepEqual(Object.keys(p).sort(), ["id", "name", "pos", "ppg"]);
+    }
+    const t7 = (await get(`${L}/league?team=7`)).json;
+    assert.equal(t7.myTeamId, "7");
+    assert.equal((await get(`${L}/league?team=99`)).status, 400);
+  });
+
   test("GET breakouts", async () => {
     const { status, json } = await get(`${L}/breakouts?limit=30`);
     assert.equal(status, 200);
@@ -649,6 +678,11 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     assert.equal(w.myPriority, 8);
     assert.equal((await get(`${base}/waivers?team=2`)).json.myPriority, 11);
     assert.equal((await get(base)).json.import.waiverPriority, 6);
+    const lv = (await get(`${base}/league`)).json;
+    const r5 = lv.teams.find((t: any) => t.id === "5");
+    assert.equal(r5.standingsRank, 5, "League tab uses the imported standings rank");
+    assert.equal(r5.pointsAgainst, 880);
+    assert.equal(r5.record, "4-3");
   });
 
   test("PUT settings, paste mode, delete", async () => {
