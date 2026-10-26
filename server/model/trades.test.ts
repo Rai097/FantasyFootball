@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import {
   MAX_REPEAT,
   acceptanceOf,
+  applyTrade,
   corePlayers,
   evaluateTrade,
   fairnessOf,
   findTrades,
   partnerRefusalReason,
   partnerWouldConsider,
+  teamState,
   verdictFor,
   type TradeContext,
 } from "./trades.js";
@@ -135,4 +137,24 @@ test("core players and diversity caps", () => {
     for (const id of ct) gets.set(id, (gets.get(id) ?? 0) + 1);
   }
   for (const [id, n] of [...gives, ...gets]) assert.ok(n <= MAX_REPEAT, `${id} appears ${n}×`);
+});
+
+test("IR slot: teamState and applyTrade never start a team's IR-slotted player; a receiver can start him", () => {
+  const irL = league([team("me", mine, { irPlayerIds: ["mRB1"] }), team("them", theirs)]);
+  const c = ctxFor(irL, [...mine, ...theirs]);
+  const me = teamState(c, "me");
+  assert.ok(!me.base.lineup.some((l) => l.player?.id === "mRB1"));
+  assert.ok(me.base.bench.some((p) => p.id === "mRB1"));
+  assert.ok(me.base.starterPpg < teamState(ctx, "me").base.starterPpg);
+  // A trade that leaves him on my roster: still benched, never dropped.
+  const rb1 = mine.find((p) => p.id === "mRB1")!;
+  const tWr4 = theirs.find((p) => p.id === "tWR4")!;
+  const tRb2 = theirs.find((p) => p.id === "tRB2")!;
+  const after = applyTrade(irL.settings.slots, me.roster, [], [tWr4, tRb2], new Set(["mRB1"]));
+  assert.ok(!after.lineup.lineup.some((l) => l.player?.id === "mRB1"));
+  assert.ok(!after.drops.some((p) => p.id === "mRB1"));
+  // Traded away: the partner (no IR flag on him) starts him.
+  const them = teamState(c, "them");
+  const got = applyTrade(irL.settings.slots, them.roster, [tWr4], [rb1], new Set());
+  assert.ok(got.lineup.lineup.some((l) => l.player?.id === "mRB1"));
 });

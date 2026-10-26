@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyzeTeams, POWER_WEIGHTS } from "./analysis.js";
+import { actualPpg, analyzeTeams, POWER_WEIGHTS } from "./analysis.js";
 import { buildLeagueView, comparisonSummary, standingsRanks } from "./league.js";
 import { league, summaryProblems, team, vp } from "./testkit.js";
 import type { ValuedPlayer } from "./types.js";
 
+const r2 = (x: number) => Math.round(x * 100) / 100;
 const REPL = { QB: 15, RB: 8, WR: 8, TE: 6, K: 7, DEF: 6 };
 /** A roster whose starters scale with `k`, plus a bench of `bench` vorp-bearing players. */
 const roster = (p: string, k: { qb: number; rb: number; wr: number; te: number }, bench: number[]): ValuedPlayer[] => [
@@ -30,7 +31,7 @@ function setup(records = true) {
   const rec = (wins: number, losses: number, pointsFor?: number) => (records ? { record: { wins, losses, ties: 0, pointsFor } } : {});
   const L = league([
     team("a", rosters.a, rec(2, 5, 700)),
-    team("b", rosters.b, rec(5, 2, 800)),
+    team("b", rosters.b, rec(5, 2, 1000)), // weaker starters, big actual scoring
     team("m", rosters.m, rec(5, 2, 820)),
     team("c", rosters.c, rec(4, 3)),
   ]);
@@ -39,17 +40,65 @@ function setup(records = true) {
   return analyzeTeams(L, players, REPL);
 }
 
-test("power score splits into 0.7 × starter ppg + 0.3 × bench strength; gaps add up", () => {
+test("power score = 0.7 × projected starter ppg + 0.3 × actual pts/game; parts and gaps add up", () => {
   const teams = setup();
+  const by = (id: string) => teams.find((t) => t.team.id === id)!;
+  assert.equal(by("m").resultsPpg, r2(820 / 7));
+  assert.ok(Math.abs(by("m").powerScore - (0.7 * by("m").starterPpg + 0.3 * (820 / 7))) <= 0.01);
+  assert.equal(by("c").resultsPpg, null, "record without points for = results unknown");
+  assert.ok(Math.abs(by("c").powerScore - by("c").starterPpg) <= 0.01, "unknown results fall back to the projection");
   const v = buildLeagueView(teams, "m");
-  for (const r of v.teams) assert.ok(Math.abs(r.starterPart + r.benchPart - r.powerScore) <= 0.02, `${r.id}: parts ${r.starterPart}+${r.benchPart} vs ${r.powerScore}`);
+  assert.deepEqual(v.weights, { projected: 0.7, results: 0.3 });
+  assert.equal(v.resultsUnknown, 1);
+  for (const r of v.teams) assert.ok(Math.abs(r.projectedPart + r.resultsPart - r.powerScore) <= 0.02, `${r.id}: parts ${r.projectedPart}+${r.resultsPart} vs ${r.powerScore}`);
   for (const c of [...v.above, ...v.below]) {
-    assert.ok(Math.abs(c.starterPartGap + c.benchPartGap - c.powerGap) <= 0.02, `${c.teamId}: power gap`);
-    assert.ok(Math.abs(POWER_WEIGHTS.starter * c.starterGap + POWER_WEIGHTS.bench * c.benchGap - c.powerGap) <= 0.02);
+    assert.ok(Math.abs(c.projectedPartGap + c.resultsPartGap - c.powerGap) <= 0.02, `${c.teamId}: power gap`);
+    if (c.resultsGap != null) assert.ok(Math.abs(POWER_WEIGHTS.projected * c.starterGap + POWER_WEIGHTS.results * c.resultsGap - c.powerGap) <= 0.02);
     const groupSum = c.groups.reduce((a, g) => a + g.gap, 0);
     assert.ok(Math.abs(groupSum - c.starterGap) <= 0.05, `${c.teamId}: Σ group gaps ${groupSum} vs starter gap ${c.starterGap}`);
     for (const g of c.groups) assert.ok(Math.abs(g.theirs - g.mine - g.gap) <= 0.01);
   }
+  assert.equal(v.below.find((c) => c.teamId === "c")!.resultsGap, null);
+  // Results lift b (weaker starters) above me; the deep bench alone would not.
+  assert.ok(v.above.some((c) => c.teamId === "b"));
+});
+
+test("power: no standings → ranked purely on projected starters", () => {
+  const teams = setup(false);
+  for (const t of teams) {
+    assert.equal(t.resultsPpg, null);
+    assert.ok(Math.abs(t.powerScore - t.starterPpg) <= 0.01);
+  }
+  const byStarters = [...teams].sort((a, b) => b.starterPpg - a.starterPpg).map((t) => t.team.id);
+  assert.deepEqual([...teams].sort((a, b) => a.powerRank - b.powerRank).map((t) => t.team.id), byStarters);
+  const v = buildLeagueView(teams, "m");
+  assert.equal(v.resultsUnknown, 4);
+  assert.match(v.summary, /projected starters only: results unknown/);
+  for (const c of [...v.above, ...v.below]) assert.match(c.summary, /\(results unknown\)/);
+});
+
+test("power: 0-0 record is unknown, not a divide by zero", () => {
+  assert.equal(actualPpg({ wins: 0, losses: 0, ties: 0, pointsFor: 0 }), null);
+  assert.equal(actualPpg(undefined), null);
+  assert.equal(actualPpg({ wins: 1, losses: 0, ties: 1, pointsFor: 250 }), 125);
+});
+
+test("power ties: broken by bench strength, then wins (bench is not in the score)", () => {
+  const base = { qb: 19, rb: 13, wr: 13, te: 12 };
+  const rosters = { x: roster("x", base, [1, 0, 0]), y: roster("y", base, [8, 8, 8]), z: roster("z", base, [1, 0, 0]) };
+  const players = new Map(Object.values(rosters).flat().map((p) => [p.id, p]));
+  const L = league([
+    team("x", rosters.x, { record: { wins: 5, losses: 2, ties: 0, pointsFor: 770 } }),
+    team("y", rosters.y, { record: { wins: 2, losses: 5, ties: 0, pointsFor: 770 } }),
+    team("z", rosters.z, { record: { wins: 3, losses: 4, ties: 0, pointsFor: 770 } }),
+  ]);
+  const t = analyzeTeams(L, players, REPL);
+  const by = (id: string) => t.find((a) => a.team.id === id)!;
+  assert.equal(by("x").powerScore, by("y").powerScore, "bench depth adds nothing to the score");
+  assert.deepEqual(["y", "x", "z"].map((id) => by(id).powerRank), [1, 2, 3], "deeper bench first, then more wins");
+  const v = buildLeagueView(t, "x");
+  assert.match(v.above[0].summary, /^Level on power score; ahead on the tie-breakers \(bench depth \+\d+\.\d, then wins\)/);
+  assert.deepEqual(summaryProblems(v.above[0].summary), []);
 });
 
 test("above = every better power rank, mine excluded; ordered best first; below the rest", () => {
@@ -77,23 +126,29 @@ test("groups stay in chart order; key players are their top 2 starters at the bi
   assert.ok(!("weeks" in a.keyPlayers[0].players[0]), "names + ids only, no full player objects");
 });
 
-test("summaries: one line ≤ 255 chars, explain the starter vs bench split", () => {
+test("summaries: one line ≤ 255 chars, explain projected starters vs actual results", () => {
   const v = buildLeagueView(setup(), "m");
   for (const c of [...v.above, ...v.below]) assert.deepEqual(summaryProblems(c.summary), [], c.summary);
   assert.deepEqual(summaryProblems(v.summary), [], v.summary);
-  const a = [...v.above, ...v.below].find((c) => c.teamId === "a")!;
-  assert.match(a.summary, /^\+\d+\.\d starter pts\/wk: stronger RB \(\+\d+\.\d\) and WR/);
+  const a = v.above.find((c) => c.teamId === "a")!;
+  assert.match(a.summary, /^\+\d+\.\d projected starter pts\/wk, partly offset by your \+\d+\.\d actual pts\/game: stronger RB \(\+\d+\.\d\) and WR/);
   assert.match(a.summary, /you're better at TE/);
-  const b = [...v.above, ...v.below].find((c) => c.teamId === "b")!;
-  assert.ok(v.above.some((c) => c.teamId === "b"), "deep bench lifts b above me");
-  assert.match(b.summary, /^Deeper bench \(\+\d+\.\d bench strength\) outweighs your \+\d+\.\d starter pts\/wk/);
+  const b = v.above.find((c) => c.teamId === "b")!;
+  assert.match(b.summary, /^\+\d+\.\d actual pts\/game outweighs your \+\d+\.\d projected starter pts\/wk/);
   const c = v.below.find((x) => x.teamId === "c")!;
-  assert.match(c.summary, /^-\d+\.\d starter pts\/wk vs you: weaker/);
-  const gs = [{ group: "WR", theirs: 30, mine: 25, gap: 5 }];
-  assert.equal(comparisonSummary({ starterGap: 4.9, benchGap: -9.1, groups: gs }, true), "+4.9 starter pts/wk, partly offset by your deeper bench (+9.1): stronger WR (+5.0).");
+  assert.match(c.summary, /^-\d+\.\d projected starter pts\/wk \(results unknown\) vs you: weaker/);
+  const gs = [{ group: "RB", theirs: 30, mine: 24.4, gap: 5.6 }, { group: "FLEX", theirs: 20, mine: 13.5, gap: 6.5 }];
+  assert.equal(
+    comparisonSummary({ starterGap: 5, resultsGap: 3.1, benchGap: -2, powerGap: 4.43, groups: gs }, true),
+    "+5.0 projected starter pts/wk and +3.1 actual pts/game: stronger FLEX (+6.5) and RB (+5.6).",
+  );
+  assert.equal(
+    comparisonSummary({ starterGap: -5, resultsGap: -3.1, benchGap: 2, powerGap: -4.43, groups: gs.map((g) => ({ ...g, gap: -g.gap })) }, false),
+    "-5.0 projected starter pts/wk and -3.1 actual pts/game vs you: weaker FLEX (-6.5) and RB (-5.6).",
+  );
   // Worst case length: every group named.
   const long = comparisonSummary(
-    { starterGap: 99.9, benchGap: -99.9, groups: ["QB", "RB", "WR", "TE", "FLEX", "K", "DEF"].map((g, i) => ({ group: g, theirs: 0, mine: 0, gap: i < 4 ? 50 : -50 })) },
+    { starterGap: 99.9, resultsGap: -99.9, benchGap: -99.9, powerGap: 40, groups: ["QB", "RB", "WR", "TE", "FLEX", "K", "DEF"].map((g, i) => ({ group: g, theirs: 0, mine: 0, gap: i < 4 ? 50 : -50 })) },
     true,
   );
   assert.deepEqual(summaryProblems(long), []);
@@ -102,14 +157,14 @@ test("summaries: one line ≤ 255 chars, explain the starter vs bench split", ()
 test("standings: rank by win% then PF; unknown records stay '—' / null, never 0", () => {
   const v = buildLeagueView(setup(), "m");
   const by = (id: string) => v.teams.find((t) => t.id === id)!;
-  assert.equal(by("m").standingsRank, 1, "5-2 with more PF than b");
-  assert.equal(by("b").standingsRank, 2);
+  assert.equal(by("b").standingsRank, 1, "5-2 with more PF than m");
+  assert.equal(by("m").standingsRank, 2);
   assert.equal(by("c").standingsRank, 3);
   assert.equal(by("a").standingsRank, 4);
   assert.equal(by("m").record, "5-2");
   assert.equal(by("c").pointsFor, null, "PF unknown stays null");
   assert.equal(by("m").pointsAgainst, null);
-  assert.match(v.summary, /1st in the standings/);
+  assert.match(v.summary, /2nd in the standings/);
 
   const u = buildLeagueView(setup(false), "m");
   assert.equal(u.standingsKnown, false);

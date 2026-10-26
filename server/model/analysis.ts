@@ -1,5 +1,5 @@
 // Team analysis for every team in a league. See docs/DESIGN.md "Team analysis".
-import type { League, Player, Position, SlotKind, Team, TeamAnalysis, ValuedPlayer } from "./types.js";
+import type { League, Player, Position, SlotKind, Team, TeamAnalysis, TeamRecord, ValuedPlayer } from "./types.js";
 import { FLEX_SLOTS, effPpg, optimalLineup, usable } from "./lineup.js";
 import { valuationNotes, valuePlayers, type Valuation } from "./projection.js";
 
@@ -18,10 +18,28 @@ export const GROUPS = ["QB", "RB", "WR", "TE", "FLEX", "K", "DEF"] as const;
 export const groupOf = (slot: SlotKind): string | null =>
   FLEX_SLOTS.includes(slot) ? "FLEX" : slot === "BN" || slot === "IR" ? null : slot;
 
-/** Power score = starter × starter ppg + bench × bench strength (docs/DESIGN.md "League tab"). */
-export const POWER_WEIGHTS = { starter: 0.7, bench: 0.3 } as const;
+/**
+ * Power score v2 (docs/DESIGN.md "Power score v2"): projected × projected starter ppg + results × actual points per game
+ * this season. Bench strength only breaks ties (then wins).
+ */
+export const POWER_WEIGHTS = { projected: 0.7, results: 0.3 } as const;
 
-/** Bench strength: summed VORP of the 3 best playable bench players (points per game above a waiver-level player). */
+/**
+ * Actual fantasy points per game this season = pointsFor / games played, from the standings. null = unknown (no record,
+ * no points for, or no games played yet), never 0.
+ */
+export function actualPpg(record: TeamRecord | undefined): number | null {
+  if (!record || record.pointsFor == null) return null;
+  const games = record.wins + record.losses + record.ties;
+  return games > 0 ? record.pointsFor / games : null;
+}
+
+/** Power score: unknown results fall back to the projection, so such a team ranks on projected starters alone. */
+export function powerScore(starterPpg: number, actual: number | null): number {
+  return POWER_WEIGHTS.projected * starterPpg + POWER_WEIGHTS.results * (actual ?? starterPpg);
+}
+
+/** Bench strength (tie-breaker only): summed VORP of the 3 best playable bench players (pts/game above a waiver-level player). */
 export function benchStrength(bench: ValuedPlayer[]): number {
   return bench
     .filter(usable)
@@ -30,6 +48,9 @@ export function benchStrength(bench: ValuedPlayer[]): number {
     .slice(0, 3)
     .reduce((a, b) => a + b, 0);
 }
+
+/** Ids of the players a team has parked in an IR slot (they never start and are not bench depth). */
+export const irSet = (team: Team): Set<string> => new Set(team.irPlayerIds ?? []);
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -59,8 +80,11 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
 
   const base = league.teams.map((team) => {
     const roster = rosterOf(team, players);
+    const ir = irSet(team);
     // This week's lineup: Questionable / Doubtful / Out starters are discounted (injuryRisk.ts), value is not.
-    const { lineup, bench, starterPpg } = optimalLineup(S.slots, roster, { injuryRisk: true });
+    // IR-slotted players never start (they stay on `bench` for display) and are not bench depth.
+    const { lineup, bench, starterPpg } = optimalLineup(S.slots, roster, { injuryRisk: true, irIds: ir });
+    const active = bench.filter((p) => !ir.has(p.id));
     const groups: Record<string, { ppg: number; rank: number; count: number; leagueAvg: number }> = {};
     for (const l of lineup) {
       const g = groupOf(l.slot);
@@ -71,9 +95,10 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
     }
     const benchValue = bench.reduce((a, p) => a + p.value, 0);
     const totalValue = roster.reduce((a, p) => a + p.value, 0);
-    const topBenchVorp = benchStrength(bench);
-    const powerScore = POWER_WEIGHTS.starter * starterPpg + POWER_WEIGHTS.bench * topBenchVorp;
-    return { team, roster, lineup, bench, starterPpg, groups, benchValue, totalValue, powerScore, topBenchVorp };
+    const topBenchVorp = benchStrength(active);
+    const resultsPpg = actualPpg(team.record);
+    const score = powerScore(starterPpg, resultsPpg);
+    return { team, roster, lineup, bench, active, starterPpg, groups, benchValue, totalValue, powerScore: score, topBenchVorp, resultsPpg };
   });
 
   // League ranks / averages per group.
@@ -90,9 +115,13 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
     }
   }
 
-  // Power rank.
+  // Power rank: score (as shown, 2 dp), then bench strength, then wins.
   const order = [...base].sort(
-    (a, b) => b.powerScore - a.powerScore || (b.team.record?.wins ?? 0) - (a.team.record?.wins ?? 0) || a.team.id.localeCompare(b.team.id),
+    (a, b) =>
+      r2(b.powerScore) - r2(a.powerScore) ||
+      r2(b.topBenchVorp) - r2(a.topBenchVorp) ||
+      (b.team.record?.wins ?? 0) - (a.team.record?.wins ?? 0) ||
+      a.team.id.localeCompare(b.team.id),
   );
   const powerRank = new Map(order.map((b, i) => [b.team.id, i + 1]));
 
@@ -115,7 +144,7 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
       const gr = b.groups[pos] ?? b.groups.FLEX;
       if (!gr || gr.count === 0) continue;
       const perSlotAvg = gr.leagueAvg / gr.count;
-      if (b.bench.some((p) => p.pos === pos && usable(p) && p.ppg >= perSlotAvg)) surplus.push(pos);
+      if (b.active.some((p) => p.pos === pos && usable(p) && p.ppg >= perSlotAvg)) surplus.push(pos);
     }
     const byeExposure: Record<number, number> = {};
     for (let w = league.settings.currentWeek; w <= league.settings.finalWeek; w++) {
@@ -139,6 +168,7 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
       surplus,
       powerRank: powerRank.get(b.team.id)!,
       powerScore: r2(b.powerScore),
+      resultsPpg: b.resultsPpg == null ? null : r2(b.resultsPpg),
       benchStrength: r2(b.topBenchVorp),
       byeExposure,
       injuryFlags,

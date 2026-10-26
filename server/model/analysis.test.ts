@@ -23,3 +23,18 @@ test("K and DEF are needs only when the slot is empty", () => {
   assert.ok(needs("c").includes("K"), needs("c").join(","));
   assert.ok(!needs("c").includes("DEF"));
 });
+
+test("IR slot: a healthy IR-slotted player never starts, is not bench depth or surplus, but stays on the bench list", () => {
+  const star = vp("aStar", "WR", 25, 40, { vorp: 17 }); // no injury status, parked in IR
+  const a = [...core("a"), vp("aK", "K", 8, 1), vp("aD", "DEF", 7, 1), star];
+  const b = [...core("b"), vp("bK", "K", 8, 1), vp("bD", "DEF", 7, 1)];
+  const players = new Map([...a, ...b].map((p) => [p.id, p]));
+  const free = analyzeTeams(league([team("a", a), team("b", b)]), players, REPL).find((t) => t.team.id === "a")!;
+  assert.ok(free.lineup.some((l) => l.player?.id === "aStar"), "fixture: he starts when not on IR");
+  const t = analyzeTeams(league([team("a", a, { irPlayerIds: ["aStar"] }), team("b", b)]), players, REPL).find((x) => x.team.id === "a")!;
+  assert.ok(!t.lineup.some((l) => l.player?.id === "aStar"));
+  assert.ok(t.bench.some((p) => p.id === "aStar"), "listed on the bench (shown as IR)");
+  assert.ok(t.starterPpg < free.starterPpg);
+  assert.equal(t.benchStrength, 0, "IR is not bench depth");
+  assert.ok(!t.surplus.includes("WR"), "IR is not surplus");
+});

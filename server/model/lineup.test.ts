@@ -80,3 +80,16 @@ test("injuryRisk: a Questionable starter is discounted ×0.85 and loses a close 
   assert.equal(slot.player!.ppg, 14);
   assert.ok(Math.abs(s.starterPpg - (20 + 15 + 12 + 14 * 0.85 + 10 + 8 + 11 + 8 + 7)) < 0.01);
 });
+
+test("irIds: an IR-slotted healthy player never starts, stays on the bench, adds nothing to starterPpg", () => {
+  const plain = optimalLineup(SMALL_SLOTS, roster);
+  assert.ok(plain.lineup.some((l) => l.player?.id === "wr1"), "fixture: wr1 starts when not on IR");
+  const r = optimalLineup(SMALL_SLOTS, roster, { irIds: new Set(["wr1"]) });
+  assert.ok(!r.lineup.some((l) => l.player?.id === "wr1"));
+  assert.ok(r.bench.some((p) => p.id === "wr1"), "IR player stays on the bench list");
+  assert.ok(r.starterPpg < plain.starterPpg);
+  // Only eligible player at the slot and on IR: the slot stays empty rather than starting him.
+  const only = optimalLineup(["TE"], [vp("t", "TE", 9, 5)], { irIds: new Set(["t"]) });
+  assert.equal(only.lineup[0].player, null);
+  assert.equal(only.starterPpg, 0);
+});

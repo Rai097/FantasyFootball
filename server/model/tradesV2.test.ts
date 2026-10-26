@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { V2, evaluateTradeV2, findBenchUpgrades, findTradesV2, judge, nearMissClass, state2 } from "./tradesV2.js";
 import { acceptanceOf, fairnessOf, type TradeContext } from "./trades.js";
 import { analyzeTeams } from "./analysis.js";
+import { rosterParts } from "./rosterScore.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { League, ValuedPlayer } from "./types.js";
 
@@ -164,4 +165,19 @@ test("nothing after the trade deadline", () => {
   assert.deepEqual([r.trades, r.smallerEdges, r.nearMisses], [[], [], []]);
   assert.match(r.summary, /deadline/);
   assert.deepEqual(findBenchUpgrades(late, "me"), []);
+});
+
+test("IR slot: state2 scores lineup and depth without the team's IR-slotted player", () => {
+  const me0 = state2(ctx, "me");
+  const star = me0.base.lineup.map((l) => l.player!).filter((p) => p.pos !== "K" && p.pos !== "DEF").sort((a, b) => b.ppg - a.ppg)[0];
+  const l = ctx.league;
+  const irLeague = { ...l, teams: l.teams.map((t) => (t.id === "me" ? { ...t, irPlayerIds: [star.id] } : t)) };
+  const c = ctxFor(irLeague, [...ctx.players.values()]);
+  const me = state2(c, "me");
+  assert.ok(!me.base.lineup.some((x) => x.player?.id === star.id));
+  assert.ok(me.parts.now < me0.parts.now, `now ${me.parts.now} vs ${me0.parts.now}`);
+  const without = rosterParts(l.settings, me0.roster.filter((p) => p.id !== star.id), c.replacement).parts;
+  assert.equal(me.parts.now, without.now);
+  assert.equal(me.parts.depth, without.depth);
+  assert.equal(me.total, me0.total, "value total still counts him");
 });

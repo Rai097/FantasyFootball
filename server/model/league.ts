@@ -1,4 +1,5 @@
-// League tab: standings, power rankings split into their two parts, and "who is above me and why".
+// League tab: standings, power rankings split into their two parts (projected starters, actual results), and "who is above
+// me and why".
 // Pure: built from the TeamAnalysis rows analysis.ts already computes. See docs/DESIGN.md "League tab".
 import type { Position, TeamAnalysis, TeamRecord, ValuedPlayer } from "./types.js";
 import { GROUPS, POWER_WEIGHTS, groupOf } from "./analysis.js";
@@ -10,11 +11,14 @@ export interface LeagueTeamRow {
   mine: boolean;
   powerRank: number;
   powerScore: number;
-  /** POWER_WEIGHTS.starter × starterPpg. */
-  starterPart: number;
-  /** POWER_WEIGHTS.bench × benchStrength. */
-  benchPart: number;
+  /** POWER_WEIGHTS.projected × starterPpg. */
+  projectedPart: number;
+  /** POWER_WEIGHTS.results × resultsPpg (× starterPpg when results are unknown). */
+  resultsPart: number;
   starterPpg: number;
+  /** Actual points per game this season; null = unknown (the results part then uses starterPpg). */
+  resultsPpg: number | null;
+  /** Tie-breaker only. */
   benchStrength: number;
   /** Standings place by record; null = unknown (no record captured). */
   standingsRank: number | null;
@@ -45,12 +49,16 @@ export interface TeamComparison {
   powerRank: number;
   standingsRank: number | null;
   record: string;
-  /** Their power score − mine (= starterPartGap + benchPartGap). */
+  /** Their power score − mine (= projectedPartGap + resultsPartGap). */
   powerGap: number;
+  /** Projected starter ppg, theirs − mine. */
   starterGap: number;
+  /** Actual points per game, theirs − mine; null when either team's results are unknown. */
+  resultsGap: number | null;
+  /** Bench strength gap (tie-breaker only). */
   benchGap: number;
-  starterPartGap: number;
-  benchPartGap: number;
+  projectedPartGap: number;
+  resultsPartGap: number;
   /** Per position group, in the fixed GROUPS order (chart order). */
   groups: GroupGap[];
   /** Their top-2 starters at the (up to 2) groups where they lead you most. */
@@ -62,9 +70,11 @@ export interface TeamComparison {
 export interface LeagueView {
   myTeamId: string;
   numTeams: number;
-  weights: { starter: number; bench: number };
+  weights: { projected: number; results: number };
   /** False when no team has a record (standings were not captured). */
   standingsKnown: boolean;
+  /** Teams whose actual points per game is unknown (ranked on projected starters only). */
+  resultsUnknown: number;
   /** Every team, by power rank. */
   teams: LeagueTeamRow[];
   /** Teams with a better power rank than mine, best first. */
@@ -113,6 +123,9 @@ export function standingsRanks(teams: TeamAnalysis[]): Map<string, number | null
   return out;
 }
 
+/** Actual ppg behind a team's results part: its starter ppg when results are unknown (same fallback as powerScore). */
+const resultsBasis = (t: TeamAnalysis) => t.resultsPpg ?? t.starterPpg;
+
 function topStarters(t: TeamAnalysis, group: string): KeyPlayer[] {
   return t.lineup
     .filter((l) => l.player && groupOf(l.slot) === group)
@@ -127,32 +140,42 @@ const list = (gs: GroupGap[]) => {
   return parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 };
 
-/** One-line "why" for a team relative to me. Names stay in the row head; players go in the details. */
-export function comparisonSummary(c: Pick<TeamComparison, "starterGap" | "benchGap" | "groups">, above: boolean): string {
+type SummaryInput = Pick<TeamComparison, "starterGap" | "resultsGap" | "benchGap" | "powerGap" | "groups">;
+
+/**
+ * One-line "why" for a team relative to me: projected starter pts/wk vs actual pts/game, then the position groups.
+ * Names stay in the row head; players go in the details.
+ */
+export function comparisonSummary(c: SummaryInput, above: boolean): string {
   const ahead = c.groups.filter((g) => g.gap >= 0.05).sort((a, b) => b.gap - a.gap);
   const behind = c.groups.filter((g) => g.gap <= -0.05).sort((a, b) => a.gap - b.gap);
+  // Orient everything from the stronger team's side: positive = in the stronger team's favour.
+  const dir = above ? 1 : -1;
+  const proj = dir * c.starterGap;
+  const act = c.resultsGap == null ? null : dir * c.resultsGap;
+  const [strong, weak] = above ? [ahead, behind] : [behind, ahead];
+  const word = above ? "stronger" : "weaker";
+  const you = above ? "your" : "their";
+  const projTxt = (x: number) => `${sgn(dir * x)} projected starter pts/wk`;
+  const actTxt = (x: number) => `${sgn(dir * x)} actual pts/game`;
   let s: string;
-  if (above) {
-    if (c.starterGap >= 0.05) {
-      s = `${sgn(c.starterGap)} starter pts/wk`;
-      if (c.benchGap <= -1) s += `, partly offset by your deeper bench (${sgn(-c.benchGap)})`;
-      s += ahead.length ? `: stronger ${list(ahead.slice(0, 2))}` : "";
-    } else {
-      s = `Deeper bench (${sgn(c.benchGap)} bench strength) outweighs your ${sgn(-c.starterGap)} starter pts/wk`;
-      s += ahead.length ? `; stronger ${list(ahead.slice(0, 1))}` : "";
-    }
-    s += behind.length ? `; you're better at ${behind.slice(0, 2).map((g) => g.group).join(" and ")}.` : ".";
+  if (Math.abs(c.powerGap) < 0.005 && Math.abs(proj) < 0.05 && (act == null || Math.abs(act) < 0.05)) {
+    s = `Level on power score; ${above ? "ahead" : "behind"} on the tie-breakers (bench depth ${sgn(c.benchGap)}, then wins)`;
+  } else if (proj >= 0.05 || act == null || act < 0.05) {
+    s = projTxt(proj);
+    if (act == null) s += " (results unknown)";
+    else if (act >= 0.05) s += ` and ${actTxt(act)}`;
+    else if (act <= -0.05) s += `, partly offset by ${you} ${sgn(-act)} actual pts/game`;
+    if (!above) s += " vs you";
+    s += strong.length ? `: ${word} ${list(strong.slice(0, 2))}` : "";
   } else {
-    if (c.starterGap <= -0.05) {
-      s = `${sgn(c.starterGap)} starter pts/wk vs you`;
-      if (c.benchGap >= 1) s += `, partly offset by their deeper bench (${sgn(c.benchGap)})`;
-      s += behind.length ? `: weaker ${list(behind.slice(0, 2))}` : "";
-    } else {
-      s = `Thinner bench (${sgn(c.benchGap)} bench strength) outweighs their ${sgn(c.starterGap)} starter pts/wk`;
-      s += behind.length ? `; weaker ${list(behind.slice(0, 1))}` : "";
-    }
-    s += ahead.length ? `; better at ${ahead.slice(0, 2).map((g) => g.group).join(" and ")}.` : ".";
+    s = above
+      ? `${actTxt(act)} outweighs your ${sgn(-proj)} projected starter pts/wk`
+      : `${actTxt(act)} outweighs their ${sgn(-proj)} projected starter pts/wk`;
+    s += strong.length ? `; ${word} ${list(strong.slice(0, 1))}` : "";
   }
+  const better = weak.slice(0, 2).map((g) => g.group).join(" and ");
+  s += weak.length ? (above ? `; you're better at ${better}.` : `; better at ${better}.`) : ".";
   return s.length > 255 ? `${s.slice(0, 254)}…` : s;
 }
 
@@ -165,24 +188,25 @@ function compare(them: TeamAnalysis, me: TeamAnalysis, standing: number | null):
     return { group: g, theirs: r2(theirs), mine: r2(mine), gap: r2(theirs - mine) };
   });
   const starterGap = r2(them.starterPpg - me.starterPpg);
+  const resultsGap = them.resultsPpg != null && me.resultsPpg != null ? r2(them.resultsPpg - me.resultsPpg) : null;
   const benchGap = r2(them.benchStrength - me.benchStrength);
-  const starterPartGap = r2(POWER_WEIGHTS.starter * (them.starterPpg - me.starterPpg));
-  const benchPartGap = r2(POWER_WEIGHTS.bench * (them.benchStrength - me.benchStrength));
+  const projectedPartGap = r2(POWER_WEIGHTS.projected * (them.starterPpg - me.starterPpg));
+  const resultsPartGap = r2(POWER_WEIGHTS.results * (resultsBasis(them) - resultsBasis(me)));
   const powerGap = r2(them.powerScore - me.powerScore);
   const keyPlayers = groups
     .filter((g) => g.gap >= 0.05)
     .sort((a, b) => b.gap - a.gap)
     .slice(0, 2)
     .map((g) => ({ group: g.group, gap: g.gap, players: topStarters(them, g.group) }));
-  const base = { powerGap, starterGap, benchGap, groups };
+  const base = { powerGap, starterGap, resultsGap, benchGap, groups };
   return {
     teamId: them.team.id,
     name: them.team.name,
     powerRank: them.powerRank,
     standingsRank: standing,
     record: recordText(them.team.record),
-    starterPartGap,
-    benchPartGap,
+    projectedPartGap,
+    resultsPartGap,
     keyPlayers,
     ...base,
     summary: comparisonSummary(base, isAbove),
@@ -201,9 +225,10 @@ export function buildLeagueView(teams: TeamAnalysis[], myTeamId: string): League
     mine: t.team.id === myTeamId,
     powerRank: t.powerRank,
     powerScore: r2(t.powerScore),
-    starterPart: r2(POWER_WEIGHTS.starter * t.starterPpg),
-    benchPart: r2(POWER_WEIGHTS.bench * t.benchStrength),
+    projectedPart: r2(POWER_WEIGHTS.projected * t.starterPpg),
+    resultsPart: r2(POWER_WEIGHTS.results * resultsBasis(t)),
     starterPpg: r2(t.starterPpg),
+    resultsPpg: t.resultsPpg,
     benchStrength: r2(t.benchStrength),
     standingsRank: standing.get(t.team.id) ?? null,
     record: recordText(t.team.record),
@@ -217,12 +242,15 @@ export function buildLeagueView(teams: TeamAnalysis[], myTeamId: string): League
   const n = teams.length;
   let summary = `Power rank ${ord(me.powerRank)} of ${n}`;
   summary += myStanding != null ? `, ${ord(myStanding)} in the standings` : ", standings unknown";
+  const resultsUnknown = teams.filter((t) => t.resultsPpg == null).length;
+  if (resultsUnknown === n) summary += " (ranked on projected starters only: results unknown)";
   summary += above.length ? `. ${above.length} team${above.length === 1 ? "" : "s"} rated above you.` : ". Nobody is rated above you.";
   return {
     myTeamId,
     numTeams: n,
     weights: { ...POWER_WEIGHTS },
     standingsKnown: teams.some((t) => t.team.record),
+    resultsUnknown,
     teams: rows,
     above,
     below,

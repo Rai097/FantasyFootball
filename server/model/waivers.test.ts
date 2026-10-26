@@ -256,3 +256,11 @@ test("long-term injured (IR, Out (ACL)): never a claim; out for the season → p
   const f = rankWaivers({ league: faab, players, teams: analyzeTeams(faab, players, REPL) }, "me", [{ player: vp("FREE", "WR", 10, 12), onWaivers: false }]);
   assert.doesNotMatch(txt(f.freeAgents[0]), /priority/i);
 });
+
+test("IR slot: a healthy IR-slotted starter never counts in the base lineup, so an add is scored against his backup", () => {
+  const fa = vp("FA_WR", "WR", 10, 12);
+  const gainWith = (ir: string[]) =>
+    rankWaivers(ctxFor([...mine, ...other], ir), "me", [{ player: fa, onWaivers: false }], { myPriority: 3 }).freeAgents.find((t) => t.id === "FA_WR")!.gain;
+  assert.equal(gainWith(["IRGUY"]), 7, "WR1 starts: the add replaces the 3-ppg WR2");
+  assert.equal(gainWith(["IRGUY", "WR1"]), 8, "WR1 on IR: the add replaces the 2-ppg bench WR who filled in");
+});

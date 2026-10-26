@@ -47,6 +47,11 @@ export interface LineupOptions {
    * The lineup keeps the original player objects; affected slots carry `riskFactor`.
    */
   injuryRisk?: boolean;
+  /**
+   * Players parked in the team's IR slot (Team.irPlayerIds): never starters, whatever their injury status. They stay on
+   * `bench` so views can label them IR.
+   */
+  irIds?: ReadonlySet<string>;
 }
 
 /**
@@ -57,7 +62,8 @@ export interface LineupOptions {
 export function optimalLineup(slots: SlotKind[], roster: ValuedPlayer[], opts: LineupOptions = {}): LineupResult {
   const starting = slots.map((s, i) => ({ s, i })).filter((x) => isStartingSlot(x.s));
   const rate = (p: ValuedPlayer) => (opts.injuryRisk ? riskAdjusted(p) : p);
-  const sorted = [...roster].sort((a, b) => byStrength(rate(a), rate(b)));
+  const ir = opts.irIds;
+  const sorted = (ir?.size ? roster.filter((p) => !ir.has(p.id)) : [...roster]).sort((a, b) => byStrength(rate(a), rate(b)));
   const used = new Set<string>();
   const assigned: (ValuedPlayer | null)[] = new Array(slots.length).fill(null);
   for (const kind of FILL_ORDER) {

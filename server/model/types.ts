@@ -220,9 +220,11 @@ export interface TeamAnalysis {
   needs: string[];
   surplus: string[];
   powerRank: number;
-  /** Power-rank score: 0.7*starterPpg + 0.3*benchStrength. */
+  /** Power-rank score: 0.7 × starterPpg + 0.3 × resultsPpg (starterPpg when results are unknown). */
   powerScore: number;
-  /** Sum of the top-3 playable bench players' VORP (the bench part of the power score). */
+  /** Actual fantasy points per game this season (pointsFor / games); null = unknown (no standings). */
+  resultsPpg: number | null;
+  /** Sum of the top-3 playable bench players' VORP, IR excluded. Power-rank tie-breaker only. */
   benchStrength: number;
   /** Remaining week -> number of current starters on bye. */
   byeExposure: Record<number, number>;

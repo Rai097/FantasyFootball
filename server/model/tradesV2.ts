@@ -24,7 +24,8 @@ import {
   type TradeContext,
   type TradeOptions,
 } from "./trades.js";
-import { MODE_WEIGHTS, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
+import { MODE_WEIGHTS, activeRoster, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
+import { irSet } from "./analysis.js";
 import { INJURY_RISK, riskAdjusted, riskStatus } from "./injuryRisk.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
 
@@ -93,7 +94,9 @@ export function state2(ctx: TradeContext, teamId: string): State2 {
       .filter((p) => p.value >= V2.starMinValue)
       .map((p) => p.id),
   );
-  return { ...s, parts: rosterParts(ctx.league.settings, s.roster, ctx.replacement).parts, irIds: new Set(s.team.irPlayerIds ?? []), stars, total: sum(s.roster) };
+  const irIds = irSet(s.team);
+  // IR-slotted players add no lineup or depth points to their own team (activeRoster); total value keeps them.
+  return { ...s, parts: rosterParts(ctx.league.settings, activeRoster(s.roster, irIds), ctx.replacement).parts, irIds, stars, total: sum(s.roster) };
 }
 
 interface FastSim {
@@ -146,8 +149,8 @@ export function judge(ctx: TradeContext, my: State2, their: State2, mode: TradeM
     const theirAfter: ValuedPlayer[] = [];
     for (const p of their.roster) if (!get.includes(p)) theirAfter.push(p);
     for (const p of give) theirAfter.push(p);
-    const me = rosterParts(S, myAfter, repl, get.length > give.length ? { count: get.length - give.length, keep: (p) => my.irIds.has(p.id) || get.some((g) => g.id === p.id) } : undefined);
-    const th = rosterParts(S, theirAfter, repl, give.length > get.length ? { count: give.length - get.length, keep: (p) => their.irIds.has(p.id) || give.includes(p) } : undefined);
+    const me = rosterParts(S, activeRoster(myAfter, my.irIds), repl, get.length > give.length ? { count: get.length - give.length, keep: (p) => my.irIds.has(p.id) || get.some((g) => g.id === p.id) } : undefined);
+    const th = rosterParts(S, activeRoster(theirAfter, their.irIds), repl, give.length > get.length ? { count: give.length - get.length, keep: (p) => their.irIds.has(p.id) || give.includes(p) } : undefined);
     const myParts = partsDelta(me.parts, my.parts);
     const theirParts = partsDelta(th.parts, their.parts);
     const giveV = sum(give);

@@ -517,13 +517,15 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assertClean(json, "league");
     assert.equal(json.myTeamId, "1");
     assert.equal(json.teams.length, 12);
+    assert.deepEqual(json.weights, { projected: 0.7, results: 0.3 });
     assert.deepEqual(summaryProblems(json.summary), [], json.summary);
     const me = json.teams.find((t: any) => t.mine);
     assert.equal(me.id, "1");
     assert.equal(json.above.length, me.powerRank - 1);
     assert.equal(json.above.length + json.below.length, 11);
     for (const t of json.teams) {
-      assert.ok(Math.abs(t.starterPart + t.benchPart - t.powerScore) <= 0.02, `${t.id}: power parts`);
+      assert.ok(Math.abs(t.projectedPart + t.resultsPart - t.powerScore) <= 0.02, `${t.id}: power parts`);
+      assert.ok(t.resultsPpg === null || typeof t.resultsPpg === "number", "actual ppg or null (unknown), never 0 for unknown");
       assert.ok(Number.isInteger(t.standingsRank), "demo has records");
       assert.equal(t.pointsAgainst, null, "demo has no PA: unknown, not 0");
     }

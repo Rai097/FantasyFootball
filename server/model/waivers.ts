@@ -1,7 +1,7 @@
 // Free-agent ranking + waiver-priority advice. See docs/DESIGN.md "Waivers" (+ amendments).
 import type { Availability, DetailItem, Position, ValuedPlayer, WaiverBreakout, WaiverRow, WaiverTarget } from "./types.js";
 import { eligible, optimalLineup, slotLabels } from "./lineup.js";
-import { rosterOf } from "./analysis.js";
+import { irSet, rosterOf } from "./analysis.js";
 import type { TradeContext } from "./trades.js";
 import { riskStatus } from "./injuryRisk.js";
 import { injuryKind } from "./projection.js";
@@ -82,8 +82,9 @@ export function rankWaivers(
   if (!team) throw Object.assign(new Error(`Unknown team ${myTeamId}`), { status: 404 });
   const analysis = ctx.teams.find((t) => t.team.id === myTeamId);
   const roster = rosterOf(team, ctx.players);
-  const base = optimalLineup(S.slots, roster);
-  const irIds = new Set(team.irPlayerIds ?? []);
+  const irIds = irSet(team);
+  // IR-slotted players never start (they stay on the bench list, never dropped).
+  const base = optimalLineup(S.slots, roster, { irIds });
   const rosterLimit = S.slots.filter((s) => s !== "IR").length;
   const activeCount = roster.filter((p) => !irIds.has(p.id)).length;
   const hasOpenSpot = activeCount < rosterLimit;
@@ -108,7 +109,7 @@ export function rankWaivers(
 
   const evalWith = (fa: ValuedPlayer, drop: ValuedPlayer | null) => {
     const after = roster.filter((p) => p.id !== drop?.id).concat(fa);
-    const lu = optimalLineup(S.slots, after);
+    const lu = optimalLineup(S.slots, after, { irIds });
     const gain = r2(lu.starterPpg - base.starterPpg);
     const benchGain = r1(fa.value - (drop?.value ?? 0));
     const idx = lu.lineup.findIndex((l) => l.player?.id === fa.id);

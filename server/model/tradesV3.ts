@@ -4,7 +4,7 @@ import type { DetailItem, FairnessBand, LeagueSettings, Position, SlotKind, Team
 import { FLEX_SLOTS, effPpg, eligible, optimalLineup, slotLabels, usable, type LineupResult } from "./lineup.js";
 import { applyTrade, combos, fmtSigned, lineupChanges, names, tradeDeadlinePassed, type TradeContext } from "./trades.js";
 import { state2, type State2 } from "./tradesV2.js";
-import { MODE_WEIGHTS, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
+import { MODE_WEIGHTS, activeRoster, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
 import { riskAdjusted } from "./injuryRisk.js";
 import { injuryKind } from "./projection.js";
 import { edgeOf, marketOf, trueOf, type ValueSource } from "./market.js";
@@ -352,14 +352,14 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     const theirAfter: ValuedPlayer[] = [];
     for (const p of their.roster) if (!get.includes(p)) theirAfter.push(p);
     for (const p of give) theirAfter.push(scaledPlayer(p, overlapFactor(p, theirCore, theirStart).f));
-    const me = rosterParts(S, myAfter, repl, get.length > give.length ? { count: get.length - give.length, keep: (p) => my.irIds.has(p.id) || get.some((g) => g.id === p.id) } : undefined);
-    const th = rosterParts(S, theirAfter, repl, give.length > get.length ? { count: give.length - get.length, keep: (p) => their.irIds.has(p.id) || give.includes(p) } : undefined);
+    const me = rosterParts(S, activeRoster(myAfter, my.irIds), repl, get.length > give.length ? { count: get.length - give.length, keep: (p) => my.irIds.has(p.id) || get.some((g) => g.id === p.id) } : undefined);
+    const th = rosterParts(S, activeRoster(theirAfter, their.irIds), repl, give.length > get.length ? { count: give.length - get.length, keep: (p) => their.irIds.has(p.id) || give.includes(p) } : undefined);
     const myParts = partsDelta(me.parts, my.parts);
     const theirParts = partsDelta(th.parts, their.parts);
     // B: slot loss aversion — a starting slot that drops ≥ 3 ppg counts ×1.5.
     let slotPenalty = 0;
     if (give.length) {
-      const after = optimalLineup(S.slots, myAfter.filter((p) => !me.drops.includes(p)));
+      const after = optimalLineup(S.slots, myAfter.filter((p) => !me.drops.includes(p)), { irIds: my.irIds });
       const labels = slotLabels(my.base.lineup);
       my.base.lineup.forEach((l, i) => {
         if (l.slot === "K" || l.slot === "DEF") return;

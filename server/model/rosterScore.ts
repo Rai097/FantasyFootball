@@ -263,6 +263,11 @@ export function rosterParts(S: LeagueSettings, roster: ValuedPlayer[], replaceme
   };
 }
 
+/** Roster without a team's IR-slotted players: what rosterParts scores for that team (IR adds no lineup or depth points). */
+export function activeRoster(roster: ValuedPlayer[], irIds: ReadonlySet<string>): ValuedPlayer[] {
+  return irIds.size ? roster.filter((p) => !irIds.has(p.id)) : roster;
+}
+
 /** Score any roster under league settings (no drops). */
 export function rosterScore(S: LeagueSettings, roster: ValuedPlayer[], replacement: Replacement = {}): ScoreParts {
   return rosterParts(S, roster, replacement).parts;

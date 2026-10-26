@@ -1,7 +1,7 @@
 // Trade finder + evaluator. See docs/DESIGN.md "Trade finder" (+ architect amendments).
 import type { League, Team, TeamAnalysis, Trade, TradeSide, ValuedPlayer } from "./types.js";
 import { effPpg, eligible, optimalLineup, slotLabels, type LineupResult } from "./lineup.js";
-import { rosterOf } from "./analysis.js";
+import { irSet, rosterOf } from "./analysis.js";
 
 export interface TradeContext {
   league: League;
@@ -73,11 +73,14 @@ export function piecesJustified(pkg: ValuedPlayer[], receiverLineup: LineupResul
   return pkg.every((p) => p.value >= MIN_PIECE_VALUE || starters.has(p.id));
 }
 
-/** Roster after a trade, dropping lowest-value bench players (never incoming or IR) to keep size. */
+/**
+ * Roster after a trade, dropping lowest-value bench players (never incoming or IR) to keep size. `irIds` = this team's
+ * IR slot: those players never start (an IR player received from the partner is not in it, so he can start here).
+ */
 export function applyTrade(slots: League["settings"]["slots"], roster: ValuedPlayer[], gives: ValuedPlayer[], gets: ValuedPlayer[], irIds: Set<string>) {
   const giveIds = new Set(gives.map((p) => p.id));
   let after = roster.filter((p) => !giveIds.has(p.id)).concat(gets);
-  let lu = optimalLineup(slots, after);
+  let lu = optimalLineup(slots, after, { irIds });
   const drops: ValuedPlayer[] = [];
   let excess = gets.length - gives.length;
   if (excess > 0) {
@@ -128,8 +131,8 @@ function simulate(
   get: ValuedPlayer[],
 ): Sim {
   const slots = ctx.league.settings.slots;
-  const meAfter = applyTrade(slots, my.roster, give, get, new Set(my.team.irPlayerIds ?? []));
-  const themAfter = applyTrade(slots, their.roster, get, give, new Set(their.team.irPlayerIds ?? []));
+  const meAfter = applyTrade(slots, my.roster, give, get, irSet(my.team));
+  const themAfter = applyTrade(slots, their.roster, get, give, irSet(their.team));
   const valueGivenByMe = sum(give);
   const valueGivenByThem = sum(get);
   const theyReceiveNet = valueGivenByMe - sum(themAfter.drops);
@@ -222,7 +225,8 @@ export function teamState(ctx: TradeContext, teamId: string) {
   const team = ctx.league.teams.find((t) => t.id === teamId);
   if (!team) throw Object.assign(new Error(`Unknown team ${teamId}`), { status: 404 });
   const roster = rosterOf(team, ctx.players);
-  const base = optimalLineup(ctx.league.settings.slots, roster);
+  // IR-slotted players never start for their team (they can still be traded).
+  const base = optimalLineup(ctx.league.settings.slots, roster, { irIds: irSet(team) });
   return { team, roster, base };
 }
 
