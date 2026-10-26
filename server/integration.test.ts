@@ -631,6 +631,26 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     assert.deepEqual(ch.teams, [{ id: "2", name: again.teams[1].name.replace(/^Imported Test League - /, ""), added: [fa.name], dropped: [dropped.name] }]);
   });
 
+  test("import with standings and waiver order → analysis records, waivers priority = my team's rank", async () => {
+    const base = `/api/league/import/${id}`;
+    const withStandings = structuredClone(payload);
+    withStandings.teams.forEach((t: any, i: number) => {
+      t.record = { wins: i % 8, losses: 7 - (i % 8), ties: 0, pointsFor: 900 + i * 10.5, pointsAgainst: 880, rank: i + 1 };
+      t.waiverRank = 12 - i;
+    });
+    const r = await post("/api/import", withStandings);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const an = (await get(`${base}/analysis`)).json;
+    const t5 = an.teams.find((t: any) => t.team.id === "5").team;
+    assert.deepEqual(t5.record, { wins: 4, losses: 3, ties: 0, pointsFor: 942, pointsAgainst: 880, rank: 5 });
+    assert.ok(an.teams.every((t: any) => t.team.record && Number.isInteger(t.team.record.wins)));
+    // myTeamId is "5" (set by PUT above): its rank is 8. The hand-entered priority 6 stays stored but the fresh rank wins.
+    const w = (await get(`${base}/waivers`)).json;
+    assert.equal(w.myPriority, 8);
+    assert.equal((await get(`${base}/waivers?team=2`)).json.myPriority, 11);
+    assert.equal((await get(base)).json.import.waiverPriority, 6);
+  });
+
   test("PUT settings, paste mode, delete", async () => {
     const put = await req("PUT", `/api/import/${id}/settings`, { scoring: { rec: 0 }, slots: "QB, RB x2, WR x2, TE, W/R/T, K, DEF, BN x6, IR", waiverPriority: 4, myTeamId: "2" });
     assert.equal(put.status, 200, JSON.stringify(put.json));

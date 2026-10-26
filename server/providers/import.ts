@@ -377,6 +377,12 @@ export function applySettings(s: StoredImport, patch: unknown): StoredImport {
     else delete next.tradeDeadlineWeek;
   }
   next.regularSeasonEnd = Math.min(next.regularSeasonEnd, next.finalWeek);
+  // A hand-entered priority is the newest fact for the importer's team: it also corrects that team's captured rank
+  // (which waiverPriorityOf reads first). The next import with a waiver order replaces it with Yahoo's fresh one.
+  if (typeof o.waiverPriority === "number" || (typeof o.waiverPriority === "string" && o.waiverPriority !== "")) {
+    const wp = next.waiverPriority;
+    if (wp) next.teams = next.teams.map((t) => (t.id === next.myTeamId && t.waiverRank ? { ...t, waiverRank: wp } : t));
+  }
   next.settingsSource = "user";
   return next;
 }

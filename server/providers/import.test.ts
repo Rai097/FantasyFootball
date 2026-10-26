@@ -348,7 +348,10 @@ test("re-import refreshes standings; a hand-entered priority is kept; a paste ke
   assert.equal(up.teams[1].record?.wins, 2);
   assert.equal(up.waiverPriority, 5, "never hand-edited: the freshly captured priority replaces the old copy");
   const edited = applySettings(first, { waiverPriority: 8 });
-  assert.equal(upsertImport(edited, incoming).stored.waiverPriority, 8, "hand-entered value kept");
+  assert.equal(waiverPriorityOf(edited, "2"), 8, "a hand-entered priority is the newest fact for the importer's team");
+  assert.equal(waiverPriorityOf(edited, "1"), 9, "other teams keep their captured rank");
+  assert.equal(upsertImport(edited, incoming).stored.waiverPriority, 8, "hand-entered value kept as the fallback");
+  assert.equal(waiverPriorityOf(upsertImport(edited, incoming).stored, "2"), 5, "a newer captured waiver order wins");
   // A re-import whose standings could not be read: records are unknown again, never carried forward as current.
   assert.equal(upsertImport(first, validateImport({ ...body(), leagueId: "1405188" })).stored.teams[0].record, undefined);
   const pasted = mergeTeams(first, [{ id: "x", name: "A", players: [{ name: "Josh Allen", pos: "QB" }] }]);

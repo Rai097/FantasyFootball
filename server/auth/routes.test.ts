@@ -273,6 +273,33 @@ describe("scoped API", () => {
     assert.equal((await call(admin, "GET", "/api/import/yY")).json.myTeamId, "1");
   });
 
+  test("a user's re-import refreshes standings and waiver ranks but never the league settings", { timeout: 240_000 }, async () => {
+    const before = (await call(admin, "GET", "/api/import/yY")).json;
+    const ranks: Record<string, number> = { "1": 3, "4": 1, "7": 2 };
+    const payload = {
+      ...league("7"),
+      name: "Renamed by a member",
+      slots: ["QB", "QB", "BN"],
+      scoring: { rec: 0 },
+      settingsSource: "page",
+      waiverPriority: 1,
+      teams: league("7").teams.map((t, i) => ({ ...t, record: { wins: 3 + i, losses: 4 - i, ties: 0, pointsFor: 700 + i, pointsAgainst: 650 }, waiverRank: ranks[t.id] })),
+    };
+    const r = await call(b, "POST", "/api/import", payload);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const after = (await call(admin, "GET", "/api/import/yY")).json;
+    for (const k of ["name", "numTeams", "slots", "scoring", "regularSeasonEnd", "finalWeek", "settingsSource", "waiverPriority", "myTeamId"]) assert.deepEqual(after[k], before[k], k);
+    assert.deepEqual(after.teams.find((t: { id: string }) => t.id === "4").record, { wins: 4, losses: 3, ties: 0, pointsFor: 701, pointsAgainst: 650 });
+    assert.equal(after.teams.find((t: { id: string }) => t.id === "4").waiverRank, 1);
+    // Waiver priority is each team's own rank: A (team 4) sees #1, the admin's default team 1 sees #3.
+    const wa = await call(a, "GET", "/api/league/import/yY/waivers");
+    assert.equal(wa.status, 200, JSON.stringify(wa.json).slice(0, 300));
+    assert.equal(wa.json.myPriority, 1);
+    assert.equal((await call(admin, "GET", "/api/league/import/yY/waivers")).json.myPriority, 3);
+    const an = await call(a, "GET", "/api/league/import/yY/analysis");
+    assert.equal(an.json.teams.find((t: { team: { id: string } }) => t.team.id === "4").team.record.wins, 4);
+  });
+
   test("user POST /api/import of a different league (or a new paste league) → 403", async () => {
     const r = await call(a, "POST", "/api/import", { ...league("4"), id: "yZ", leagueId: "777" });
     assert.equal(r.status, 403);

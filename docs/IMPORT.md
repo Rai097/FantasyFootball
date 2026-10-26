@@ -80,6 +80,10 @@ in `.data/import-<id>-history.json`) for this comparison.
   one whether he is a free agent ("FA", add any time) or on waivers ("W", needs a
   claim). Imports made before 2026-10-26 do not have this or K/DEF: re-import once
   to see free agents vs waivers and kicker/defense streaming advice.
+* The **Standings** page (else the league home page): each team's record, points
+  for/against, rank and streak, plus the waiver order. Re-import once (from
+  2026-10-26) to see records and "Waiver priority #N"; columns Yahoo does not
+  show stay "—".
 
 It only makes requests to Yahoo pages of *your* league, in *your* browser,
 and never sends the data anywhere. You carry it over by copy and paste.

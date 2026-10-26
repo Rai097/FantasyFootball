@@ -554,3 +554,30 @@ shows the sign-in screen on any 401.
   requires full Discord config. Auth vars are trimmed; whitespace-only = missing.
 * Logout always clears the cookie; if the session file cannot be written it answers 503 and the store retries the
   write (every 5 s, at most 60 times) so a restart cannot revive the session once storage works.
+
+## Import: standings and waiver order (2026-10-26) — release 2 "Import enabler"
+
+Before: every imported team's record showed "—" and waiver priority was "unknown" (the bookmarklet never read them).
+
+* **Bookmarklet**: after the team pages, reads `<league>/standings`, else the league home page (`<league>`), and
+  `parseStandingsHtml` (web/src/import/yahooHtml.ts) finds columns by header text — Rank (or an unlabeled first
+  column), W-L-T (one "6-1-0" / "6-1" cell, or W / L / T columns), Pts For, Pts Agst, Streak, Waiver, Seed — across
+  every division table. Rows are matched to team pages by the `/f1/<league>/<n>` link. Missing columns stay unknown and
+  are listed in the `standings` diagnostics (`headers`, `columns`, `missing`, `noRecord`); the overlay says
+  "standings: N of M teams · waiver order: …". Fixtures `yahoo-web-standings*.html` are RECONSTRUCTED; the real
+  markup is verified on the owner's next import.
+* **Payload / StoredImport**: per team optional `record {wins, losses, ties, pointsFor?, pointsAgainst?, rank?, streak?,
+  seed?}` and `waiverRank`. Validation (`cleanRecord`): W/L/T whole numbers (≤ 20 games) or no record; each optional
+  field dropped alone when invalid; duplicate waiver ranks drop the whole order. Old imports are unchanged.
+  `buildImportLeague` copies them onto `Team.record` / `Team.waiverRank` (analysis already sorts on `record.wins`).
+* **Waiver priority** (`waiverPriorityOf`): the request team's own `waiverRank`, else the stored `waiverPriority` —
+  which belongs to the importer's team (`StoredImport.myTeamId`) only, so a member never sees the importer's number.
+  An admin import with no explicit `waiverPriority` stores the importer's team rank; a re-import replaces it unless the
+  admin hand-edited settings. A hand-entered priority (PUT settings) also corrects the importer's team rank; the next
+  import with a waiver order supersedes it (priority changes every week, the newer fact wins).
+* **Who may change what**: standings and ranks live on the teams, so a member's re-import refreshes them (weekly,
+  roster-like data); league settings (name, slots, scoring, weeks, stored `waiverPriority`, `myTeamId`) stay admin-only
+  (`leagueSettingsOf` in api.ts). A paste-mode roster replacement keeps the team's standings.
+* **UI**: My Team "Record" shows "6-1" with "1,043.2 PF" (tooltip says where it came from), "—" when unknown; the
+  Waivers header shows "Waiver priority #N of 12" from the team's rank. The League tab (release 3) builds on these.
+

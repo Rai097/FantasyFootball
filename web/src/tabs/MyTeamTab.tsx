@@ -28,7 +28,16 @@ export function MyTeamTab({ analysis }: { analysis: Analysis }) {
     <div className="stack">
       <section className="stat-row">
         <Stat label="Power rank" value={`${ordinal(me.powerRank)}`} sub={`of ${teams.length}`} />
-        <Stat label="Record" value={record(me.team.record)} sub={me.team.record?.pointsFor != null ? `${f1(me.team.record.pointsFor)} PF` : undefined} />
+        <Stat
+          label="Record"
+          value={record(me.team.record)}
+          sub={me.team.record?.pointsFor != null ? `${f1(me.team.record.pointsFor)} PF` : undefined}
+          why={
+            me.team.record
+              ? "Wins and losses (and points scored) from the league standings at the last update."
+              : "Unknown: the standings were not captured. Re-import the league with the latest bookmarklet to read them."
+          }
+        />
         <Stat label="Starter ppg" value={f1(me.starterPpg)} />
         <Stat label="Bench value" value={f1(me.benchValue)} />
         <Stat label="Total value" value={f1(me.totalValue)} />
@@ -159,9 +168,9 @@ export function MyTeamTab({ analysis }: { analysis: Analysis }) {
   );
 }
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Stat({ label, value, sub, why }: { label: string; value: string; sub?: string; why?: string }) {
   return (
-    <div className="stat">
+    <div className="stat" title={why}>
       <div className="stat-label">{label}</div>
       <div className="stat-value">{value}</div>
       {sub && <div className="stat-sub">{sub}</div>}

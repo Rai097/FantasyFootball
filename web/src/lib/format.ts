@@ -41,6 +41,6 @@ export function ago(iso: string | undefined): string {
 }
 
 export function record(r?: { wins: number; losses: number; ties: number }): string {
-  if (!r) return "–";
+  if (!r) return "—"; // unknown, never 0-0
   return r.ties ? `${r.wins}-${r.losses}-${r.ties}` : `${r.wins}-${r.losses}`;
 }

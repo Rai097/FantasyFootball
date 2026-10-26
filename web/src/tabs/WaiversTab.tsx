@@ -39,7 +39,9 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
               Waiver priority <b>#{myPriority}</b> of {numTeams}
             </span>
           ) : (
-            <span className="pill big muted">Waiver priority unknown</span>
+            <span className="pill big muted" title="Not captured yet: re-import the league with the latest bookmarklet to read the waiver order.">
+              Waiver priority unknown
+            </span>
           )}
           {usesFaab && (
             <span className="pill big" title="Free-agent budget you have left to bid with this season.">
