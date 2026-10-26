@@ -58,6 +58,8 @@ export interface StoredImport {
   freeAgents?: ImportFreeAgentRaw[];
   importedAt: string;
   settingsSource: SettingsSource;
+  /** Team names already had the shared league-name prefix removed (set on save; absent on leagues saved before). */
+  teamNamesClean?: boolean;
   /** Yahoo league number when imported by the bookmarklet. */
   leagueId?: string;
   diagnostics?: unknown[];
@@ -220,7 +222,7 @@ function keepTimestamp(v: unknown, now: Date): string {
  *
  * Idempotent (it runs on save, and on read for imports saved before the rule): without `leagueName`, the prefix is
  * only removed when what is left does not share a prefix again ("L - Team - One" / "L - Team - Two" is ambiguous and
- * stays as is), so a second pass never strips more. With `leagueName` (the read path), only exactly
+ * stays as is), so a second pass never strips more. With `leagueName`, only exactly
  * "<leagueName> - " is removed: an already-stripped name never starts with it again.
  */
 export function stripLeaguePrefix<T extends { name: string }>(teams: T[], leagueName?: string): T[] {
@@ -298,6 +300,7 @@ export function validateImport(body: unknown, now = new Date()): StoredImport {
     teams,
     importedAt: keepTimestamp(o.importedAt, now),
     settingsSource,
+    teamNamesClean: true,
   };
   const deadline = int(o.tradeDeadlineWeek, 1, 18);
   if (deadline) out.tradeDeadlineWeek = deadline;
@@ -322,13 +325,19 @@ export function validateImport(body: unknown, now = new Date()): StoredImport {
 // ------------------------------------------------------------------ persistence
 const fileName = (id: string) => `import-${id}`;
 
+/** Read-path migration: a league saved before the prefix rule gets its team names cleaned once; others pass through. */
+export function cleanStoredTeamNames(s: StoredImport): StoredImport {
+  return s.teamNamesClean ? s : { ...s, teams: stripLeaguePrefix(s.teams), teamNamesClean: true };
+}
+
 export async function readImport(id: string): Promise<StoredImport | null> {
   if (!isValidId(id)) return null;
   const s = await readJson<StoredImport>(fileName(id));
   // import-<id>-history.json also matches import-*.json: it holds an array, not an import.
-  // Leagues saved before the prefix rule are cleaned on read (no re-import needed), but only of the league's own
-  // name: names already stripped on save are never stripped again.
-  return s && !Array.isArray(s) && Array.isArray(s.teams) ? { ...s, teams: stripLeaguePrefix(s.teams, s.name) } : null;
+  // Leagues saved before the prefix rule are cleaned once on read (no re-import needed); leagues saved since carry
+  // teamNamesClean and are never stripped again (a real team named "Team - One" stays intact).
+  if (!s || Array.isArray(s) || !Array.isArray(s.teams)) return null;
+  return cleanStoredTeamNames(s);
 }
 
 export async function saveImport(s: StoredImport): Promise<void> {

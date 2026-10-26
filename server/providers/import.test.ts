@@ -17,6 +17,7 @@ import {
   parseSlotList,
   snapshotOf,
   stripLeaguePrefix,
+  cleanStoredTeamNames,
   upsertImport,
   validateImport,
   waiverPriorityOf,
@@ -368,4 +369,20 @@ test("re-import refreshes standings; a hand-entered priority is kept; a paste ke
   assert.equal(pasted.teams[0].record?.wins, 5);
   assert.equal(pasted.teams[0].waiverRank, 9);
   assert.equal(pasted.teams[0].players[0].name, "Josh Allen");
+});
+
+test("read-path migration: a legacy league is cleaned once even when its stored name differs from the prefix", () => {
+  const legacy = { ...validateImport({ name: "Yahoo league 1405188", teams: [{ id: "1", name: "x", players: [] }, { id: "2", name: "y", players: [] }] }) };
+  delete legacy.teamNamesClean;
+  legacy.teams = [
+    { id: "1", name: "Kingshot Gridiron Chumps - No Cap Rai", players: [] },
+    { id: "2", name: "Kingshot Gridiron Chumps - Playmaker Caw", players: [] },
+  ];
+  const once = cleanStoredTeamNames(legacy);
+  assert.deepEqual(once.teams.map((t) => t.name), ["No Cap Rai", "Playmaker Caw"]);
+  assert.equal(once.teamNamesClean, true);
+  // A league saved after the rule keeps names such as "Team - One" intact on every read.
+  const fresh = validateImport({ teams: [{ id: "1", name: "Team - One", players: [] }, { id: "2", name: "Team - Two", players: [] }] });
+  assert.equal(fresh.teamNamesClean, true);
+  assert.deepEqual(cleanStoredTeamNames(cleanStoredTeamNames(fresh)).teams.map((t) => t.name), ["One", "Two"].map((n, i) => fresh.teams[i].name));
 });
