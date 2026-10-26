@@ -1,8 +1,9 @@
 // Free-agent ranking + waiver-priority advice. See docs/DESIGN.md "Waivers" (+ amendments).
-import type { Position, ValuedPlayer, WaiverTarget } from "./types.js";
+import type { Position, ValuedPlayer, WaiverBreakout, WaiverTarget } from "./types.js";
 import { eligible, optimalLineup, slotLabels } from "./lineup.js";
 import { rosterOf } from "./analysis.js";
 import type { TradeContext } from "./trades.js";
+import { riskStatus } from "./injuryRisk.js";
 
 export interface FreeAgentInput {
   player: ValuedPlayer;
@@ -38,7 +39,19 @@ export function snapTrendOf(p: { snapShare: Record<number, number> }): number {
   return r2(last - earlier.reduce((a, b) => a + b, 0) / earlier.length);
 }
 
-export const REC_ORDER: Record<WaiverTarget["recommendation"], number> = { claim: 0, optional: 1, wait: 2, pass: 3 };
+export const REC_ORDER: Record<WaiverTarget["recommendation"], number> = { claim: 0, optional: 1, stash: 2, wait: 3, pass: 4 };
+
+/**
+ * Future starter (worth a claim before he starts for you): a strong breakout score, a path at least partly open, and
+ * already a flex-level share of the work (expected pts/g over the last 2 weeks). Snap share alone is not enough:
+ * blocking tight ends play lots of snaps without targets.
+ */
+export const FUTURE_STARTER = { score: 55, situation: 0.5, oppLevel: { RB: 10, WR: 9, TE: 8 } as Partial<Record<Position, number>> };
+/** A "stash" needs this breakout score and real expected points (blocking TEs rack up snaps, not targets); else "pass". */
+export const STASH = { score: 50, oppLevel: 4.5 };
+
+export const isFutureStarter = (b: WaiverBreakout | undefined, pos: Position): boolean =>
+  !!b && b.score >= FUTURE_STARTER.score && b.situation >= FUTURE_STARTER.situation && b.oppLevel >= (FUTURE_STARTER.oppLevel[pos] ?? Infinity);
 
 /** Drop-order comparator: lowest value, then lowest ppg, then worst ECR. */
 const dropOrder = (a: ValuedPlayer, b: ValuedPlayer) =>
@@ -48,7 +61,7 @@ export function rankWaivers(
   ctx: TradeContext,
   myTeamId: string,
   freeAgents: FreeAgentInput[],
-  opts: { myPriority?: number; limit?: number } = {},
+  opts: { myPriority?: number; limit?: number; breakouts?: Map<string, WaiverBreakout> } = {},
 ): WaiverResult {
   const S = ctx.league.settings;
   const n = S.numTeams || ctx.league.teams.length;
@@ -102,6 +115,7 @@ export function rankWaivers(
     const best = options.map((d) => evalWith(fa, d)).sort((a, b) => b.rankScore - a.rankScore)[0];
     const { drop, gain, benchGain, rankScore } = best;
 
+    const bo = opts.breakouts?.get(fa.id);
     const list = posList[fa.pos] ?? [];
     const faRank = list.indexOf(fa) + 1;
     const fifth = list[4];
@@ -130,12 +144,16 @@ export function rankWaivers(
     } else if (gain >= threshold) {
       recommendation = "claim";
       reasons.push(`lineup gain ${fmtSigned(gain)} ≥ ${threshold.toFixed(1)} threshold`);
+    } else if (isFutureStarter(bo, fa.pos)) {
+      recommendation = "claim";
+      reasons.push(`future starter: ${bo!.oppLevel.toFixed(1)} expected pts/g over the last 2 weeks, breakout score ${bo!.score.toFixed(0)}, path to more work`);
     } else if (valueJump && top3AtNeed) {
       recommendation = "claim";
       reasons.push(`top-3 FA ${fa.pos} at a need position and ≥1.5× the value of your drop`);
     } else if (gain <= 0.05 && benchGain <= 0) {
-      recommendation = "pass";
-      reasons.push("not an upgrade on your lineup or your worst bench player");
+      const stash = !!bo && bo.score >= STASH.score && bo.oppLevel >= STASH.oppLevel;
+      recommendation = stash ? "stash" : "pass";
+      reasons.push(stash ? `not an upgrade yet, but his role is rising (breakout score ${bo!.score.toFixed(0)})` : "not an upgrade on your lineup or your worst bench player");
     } else if (onWaivers && fifth && belowFifth) {
       recommendation = "wait";
       const cmp = fifth.value === 0 ? `${fifth.ppg.toFixed(1)} ppg` : fifth.value.toFixed(1);
@@ -143,6 +161,12 @@ export function rankWaivers(
     } else {
       recommendation = "optional";
       reasons.push(`modest upgrade (gain ${fmtSigned(gain)} < ${threshold.toFixed(1)})`);
+    }
+    // An injured player is never worth rolling-list priority sight unseen: hold him as a stash until his status is known.
+    const hurt = riskStatus(fa);
+    if (recommendation === "claim" && hurt && onWaivers && !S.usesFaab) {
+      recommendation = "stash";
+      reasons.push(`but he is ${fa.injury!.status}: confirm his status before spending priority, or add him after waivers clear`);
     }
 
     const parts: string[] = [];
@@ -157,6 +181,7 @@ export function rankWaivers(
     if (snapTrend !== 0) trendBits.push(`snaps ${fmtSigned(snapTrend * 100)}%`);
     if (fa.injury) trendBits.push(`${fa.injury.status}${fa.injury.detail ? ` (${fa.injury.detail})` : ""}`);
     let why = `${parts.join("; ")}.${trendBits.length ? ` ${trendBits.join(", ")}.` : ""} ${recommendation[0].toUpperCase()}${recommendation.slice(1)}: ${reasons.join("; ")}.`;
+    if (bo) why += ` ${bo.thesis}`;
     if (recommendation === "claim" || recommendation === "optional") why += ` ${costText(S.usesFaab, team.faabRemaining ?? S.faabBudget, w, n, onWaivers, rankScore)}`;
 
     return {
@@ -171,6 +196,7 @@ export function rankWaivers(
       onWaivers,
       percentOwned,
       rankScore: r2(rankScore),
+      ...(bo ? { breakout: bo } : {}),
     };
   });
 
@@ -184,6 +210,7 @@ export function rankWaivers(
     (a, b) =>
       REC_ORDER[a.recommendation] - REC_ORDER[b.recommendation] ||
       b.rankScore - a.rankScore ||
+      (b.breakout?.score ?? -1) - (a.breakout?.score ?? -1) ||
       b.gain - a.gain ||
       vorpOf(b) - vorpOf(a) ||
       b.value - a.value ||
@@ -197,11 +224,13 @@ export function rankWaivers(
   if (S.usesFaab) {
     advice = `FAAB league: bid on lineup gains ≥ ${threshold.toFixed(1)} ppg or top-3 FAs at a need (${needList}).`;
   } else if (w !== undefined) {
-    advice = `You hold waiver priority #${w} of ${n} (rolling list): claim for a lineup gain ≥ ${threshold.toFixed(1)} ppg or a top-3 FA at a need (${needList}); ${w === n ? "you are already last, so claiming costs nothing." : `using it drops you to #${n}.`}`;
+    advice = `You hold waiver priority #${w} of ${n} (rolling list): claim for a lineup gain ≥ ${threshold.toFixed(1)} ppg, a rising future starter, or a top-3 FA at a need (${needList}); ${w === n ? "you are already last, so claiming costs nothing." : `using it drops you to #${n}.`}`;
   } else {
-    advice = `Claim for a lineup gain ≥ ${threshold.toFixed(1)} ppg or a top-3 FA at a need (${needList}).`;
+    advice = `Claim for a lineup gain ≥ ${threshold.toFixed(1)} ppg, a rising future starter, or a top-3 FA at a need (${needList}).`;
   }
   advice += claims.length ? ` ${claims.length} claim-worthy: ${claims.slice(0, 3).map((c) => c.name).join(", ")}.` : " Nobody is worth a claim right now.";
+  const stashes = limited.filter((t) => t.recommendation === "stash");
+  if (stashes.length) advice += ` ${stashes.length} to stash or watch (rising role): ${stashes.slice(0, 3).map((c) => c.name).join(", ")}.`;
   return { freeAgents: limited, myPriority: w, numTeams: n, advice };
 }
 

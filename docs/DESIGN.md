@@ -428,3 +428,23 @@ GET /api/league/:provider/:id/breakouts?team=&pos=RB|WR|TE|all&limit=30&cheap=0|
   → { targets: BreakoutTarget[], notes: string[] }   (types.ts BreakoutTarget: player, where, tier, score, components, chartSays?,
       weeks, snaps, expPpg, actPpg, touches?, depthLabel?, ahead[], tags[], thesis, ask)
 ```
+
+## Waivers v2: future starters and injury-aware lineups (2026-10-26) — overrides "Waivers" and "Lineup" where they differ
+
+Why: the owner uses waivers to find players who can *become* starters, not only this week's upgrades. Free-agent
+`value` stays 0 below replacement (by design); the waiver calls stop relying on it alone.
+
+* **Breakout signal per free agent**: `api.ts faBreakoutSignals()` runs `findBreakouts` (no market) and passes
+  `{ tier, score, situation, oppLevel, thesis }` for unrostered players to `rankWaivers(…, { breakouts })`. The breakouts
+  endpoint passes the same map, so its FA "ask" shows the new call.
+* **Calls** (order claim > optional > stash > wait > pass; K/DEF rules unchanged):
+  * claim: lineup gain ≥ threshold, **or future starter** = breakout score ≥ 55, situation ≥ 0.5 and expected pts/g
+    over the last 2 weeks ≥ RB 10 / WR 9 / TE 8 (`FUTURE_STARTER`), or the existing top-3-at-a-need rule.
+  * An injured (Q/D/O) would-be claim **on waivers** in a rolling-list league becomes **stash** ("confirm his status
+    before spending priority, or add him after waivers clear"). As a free agent it stays a claim (no priority cost).
+  * stash: not an upgrade today, breakout score ≥ 50 and ≥ 4.5 expected pts/g (`STASH`); otherwise pass.
+  * Rows tie-break on breakout score after rankScore. The breakout thesis is appended to `why`.
+* **Lineup**: `optimalLineup(slots, roster, { injuryRisk: true })` ranks and totals starters on the injury-risk rate
+  (`injuryRisk.ts`: Q 0.85 / D 0.70 / O 0.55, shared with trades). Used by team analysis (My Team, power ranks, group
+  ranks) for every team. `LineupSlot.riskFactor` marks discounted starters; the UI shows "×0.85 · check status".
+  Trade and waiver lineups are unchanged; `value` is unchanged.

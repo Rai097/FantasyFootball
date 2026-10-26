@@ -426,7 +426,8 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     const rostered = new Set(league.teams.flatMap((t: any) => t.playerIds));
     for (const w of json.freeAgents) {
       assertValuedPlayer(w, "waivers");
-      assert.ok(["claim", "wait", "optional", "pass"].includes(w.recommendation), `${w.name}: ${w.recommendation}`);
+      assert.ok(["claim", "optional", "stash", "wait", "pass"].includes(w.recommendation), `${w.name}: ${w.recommendation}`);
+      if (w.recommendation === "stash" && !w.injury) assert.ok(w.breakout && w.breakout.score >= 50, `${w.name}: stash without a breakout signal`);
       assert.ok(typeof w.why === "string" && w.why.length > 0, `${w.name}: why`);
       assert.ok(Number.isFinite(w.gain) && Number.isFinite(w.benchGain));
       assert.ok(!rostered.has(w.id), `${w.name} is rostered`);

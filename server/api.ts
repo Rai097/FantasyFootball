@@ -42,7 +42,7 @@ import { rankWaivers, type FreeAgentInput } from "./model/waivers.js";
 import { findBreakouts, type MarketValue } from "./model/breakouts.js";
 import { getDepthChart } from "./data/depthCharts.js";
 import { getMarketData, pprBucket } from "./data/fantasycalc.js";
-import type { BreakoutResult, League, Player, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "./model/types.js";
+import type { BreakoutResult, League, Player, Trade, TradeFinderResult, ValuedPlayer, WaiverBreakout, WaiverTarget } from "./model/types.js";
 
 const CACHE_TTL_MS = 60_000;
 
@@ -244,6 +244,17 @@ async function freeAgentInputs(
   return { input, myPriority, league };
 }
 
+/** Breakout Targets signal for every unrostered player in the breakout pool (feeds the waiver calls). */
+async function faBreakoutSignals(l: Loaded, team: string): Promise<Map<string, WaiverBreakout>> {
+  const depth = await getDepthChart(l.db.season);
+  const r = findBreakouts({ league: l.league, players: l.ctx.players, teams: l.ctx.teams, myTeamId: team, depth, limit: 10_000 });
+  return new Map(
+    r.targets
+      .filter((t) => t.where.type === "fa")
+      .map((t) => [t.player.id, { tier: t.tier, score: t.score, situation: t.components.situation, oppLevel: t.components.oppLevel, thesis: t.thesis }]),
+  );
+}
+
 /** FantasyCalc market values for this league's format (null when unavailable). */
 async function loadMarketValues(league: League): Promise<Map<string, MarketValue> | null> {
   const S = league.settings;
@@ -408,8 +419,11 @@ apiRouter.get(
     const team = teamParam(req, l.league);
     const key = `${provider}:${req.params.id}:waivers:${team}`;
     const result = await cached(key, refresh, async () => {
-      const { input, myPriority, league } = await freeAgentInputs(l, provider, req.params.id, team, refresh);
-      return rankWaivers({ ...l.ctx, league }, team, input, { myPriority });
+      const [{ input, myPriority, league }, breakouts] = await Promise.all([
+        freeAgentInputs(l, provider, req.params.id, team, refresh),
+        faBreakoutSignals(l, team),
+      ]);
+      return rankWaivers({ ...l.ctx, league }, team, input, { myPriority, breakouts });
     });
     res.json(result);
   }),
@@ -440,7 +454,8 @@ apiRouter.get(
       ]);
       let waivers: Map<string, WaiverTarget> | undefined;
       if (fa) {
-        const w = rankWaivers({ ...l.ctx, league: fa.league }, team, fa.input, { myPriority: fa.myPriority, limit: fa.input.length });
+        const breakouts = await faBreakoutSignals(l, team);
+        const w = rankWaivers({ ...l.ctx, league: fa.league }, team, fa.input, { myPriority: fa.myPriority, limit: fa.input.length, breakouts });
         waivers = new Map(w.freeAgents.map((x) => [x.id, x]));
       }
       return findBreakouts({ league: l.league, players: l.ctx.players, teams: l.ctx.teams, myTeamId: team, depth, market, waivers, pos, limit, cheapOnly });

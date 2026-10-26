@@ -287,12 +287,27 @@ export interface WaiverTarget extends ValuedPlayer {
   trend: number;
   /** Last-week snap share minus average of earlier weeks (0..1 scale). */
   snapTrend: number;
-  recommendation: "claim" | "wait" | "optional" | "pass";
+  /** stash = not a lineup upgrade yet, but his role is rising (Breakout Targets signal). */
+  recommendation: "claim" | "optional" | "stash" | "wait" | "pass";
   why: string;
   onWaivers: boolean;
   percentOwned?: number;
   /** Ranking score: max(gain*3, benchGain/10). */
   rankScore: number;
+  /** Breakout Targets signal for this free agent, when he is in that pool. */
+  breakout?: WaiverBreakout;
+}
+
+/** The part of a BreakoutTarget the waivers module uses. */
+export interface WaiverBreakout {
+  tier: "rising" | "stash";
+  /** 0..100 breakout score. */
+  score: number;
+  /** 0 / 0.5 / 1: how open his path to a bigger role is. */
+  situation: number;
+  /** Mean expected fantasy points over the last 2 weeks (league scoring). */
+  oppLevel: number;
+  thesis: string;
 }
 
 /** Breakout Targets (GET /breakouts): a player whose role is rising before his fantasy points have. */
