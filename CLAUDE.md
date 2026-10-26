@@ -42,5 +42,9 @@ Open work and "Resume here" live in TASKS.md.
 ## Deploy
 - Render blueprint `render.yaml`: service `fantasy-trade-desk`, free plan, Oregon (US region
   required by Yahoo), health check `/healthz`, password gate via `APP_PASSWORD`. Guide: docs/DEPLOY.md.
-- UNVERIFIED: whether Render auto-deploys on push to the working branch. Until confirmed,
-  assume a push may deploy. Claude has no standing grant to trigger or change Render deploys — ask.
+- Render service `srv-dau493jncjis73amrrvg` (workspace "My Workspace", account guanwu097),
+  https://fantasy-trade-desk.onrender.com. AUTO-DEPLOYS on every push to the working branch,
+  so a push = a production deploy and wipes `.data/` (browser backup restores imports).
+  Batch docs-only commits with a code change; ask before pushing. Imported league data lives
+  only on the server disk and in the browser's localStorage — not in git, not readable via Render MCP.
+- A claude.ai/code cloud session may also push to this branch: `git fetch` before starting work.
