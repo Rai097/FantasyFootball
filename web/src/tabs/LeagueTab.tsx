@@ -71,9 +71,15 @@ export function LeagueTab({ active }: { analysis: Analysis; active: Active & { t
   );
 }
 
-/** Horizontal stacked bars from zero: starter part + bench part = power score. */
+/**
+ * Horizontal stacked bars: starter part + bench part = power score. Scores sit close together (e.g. 68–79), so the axis
+ * starts just below the lowest starter part (a round number, labelled) instead of 0, making the real gaps visible.
+ */
 function PowerChart({ teams }: { teams: LeagueTeamRow[] }) {
   const max = Math.max(...teams.map((t) => t.starterPart + t.benchPart), 1);
+  const minStarter = Math.min(...teams.map((t) => t.starterPart));
+  const base = Math.max(0, Math.floor((minStarter - (max - minStarter) * 0.15) / 5) * 5);
+  const span = Math.max(max - base, 1);
   return (
     <div className="lg-chart" role="table" aria-label="Power score by team">
       <div className="lg-legend muted small">
@@ -83,7 +89,7 @@ function PowerChart({ teams }: { teams: LeagueTeamRow[] }) {
       <div className="lg-chart-row lg-chart-head" role="row">
         <span>#</span>
         <span>Team</span>
-        <span>Starters + bench</span>
+        <span>Starters + bench <span className="muted small">(axis from {base})</span></span>
         <span className="num">Score</span>
       </div>
       {teams.map((t) => (
@@ -96,8 +102,8 @@ function PowerChart({ teams }: { teams: LeagueTeamRow[] }) {
           <span className="muted">{t.powerRank}</span>
           <span className={`lg-name${t.mine ? " strong" : ""}`}>{t.name}</span>
           <span className="lg-bar" aria-hidden>
-            <span className="seg starter" style={{ width: `${(t.starterPart / max) * 100}%` }} />
-            {t.benchPart > 0 && <span className="seg bench" style={{ width: `${(t.benchPart / max) * 100}%` }} />}
+            <span className="seg starter" style={{ width: `${(Math.max(0, t.starterPart - base) / span) * 100}%` }} />
+            {t.benchPart > 0 && <span className="seg bench" style={{ width: `${(t.benchPart / span) * 100}%` }} />}
           </span>
           <span className="num strong">{f1(t.powerScore)}</span>
         </div>
