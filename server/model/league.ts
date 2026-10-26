@@ -135,6 +135,7 @@ export function comparisonSummary(c: Pick<TeamComparison, "starterGap" | "benchG
   if (above) {
     if (c.starterGap >= 0.05) {
       s = `${sgn(c.starterGap)} starter pts/wk`;
+      if (c.benchGap <= -1) s += `, partly offset by your deeper bench (${sgn(-c.benchGap)})`;
       s += ahead.length ? `: stronger ${list(ahead.slice(0, 2))}` : "";
     } else {
       s = `Deeper bench (${sgn(c.benchGap)} bench strength) outweighs your ${sgn(-c.starterGap)} starter pts/wk`;
@@ -144,6 +145,7 @@ export function comparisonSummary(c: Pick<TeamComparison, "starterGap" | "benchG
   } else {
     if (c.starterGap <= -0.05) {
       s = `${sgn(c.starterGap)} starter pts/wk vs you`;
+      if (c.benchGap >= 1) s += `, partly offset by their deeper bench (${sgn(c.benchGap)})`;
       s += behind.length ? `: weaker ${list(behind.slice(0, 2))}` : "";
     } else {
       s = `Thinner bench (${sgn(c.benchGap)} bench strength) outweighs their ${sgn(c.starterGap)} starter pts/wk`;

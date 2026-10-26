@@ -89,6 +89,8 @@ test("summaries: one line ≤ 255 chars, explain the starter vs bench split", ()
   assert.match(b.summary, /^Deeper bench \(\+\d+\.\d bench strength\) outweighs your \+\d+\.\d starter pts\/wk/);
   const c = v.below.find((x) => x.teamId === "c")!;
   assert.match(c.summary, /^-\d+\.\d starter pts\/wk vs you: weaker/);
+  const gs = [{ group: "WR", theirs: 30, mine: 25, gap: 5 }];
+  assert.equal(comparisonSummary({ starterGap: 4.9, benchGap: -9.1, groups: gs }, true), "+4.9 starter pts/wk, partly offset by your deeper bench (+9.1): stronger WR (+5.0).");
   // Worst case length: every group named.
   const long = comparisonSummary(
     { starterGap: 99.9, benchGap: -99.9, groups: ["QB", "RB", "WR", "TE", "FLEX", "K", "DEF"].map((g, i) => ({ group: g, theirs: 0, mine: 0, gap: i < 4 ? 50 : -50 })) },
