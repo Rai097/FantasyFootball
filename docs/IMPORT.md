@@ -21,7 +21,7 @@ You do this once:
 2. Find **Import from Yahoo (browser)**. Make sure your browser's bookmarks
    bar is visible (Chrome/Edge: Ctrl+Shift+B, Mac: Cmd+Shift+B; Firefox: View
    → Toolbars → Bookmarks Toolbar; Safari: View → Show Favorites Bar).
-3. Drag the blue **Trade Desk import** button onto the bookmarks bar. (Clicking it
+3. Drag the blue **Trade Desk import v2** button onto the bookmarks bar (delete any older "Trade Desk import" bookmark first: it lacks standings, waiver order and K/DEF). (Clicking it
    on the Trade Desk page does nothing; it only works on Yahoo.)
 
 Each time you want fresh data:
@@ -30,7 +30,7 @@ Each time you want fresh data:
    **football.fantasysports.yahoo.com**. Any page of the league works: the
    address must contain `/f1/` followed by your league number, for example
    `https://football.fantasysports.yahoo.com/f1/1405188`.
-2. Click **Trade Desk import** on your bookmarks bar.
+2. Click **Trade Desk import v2** on your bookmarks bar.
 3. Wait 10–30 seconds. A dark box appears in the top-right corner listing
    the teams it found and how many players each has.
 4. Click **Copy to clipboard** (or **Download JSON** and open the file in a

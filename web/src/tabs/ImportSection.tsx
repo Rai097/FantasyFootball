@@ -70,7 +70,7 @@ function BookmarkletCard() {
       <div className="row gap wrap">
         {bm.data ? (
           <a ref={ref} draggable className="btn primary bookmarklet" onClick={(e) => (e.preventDefault(), alert("Drag this button to your bookmarks bar, then click it while on your Yahoo league page."))}>
-            Trade Desk import
+            Trade Desk import v2
           </a>
         ) : bm.loading ? (
           <span className="muted">loading…</span>

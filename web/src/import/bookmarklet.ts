@@ -241,7 +241,7 @@ async function run(): Promise<void> {
 
   // ---- summary
   box.textContent = "";
-  box.appendChild(el("div", "Trade Desk import", "font-weight:700;font-size:15px;margin-bottom:6px"));
+  box.appendChild(el("div", "Trade Desk import v2", "font-weight:700;font-size:15px;margin-bottom:6px"));
   const summary = el("div");
   const noPos = diagnostics.reduce((a, d) => a + (Array.isArray(d.noPos) ? d.noPos.length : 0), 0);
   summary.textContent =
