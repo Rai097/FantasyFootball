@@ -171,6 +171,20 @@ function keepTimestamp(v: unknown, now: Date): string {
   return now.toISOString();
 }
 
+/**
+ * Yahoo's pages name teams "<League name> - <Team>". With one league on screen the prefix is noise, so when every
+ * team (at least 2) starts with the same "<x> - " part it is removed. Names that would become empty are kept.
+ */
+export function stripLeaguePrefix<T extends { name: string }>(teams: T[]): T[] {
+  if (teams.length < 2) return teams;
+  const first = teams[0].name;
+  const sep = first.indexOf(" - ");
+  if (sep <= 0) return teams;
+  const prefix = first.slice(0, sep + 3);
+  if (!teams.every((t) => t.name.startsWith(prefix) && t.name.length > prefix.length)) return teams;
+  return teams.map((t) => ({ ...t, name: t.name.slice(prefix.length).trim() }));
+}
+
 export function validateImport(body: unknown, now = new Date()): StoredImport {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new ImportError("Import must be a JSON object", "Paste the text the bookmarklet copied, unchanged.");
   if (JSON.stringify(body).length > MAX_BYTES) throw new ImportError("Import is larger than 1 MB");
@@ -178,7 +192,7 @@ export function validateImport(body: unknown, now = new Date()): StoredImport {
   if (!Array.isArray(o.teams) || o.teams.length === 0) throw new ImportError("Import has no teams", "The bookmarklet found no rosters: copy its diagnostics and report them.");
   if (o.teams.length > MAX_TEAMS) throw new ImportError(`Too many teams (${o.teams.length}); the limit is ${MAX_TEAMS}`);
   const ids = new Set<string>();
-  const teams: ImportTeamRaw[] = o.teams.map((tv, i) => {
+  const teamsIn: ImportTeamRaw[] = o.teams.map((tv, i) => {
     const t = (tv ?? {}) as Record<string, unknown>;
     let id = str(t.id, 20) ?? String(i + 1);
     if (ids.has(id)) id = `${id}-${i + 1}`;
@@ -190,6 +204,7 @@ export function validateImport(body: unknown, now = new Date()): StoredImport {
     if (owner) team.owner = owner;
     return team;
   });
+  const teams = stripLeaguePrefix(teamsIn);
   const fa = Array.isArray(o.freeAgents) ? o.freeAgents : undefined;
   if (fa && fa.length > MAX_FREE_AGENTS) throw new ImportError(`Too many free agents (${fa.length}); the limit is ${MAX_FREE_AGENTS}`);
 
@@ -244,7 +259,8 @@ export async function readImport(id: string): Promise<StoredImport | null> {
   if (!isValidId(id)) return null;
   const s = await readJson<StoredImport>(fileName(id));
   // import-<id>-history.json also matches import-*.json: it holds an array, not an import.
-  return s && !Array.isArray(s) && Array.isArray(s.teams) ? s : null;
+  // Leagues saved before the prefix rule are cleaned on read (no re-import needed).
+  return s && !Array.isArray(s) && Array.isArray(s.teams) ? { ...s, teams: stripLeaguePrefix(s.teams) } : null;
 }
 
 export async function saveImport(s: StoredImport): Promise<void> {

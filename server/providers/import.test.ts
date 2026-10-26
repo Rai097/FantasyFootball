@@ -15,6 +15,7 @@ import {
   mergeTeams,
   parseSlotList,
   snapshotOf,
+  stripLeaguePrefix,
   upsertImport,
   validateImport,
   type StoredImport,
@@ -253,4 +254,18 @@ test("free agents keep onWaivers per player (booleans only); missing = unknown, 
     ["P3", true, "waivers"],
     ["DEF:BUF", true, "unknown"],
   ]);
+});
+
+test("league-name prefix is stripped from team names when every team shares it", () => {
+  const L = "Kingshot Gridiron Chumps - ";
+  const t = (n: string) => ({ name: n });
+  assert.deepEqual(stripLeaguePrefix([t(L + "No Cap Rai"), t(L + "Playmaker Caw")]).map((x) => x.name), ["No Cap Rai", "Playmaker Caw"]);
+  // Not shared by every team, a single team, or nothing left after the prefix: unchanged.
+  assert.deepEqual(stripLeaguePrefix([t(L + "A"), t("Other - B")]).map((x) => x.name), [L + "A", "Other - B"]);
+  assert.deepEqual(stripLeaguePrefix([t(L + "A")]).map((x) => x.name), [L + "A"]);
+  assert.deepEqual(stripLeaguePrefix([t("X - "), t("X - B")]).map((x) => x.name), ["X - ", "X - B"]);
+  // A dash inside a real team name with no shared prefix stays.
+  assert.deepEqual(stripLeaguePrefix([t("Run - DMC"), t("Ball - Hogs")]).map((x) => x.name), ["Run - DMC", "Ball - Hogs"]);
+  const v = validateImport({ teams: [{ id: "1", name: L + "No Cap Rai", players: [] }, { id: "2", name: L + "Caw", players: [] }] });
+  assert.deepEqual(v.teams.map((x) => x.name), ["No Cap Rai", "Caw"]);
 });

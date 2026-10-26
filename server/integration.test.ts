@@ -540,7 +540,8 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
       settingsSource: "page",
       teams: a.league.teams.map((t: any, i: number) => ({
         id: String(i + 1),
-        name: t.name,
+        // Yahoo's pages prefix every team with the league name; the server strips it.
+        name: `Imported Test League - ${t.name}`,
         players: t.playerIds.map((pid: string) => {
           const p = a.players[pid];
           return { yahooId: p.ids?.yahoo, name: p.name, pos: p.pos, team: p.team };
@@ -572,6 +573,9 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     const an = await get(`${base}/analysis`);
     assert.equal(an.status, 200);
     assertClean(an.json, "import analysis");
+    // No team name anywhere in league / analysis / trades / waivers responses repeats the league name.
+    assert.equal(JSON.stringify(league.json.teams.map((t: any) => t.name)).includes("Imported Test League -"), false);
+    for (const t of an.json.teams) assert.ok(!String(t.team.name).startsWith("Imported Test League"), t.team.name);
     assert.equal(an.json.teams.length, 12);
     assert.equal(an.json.myTeamId, "3");
 
@@ -582,6 +586,7 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     const trades = await get(`${base}/trades`);
     assert.equal(trades.status, 200);
     assert.ok(Array.isArray(trades.json) && trades.json.length > 0, "no trades");
+    assert.equal(JSON.stringify(trades.json).includes("Imported Test League -"), false, "trade text repeats the league name");
     assertClean(trades.json, "import trades");
 
     const w = await get(`${base}/waivers`);
@@ -623,7 +628,7 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     assert.equal(hist[1].teams.length, 12);
     const ch = (await get(`/api/import/${id}/changes`)).json;
     assert.equal(ch.playersChanged, 1);
-    assert.deepEqual(ch.teams, [{ id: "2", name: again.teams[1].name, added: [fa.name], dropped: [dropped.name] }]);
+    assert.deepEqual(ch.teams, [{ id: "2", name: again.teams[1].name.replace(/^Imported Test League - /, ""), added: [fa.name], dropped: [dropped.name] }]);
   });
 
   test("PUT settings, paste mode, delete", async () => {
@@ -641,7 +646,8 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     // Paste mode: replace team 1's roster by name.
     const t1 = payload.teams[0];
     const text = t1.players.slice(0, 5).map((p: any) => `${p.name} ${p.team} - ${p.pos}`).join("\n");
-    const paste = await post("/api/import", { id, text, teamName: t1.name });
+    // The user types the team name as shown in the app (no league prefix).
+    const paste = await post("/api/import", { id, text, teamName: t1.name.replace(/^Imported Test League - /, "") });
     assert.equal(paste.status, 200, JSON.stringify(paste.json));
     assert.equal(paste.json.id, id);
     const after = (await get(`/api/league/import/${id}`)).json;
