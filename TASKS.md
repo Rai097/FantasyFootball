@@ -8,6 +8,9 @@
   2026-10-26) until Discord login ships. Render still runs (password-protected); owner to decide whether to suspend it.
 - Next feature (owner, 2026-10-26): Discord single sign-on like perp.raibot.us, multi-tenant: allow-listed Discord
   user ids (owner will supply), each user manages their own team/league. Then release 2 = import fixes (Backlog).
+- Right after sign-in (owner, 2026-10-26): header shows "League updated <date, time> · by <Discord name>" at all
+  times (store importedBy on each import/re-import; any user in the league can re-import, it upserts the shared
+  league). Rename the existing "Data Xm ago" pill (player-stats download time) so the two are not confused.
 - Open bugs: none known beyond the backlog.
 
 ## Waiting on
