@@ -253,6 +253,7 @@ function analyse(): TeamAnalysis[] {
     surplus: [],
     powerRank: 0,
     powerScore: r1(0.7 * b.starterPpg + 0.3 * b.bench.slice(0, 3).reduce((s, p) => s + p.vorp, 0)),
+    benchStrength: r1(b.bench.slice(0, 3).reduce((s, p) => s + p.vorp, 0)),
     byeExposure: byeExposure(b.lineup),
     injuryFlags: rosterOf(b.team.id)
       .filter((p) => p.injury)

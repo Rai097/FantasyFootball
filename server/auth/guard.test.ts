@@ -47,6 +47,7 @@ describe("classify", () => {
     assert.equal(c("GET", "/api/auth/me").kind, "signed");
     assert.deepEqual(c("GET", "/api/import/yA/history"), { kind: "importId", id: "yA" });
     assert.deepEqual(c("GET", "/api/league/import/yA/waivers"), { kind: "league", provider: "import", id: "yA" });
+    assert.deepEqual(c("GET", "/api/league/import/yA/league"), { kind: "league", provider: "import", id: "yA" });
     assert.deepEqual(c("GET", "/api/players/search", { q: "x" }), { kind: "league", provider: "demo", id: "42" });
     assert.deepEqual(c("GET", "/api/players/search", { provider: "import", id: "yB" }), { kind: "league", provider: "import", id: "yB" });
   });
@@ -134,6 +135,9 @@ describe("guard middleware (discord mode)", () => {
     assert.equal((await call(A, "GET", "/api/league/import/yA/analysis?team=4&team=5")).status, 403);
     assert.equal((await call(A, "POST", "/api/league/import/yA/trade/evaluate", { body: { team: "5", partner: "1" } })).status, 403);
     assert.equal((await call(A, "GET", "/api/league/import/yB")).json.code, "league");
+    assert.equal((await call(A, "GET", "/api/league/import/yA/league")).status, 200, "League tab: own league");
+    assert.equal((await call(A, "GET", "/api/league/import/yB/league")).json.code, "league", "League tab: another league");
+    assert.equal((await call(A, "GET", "/api/league/import/yA/league?team=5")).json.code, "team", "League tab: another team");
     assert.equal((await call(A, "GET", "/api/league/import/YA")).status, 403, "ids compare exactly");
     assert.equal((await call(A, "GET", "/api/league/yahoo/yA")).status, 403);
     assert.equal((await call(A, "GET", "/api/league/demo/42/analysis?team=9")).status, 200, "demo: read-only sample data");
