@@ -399,8 +399,13 @@ apiRouter.get(
     const players: Record<string, ValuedPlayer> = {};
     for (const p of relevantPlayers(l)) players[p.id] = p;
     const body = { league: leagueFor(req, provider, l.league), players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes, valueSource: l.valueSource };
-    // My Team still renders the prose `why` (release 5 moves it to bullets): leave the item copy out of this big payload.
-    res.type("application/json").send(JSON.stringify(body, (k, v) => (k === "whyItems" ? undefined : v)));
+    // My Team renders the value bullets of the request team's players only: everyone else's stay out of this big payload.
+    const mine = new Set(l.ctx.teams.find((t) => t.team.id === team)?.team.playerIds ?? []);
+    res.type("application/json").send(
+      JSON.stringify(body, function (this: { id?: unknown }, k, v) {
+        return k === "whyItems" && !(typeof this.id === "string" && mine.has(this.id)) ? undefined : v;
+      }),
+    );
   }),
 );
 
@@ -594,6 +599,12 @@ apiRouter.get(
   }),
 );
 
+/** Display name stamped on an import: the Discord name, "Admin" in dev mode (no real account). */
+export function importerName(scope: { dev: boolean; name: string }): string {
+  const n = scope.name.replace(/\s+/g, " ").trim().slice(0, 60);
+  return scope.dev || !n ? "Admin" : n;
+}
+
 /** The admin-owned, league-level fields of an import (everything except rosters, free agents and timestamps). */
 function leagueSettingsOf(s: StoredImport): Partial<StoredImport> {
   const { name, numTeams, slots, scoring, regularSeasonEnd, finalWeek, tradeDeadlineWeek, waiverPriority, settingsSource, leagueId } = s;
@@ -640,6 +651,9 @@ apiRouter.post(
       // League settings are admin-only: a user's re-import refreshes rosters and free agents, nothing else.
       if (previous) stored = { ...stored, ...leagueSettingsOf(previous) };
     }
+    // Who ran this import (header "League updated … · by <name>"): the session's name, never the payload's.
+    // Not a league setting, so a member's re-import sets it too.
+    stored = { ...stored, importedBy: importerName(scope) };
     await saveImport(stored);
     await recordHistory(stored, previous);
     invalidateLeague("import", stored.id);
@@ -650,6 +664,7 @@ apiRouter.post(
       myTeamId: ownLeague !== undefined ? scope.teamId : stored.myTeamId,
       settingsSource: stored.settingsSource,
       importedAt: stored.importedAt,
+      importedBy: stored.importedBy,
       updated: !!previous,
       ...(changes ? { changes: { teams: changes.teams, playersChanged: changes.playersChanged } } : {}),
       ...(skippedLines !== undefined ? { skippedLines } : {}),

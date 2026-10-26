@@ -2,6 +2,7 @@
 import type { DetailItem, League, Player, Position, Scoring, SlotKind, ValuedPlayer } from "./types.js";
 import { SKILL_POSITIONS } from "./types.js";
 import { recFormat, score } from "./scoring.js";
+import { clampItem } from "./details.js";
 
 export const POSITIONS: Position[] = ["QB", "RB", "WR", "TE", "K", "DEF"];
 
@@ -413,7 +414,7 @@ function explainItems(b: Base, repl: number, vorp: number, value: number, anchor
   const p = b.p;
   const f1 = (x: number) => x.toFixed(1);
   const out: DetailItem[] = [];
-  const add = (label: string, v: string) => out.push({ label, value: v });
+  const add = (label: string, v: string) => out.push({ label, value: clampItem(v) });
   if (p.pos === "K" || p.pos === "DEF") {
     const rank = b.ecrRank !== undefined ? `${p.pos}${Math.round(b.ecrRank)}` : `unranked ${p.pos}`;
     add("Projection", `${f1(b.ppg)} ppg from experts' ${rank}`);

@@ -404,6 +404,31 @@ describe("scoped API", () => {
     assert.equal(after.json.code, "signin");
   });
 
+  test("importedBy: the importer's Discord name on every import and re-import, never the payload's", async () => {
+    const byOf = async () => (await call(admin, "GET", "/api/import/yY")).json.importedBy;
+    // Admin import; a spoofed importedBy in the payload is ignored.
+    const r = await call(admin, "POST", "/api/import", { ...league("1"), importedBy: "Spoofed" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(r.json.importedBy, "user10");
+    assert.equal(await byOf(), "user10");
+    // A member's re-import sets it (it is not an admin-only league setting); the header (league.import) shows it.
+    const u = await call(b, "POST", "/api/import", { ...league("7"), importedBy: "Spoofed" });
+    assert.equal(u.status, 200, JSON.stringify(u.json));
+    assert.equal(await byOf(), "user30");
+    assert.equal((await call(a, "GET", "/api/league/import/yY")).json.import.importedBy, "user30");
+    // The imported-league list carries the name and the captured flags (Connect tab chips).
+    const row = (await call(a, "GET", "/api/import")).json.find((x: { id: string }) => x.id === "yY");
+    assert.equal(row.importedBy, "user30");
+    assert.equal(typeof row.hasStandings, "boolean");
+    assert.equal(row.hasFreeAgents, false);
+    // Paste mode re-import by member A, then the admin again: the newest importer wins each time.
+    const p = await call(a, "POST", "/api/import", { text: "Patrick Mahomes KC - QB", teamName: "Team 4", id: "yY" });
+    assert.equal(p.status, 200, JSON.stringify(p.json));
+    assert.equal(await byOf(), "user20");
+    assert.equal((await call(admin, "POST", "/api/import", league("1"))).status, 200);
+    assert.equal(await byOf(), "user10");
+  });
+
   test("secrets, codes, tokens and cookies never appear in log output", async () => {
     const r = await startLogin();
     await callback(`code-${A}`, r.state, r.stateCookie);

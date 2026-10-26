@@ -156,6 +156,27 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assertClean(json, "league");
   });
 
+  test("GET analysis: value bullets only for the request team's players, short and unchained", async () => {
+    let size = 0;
+    const teams = (await get(L)).json.teams.map((t: any) => t.id);
+    for (const team of teams) {
+      const text = await (await fetch(`${base}${L}/analysis?team=${team}`)).text();
+      const json = JSON.parse(text);
+      // My Team's bullets may only add a little to this big payload (the old one stripped every whyItems).
+      size = Math.max(size, JSON.stringify(json).length - JSON.stringify(json, (k, v) => (k === "whyItems" ? undefined : v)).length);
+      const me = json.teams.find((t: any) => t.team.id === team);
+      const mine = new Set(me.team.playerIds);
+      for (const p of [...me.lineup.map((l: any) => l.player).filter(Boolean), ...me.bench]) {
+        assert.ok(Array.isArray(p.whyItems) && p.whyItems.length >= 3, `${team}: ${p.name} has value bullets`);
+        assert.deepEqual(detailProblems(p.whyItems), [], `${team}: ${p.name}`);
+      }
+      for (const t of json.teams.filter((t: any) => t.team.id !== team))
+        for (const p of t.bench) assert.equal(p.whyItems, undefined, `${p.name}: another team's bullets leaked into the payload`);
+      for (const p of Object.values(json.players) as any[]) if (!mine.has(p.id)) assert.equal(p.whyItems, undefined, `${p.name}: not on the team`);
+    }
+    assert.ok(size > 0 && size < 40_000, `My Team bullets add ${size} bytes to /analysis`);
+  });
+
   test("GET analysis: full lineups, sane numbers", async () => {
     const { status, json } = await get(`${L}/analysis`);
     assert.equal(status, 200);
@@ -633,6 +654,8 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     assert.equal(id, "itest");
     const list = await get("/api/import");
     assert.ok(list.json.some((x: any) => x.id === id && x.numTeams === 12));
+    assert.equal(r.json.importedBy, "Admin", "dev mode stamps the import as Admin");
+    assert.equal(list.json.find((x: any) => x.id === id).importedBy, "Admin");
   });
 
   test("league / analysis / values / trades / waivers work with provider=import", async () => {

@@ -186,6 +186,8 @@ export interface ImportMeta {
   waiverPriority?: number;
   /** Yahoo league number, when imported by the bookmarklet. */
   leagueId?: string;
+  /** Who ran the latest import (Discord display name, "Admin" in dev mode); absent on older imports. */
+  importedBy?: string;
 }
 
 export interface League {

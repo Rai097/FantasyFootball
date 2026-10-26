@@ -63,6 +63,9 @@ export interface StoredImport {
   /** Yahoo league number when imported by the bookmarklet. */
   leagueId?: string;
   diagnostics?: unknown[];
+  /** Who ran the latest import / re-import: the signed-in Discord display name ("Admin" in dev mode). Set by the
+   *  server (POST /api/import), never taken from the payload. Absent on imports saved before release 5. */
+  importedBy?: string;
 }
 
 export interface ImportSummary {
@@ -72,6 +75,11 @@ export interface ImportSummary {
   numTeams: number;
   teams: number;
   settingsSource: SettingsSource;
+  importedBy?: string;
+  /** At least one team's record (standings) was captured. */
+  hasStandings: boolean;
+  /** The free-agent list was captured (waiver advice for this league works). */
+  hasFreeAgents: boolean;
 }
 
 export class ImportError extends Error {
@@ -350,6 +358,21 @@ export async function deleteImport(id: string): Promise<boolean> {
   return true;
 }
 
+/** One row of the imported-league list (Connect tab). */
+export function summaryOf(s: StoredImport): ImportSummary {
+  return {
+    id: s.id,
+    name: s.name,
+    importedAt: s.importedAt,
+    numTeams: s.numTeams,
+    teams: s.teams.length,
+    settingsSource: s.settingsSource,
+    ...(s.importedBy ? { importedBy: s.importedBy } : {}),
+    hasStandings: s.teams.some((t) => !!t.record),
+    hasFreeAgents: (s.freeAgents?.length ?? 0) > 0,
+  };
+}
+
 export async function listImports(): Promise<ImportSummary[]> {
   let files: string[] = [];
   try {
@@ -362,7 +385,7 @@ export async function listImports(): Promise<ImportSummary[]> {
     const m = /^import-([A-Za-z0-9_-]{1,40})\.json$/.exec(f);
     if (!m) continue;
     const s = await readImport(m[1]);
-    if (s) out.push({ id: s.id, name: s.name, importedAt: s.importedAt, numTeams: s.numTeams, teams: s.teams.length, settingsSource: s.settingsSource });
+    if (s) out.push(summaryOf(s));
   }
   return out.sort((a, b) => b.importedAt.localeCompare(a.importedAt));
 }
@@ -480,7 +503,7 @@ export function buildImportLeague(db: Finder, s: StoredImport, ctx: { season: nu
     teams,
     myTeamId: s.myTeamId && teams.some((t) => t.id === s.myTeamId) ? s.myTeamId : teams[0]?.id,
     fetchedAt: s.importedAt,
-    import: { settingsSource: s.settingsSource, importedAt: s.importedAt, waiverPriority: s.waiverPriority, leagueId: s.leagueId },
+    import: { settingsSource: s.settingsSource, importedAt: s.importedAt, waiverPriority: s.waiverPriority, leagueId: s.leagueId, ...(s.importedBy ? { importedBy: s.importedBy } : {}) },
     playerOverrides: overrides,
   };
 }
