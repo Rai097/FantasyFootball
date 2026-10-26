@@ -156,15 +156,30 @@ export function createAuth(o: AuthOptions) {
           return void res.status(e.status).json({ error: e.message, code: e.code, hint: e.hint });
         }
         const r = await guard.scopeFor(req);
-        if (!(r instanceof AuthError) && r.sessionKey) {
-          await sessions.revoke(r.sessionKey);
-          log(`[auth] event=logout uid=${r.uid} result=ok`);
-        } else {
-          // Not allowlisted any more, or no session: still revoke whatever the cookie names.
-          const parsed = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-          const id = verifySessionCookie(parsed, secret);
-          const s = id ? sessions.get(id) : null;
-          if (s) await sessions.revoke(s.key);
+        // Revoked in memory at once; if the file write fails the cookie is still cleared and the store keeps
+        // retrying the write, so a restart cannot revive the session once storage works again.
+        let saved = true;
+        try {
+          if (!(r instanceof AuthError) && r.sessionKey) {
+            await sessions.revoke(r.sessionKey);
+            log(`[auth] event=logout uid=${r.uid} result=ok`);
+          } else {
+            // Not allowlisted any more, or no session: still revoke whatever the cookie names.
+            const parsed = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+            const id = verifySessionCookie(parsed, secret);
+            const s = id ? sessions.get(id) : null;
+            if (s) await sessions.revoke(s.key);
+          }
+        } catch {
+          saved = false;
+          log(`[auth] event=logout result=error reason=session_store_write_failed`);
+        }
+        if (!saved) {
+          clearCookie(res, SESSION_COOKIE);
+          return void res
+            .status(503)
+            .set("Cache-Control", "no-store")
+            .json({ error: "Signed out on this device, but the server could not save it yet; it will keep retrying.", code: "store" });
         }
       }
       clearCookie(res, SESSION_COOKIE);

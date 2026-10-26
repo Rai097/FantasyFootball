@@ -542,6 +542,12 @@ apiRouter.get(
   }),
 );
 
+/** The admin-owned, league-level fields of an import (everything except rosters, free agents and timestamps). */
+function leagueSettingsOf(s: StoredImport): Partial<StoredImport> {
+  const { name, numTeams, slots, scoring, regularSeasonEnd, finalWeek, tradeDeadlineWeek, waiverPriority, settingsSource, leagueId } = s;
+  return { name, numTeams, slots, scoring, regularSeasonEnd, finalWeek, tradeDeadlineWeek, waiverPriority, settingsSource, leagueId };
+}
+
 apiRouter.post(
   "/api/import",
   h(async (req, res) => {
@@ -579,6 +585,8 @@ apiRouter.post(
     if (ownLeague !== undefined) {
       if (previous?.myTeamId) stored.myTeamId = previous.myTeamId;
       else delete stored.myTeamId;
+      // League settings are admin-only: a user's re-import refreshes rosters and free agents, nothing else.
+      if (previous) stored = { ...stored, ...leagueSettingsOf(previous) };
     }
     await saveImport(stored);
     await recordHistory(stored, previous);

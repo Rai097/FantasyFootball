@@ -149,19 +149,21 @@ test("production with all four vars and corrupt sessions.json / access.json → 
   }
 });
 
-test("DOCUMENTS: NODE_ENV unset / mis-cased with no Discord vars → dev mode (every request is admin, no cookie)", { timeout: 90_000 }, async () => {
-  // Spec: "Non-production without Discord config → dev mode". The plist and `npm start` pin NODE_ENV=production; this
-  // test records what happens if a service is ever started without it (or with "Production").
+test("NODE_ENV unset / mis-cased with no Discord vars → exit 1 (dev mode needs an explicit development/test)", { timeout: 90_000 }, async () => {
+  // Fail closed: a service started without NODE_ENV (or with "Production") must not serve admin to anyone.
   for (const NODE_ENV of ["", "Production", "prod"]) {
     const b = await boot({ ...(NODE_ENV ? { NODE_ENV } : {}) });
     try {
-      assert.equal(b.code, null, b.log);
-      assert.match(b.log, /mode=dev/);
-      const me = await fetch(`${b.base}/api/auth/me`);
-      assert.equal(me.status, 200, `NODE_ENV=${JSON.stringify(NODE_ENV)}: dev mode serves admin to anyone`);
-      assert.equal(((await me.json()) as { role: string }).role, "admin");
+      assert.equal(b.code, 1, `NODE_ENV=${JSON.stringify(NODE_ENV)}: ${b.log}`);
     } finally {
       await b.kill();
     }
+  }
+  const dev = await boot({ NODE_ENV: "development" });
+  try {
+    assert.equal(dev.code, null, dev.log);
+    assert.match(dev.log, /mode=dev/);
+  } finally {
+    await dev.kill();
   }
 });

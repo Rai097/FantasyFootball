@@ -895,11 +895,15 @@ describe("sessions: logout, restart, failing storage", () => {
 
   test("logout while session storage is unwritable must not leave a session that a restart revives", async () => {
     const io = fileIO(path.join(work, "sessions-ro2.json"));
-    const b9 = await listen(buildApp({ sessions: new SessionStore(io) }).app);
+    const store9 = new SessionStore(io);
+    const b9 = await listen(buildApp({ sessions: store9 }).app);
     const w = await signIn(A, b9);
     io.failWrites = true;
     const out = await call(w, "POST", "/auth/logout", undefined, { b: b9 });
+    assert.equal(out.status, 503, "a logout that could not be saved says so");
+    assert.ok(setCookies(out as Res).some((c) => /^td_session=;/.test(c)), "the cookie is cleared anyway");
     io.failWrites = false;
+    assert.equal(await store9.flush(), true, "the pending write lands once storage works (the store retries it)");
     const store2 = new SessionStore(io);
     await store2.load();
     const b10 = await listen(buildApp({ sessions: store2 }).app);

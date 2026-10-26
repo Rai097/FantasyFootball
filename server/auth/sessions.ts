@@ -116,6 +116,12 @@ function validRow(v: unknown): v is SessionRow {
 export class SessionStore {
   private rows = new Map<string, SessionRow>();
   private writing: Promise<void> = Promise.resolve();
+  /** A failed write leaves the file behind memory (e.g. a revoked session still on disk): retried until it lands. */
+  private dirty = false;
+  private retryTimer: NodeJS.Timeout | null = null;
+  private retries = 0;
+  static RETRY_MS = 5_000;
+  static MAX_RETRIES = 60;
 
   constructor(
     private io: SessionIO = fileIO,
@@ -176,7 +182,24 @@ export class SessionStore {
     return had;
   }
 
-  /** Serialised write-through of the whole map (expired rows dropped). */
+  /** True while memory has changes the file does not (a write failed and has not been retried successfully yet). */
+  get pendingWrite(): boolean {
+    return this.dirty;
+  }
+
+  /** Write memory to disk now if a previous write failed. Resolves true when the file is current. */
+  async flush(): Promise<boolean> {
+    if (!this.dirty) return true;
+    try {
+      await this.persist();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Serialised write-through of the whole map (expired rows dropped). A failure marks the store dirty and schedules
+   *  bounded retries (every RETRY_MS, at most MAX_RETRIES), so a logout that could not be saved still lands on disk. */
   private persist(): Promise<void> {
     const run = async () => {
       const t = this.now();
@@ -184,8 +207,28 @@ export class SessionStore {
       for (const [k, r] of this.rows) if (r.expiresMs > t) out[k] = r;
       await this.io.write(out);
     };
-    const p = this.writing.then(run, run);
+    const p = this.writing.then(run, run).then(
+      () => {
+        this.dirty = false;
+        this.retries = 0;
+      },
+      (e: unknown) => {
+        this.dirty = true;
+        this.scheduleRetry();
+        throw e;
+      },
+    );
     this.writing = p.catch(() => undefined);
     return p;
+  }
+
+  private scheduleRetry(): void {
+    if (this.retryTimer || this.retries >= SessionStore.MAX_RETRIES) return;
+    this.retries++;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.flush();
+    }, SessionStore.RETRY_MS);
+    this.retryTimer.unref();
   }
 }

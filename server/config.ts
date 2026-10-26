@@ -7,25 +7,30 @@ export type AuthConfig =
   | { mode: "dev" }
   | { mode: "error"; message: string };
 
+/** NODE_ENV values that may run without Discord (every request is a built-in admin): never the default. */
+export const DEV_ENVS = new Set(["development", "test"]);
+
 /**
- * Discord sign-in config (docs/DESIGN.md "Discord sign-in, multi-tenant"). Production needs all four vars
- * (fail closed). Outside production, no DISCORD_CLIENT_ID = dev mode (every request is a built-in admin);
- * a partial config is an error rather than a silent fallback.
+ * Discord sign-in config (docs/DESIGN.md "Discord sign-in, multi-tenant"). All four vars are required (fail closed)
+ * unless NODE_ENV is explicitly "development" or "test" AND no DISCORD_CLIENT_ID is set: then dev mode. An unset or
+ * misspelled NODE_ENV is NOT dev mode. A partial config is an error rather than a silent fallback. Values are
+ * trimmed: whitespace-only counts as missing.
  */
 export function authConfig(env: NodeJS.ProcessEnv, isProd: boolean): AuthConfig {
-  const missing = AUTH_VARS.filter((k) => !env[k]);
-  if (!isProd && !env.DISCORD_CLIENT_ID) return { mode: "dev" };
+  const v = (k: (typeof AUTH_VARS)[number]) => (env[k] ?? "").trim();
+  const missing = AUTH_VARS.filter((k) => !v(k));
+  if (!isProd && DEV_ENVS.has(env.NODE_ENV ?? "") && !v("DISCORD_CLIENT_ID")) return { mode: "dev" };
   if (missing.length) return { mode: "error", message: `missing ${missing.join(", ")}` };
-  if (env.SESSION_SECRET!.length < 32) return { mode: "error", message: "SESSION_SECRET must be at least 32 characters (e.g. openssl rand -hex 32)" };
+  if (v("SESSION_SECRET").length < 32) return { mode: "error", message: "SESSION_SECRET must be at least 32 characters (e.g. openssl rand -hex 32)" };
   let url: URL;
   try {
-    url = new URL(env.PUBLIC_URL!);
+    url = new URL(v("PUBLIC_URL"));
   } catch {
     return { mode: "error", message: "PUBLIC_URL is not a URL" };
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") return { mode: "error", message: "PUBLIC_URL must be http(s)" };
   if (isProd && url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return { mode: "error", message: "PUBLIC_URL must be https in production" };
-  return { mode: "discord", clientId: env.DISCORD_CLIENT_ID!, clientSecret: env.DISCORD_CLIENT_SECRET!, sessionSecret: env.SESSION_SECRET!, publicUrl: url.origin + url.pathname.replace(/\/+$/, "") };
+  return { mode: "discord", clientId: v("DISCORD_CLIENT_ID"), clientSecret: v("DISCORD_CLIENT_SECRET"), sessionSecret: v("SESSION_SECRET"), publicUrl: url.origin + url.pathname.replace(/\/+$/, "") };
 }
 
 const isProd = process.env.NODE_ENV === "production";
