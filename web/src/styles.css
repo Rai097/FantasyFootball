@@ -193,6 +193,7 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .sort-btn.active { color: var(--text); }
 .sort-arrow { font-size: 9px; width: 8px; }
 .owner { white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.table.values .owner { max-width: none; }
 .owner.fa { color: var(--pos); font-weight: 600; }
 .table-more { padding: 12px; text-align: center; }
 
@@ -205,10 +206,6 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .stat-link { font: inherit; color: inherit; text-align: left; cursor: pointer; display: block; width: 100%; }
 .stat-link:hover { border-color: var(--accent-2); }
 .stat-link .stat-sub { color: var(--accent); }
-.bench-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
-.bench-list li { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.bench-list .chip { flex: 0 1 auto; }
-.bench-nums { margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .strength { display: flex; flex-direction: column; gap: 8px; }
 .strength-row { display: grid; grid-template-columns: 44px minmax(60px, 1fr) 76px 82px; gap: 10px; align-items: center; }
 .strength-label { font-weight: 700; font-size: 12px; font-family: var(--mono); }
@@ -222,7 +219,7 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .legend { display: flex; align-items: center; gap: 6px; }
 .legend-avg { display: inline-block; width: 2px; height: 12px; background: var(--text); }
 .chips-block { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
-.bye-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; margin-bottom: 8px; }
+.bye-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 6px; margin-bottom: 8px; }
 .bye-cell { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); text-align: center; padding: 4px 0; }
 .bye-cell.playoff { border-style: dashed; }
 .bye-cell.warn { background: var(--warn-bg); border-color: rgba(245, 184, 65, 0.5); }
@@ -239,16 +236,6 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .league-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .league-list li.active { border-color: var(--accent); }
 .current .field { margin-top: 14px; max-width: 420px; }
-
-/* ---------- trades ---------- */
-.trade-card { display: flex; flex-direction: column; gap: 12px; }
-.trade-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.accept { text-align: right; line-height: 1.1; }
-.accept-num { display: block; font-size: 20px; font-weight: 750; font-variant-numeric: tabular-nums; }
-.accept-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.accept.good .accept-num { color: var(--pos); }
-.accept.warn .accept-num { color: var(--warn); }
-.accept.bad .accept-num { color: var(--neg); }
 .verdict { display: inline-block; margin-top: 4px; font-weight: 750; font-size: 13px; padding: 3px 10px; border-radius: 999px; }
 .verdict.good { background: var(--pos-bg); color: var(--pos); }
 .verdict.warn { background: var(--warn-bg); color: var(--warn); }
@@ -264,23 +251,14 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .metric-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 .metric-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .tags { display: flex; flex-wrap: wrap; }
-.delta-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
-.small-delta { display: flex; flex-direction: column; align-items: flex-start; background: var(--bg-2); border-radius: var(--radius-sm); padding: 5px 8px; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px; min-width: 0; }
-.small-delta .metric-label { font-size: 10px; }
-.mode-picker { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.mode-picker .seg { align-self: flex-start; max-width: 100%; }
 .finder-summary { font-size: 14px; }
 .fold { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
 .fold > summary { cursor: pointer; padding: 10px 14px; font-weight: 700; list-style-position: inside; }
 .fold > summary .muted { font-weight: 400; }
 .fold[open] > summary { border-bottom: 1px solid var(--border); }
 .fold-body { padding: 12px; display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
-.section-title { font-size: 15px; font-weight: 750; margin: 4px 0 0; }
-.trade-details { border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
-.changes, .why-list { margin: 0; padding-left: 18px; font-size: 13px; }
-.changes li, .why-list li { margin-bottom: 4px; }
-.why-list { color: var(--muted); }
-.why-list .strong { color: var(--text); }
+.changes { margin: 0; padding-left: 18px; font-size: 13px; }
+.changes li { margin-bottom: 4px; }
 
 .builder { display: flex; flex-direction: column; gap: 12px; }
 .builder h2 { margin-bottom: 0; }
@@ -425,8 +403,6 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
   .card { padding: 12px; }
   .trade-cols, .builder-cols { grid-template-columns: minmax(0, 1fr); }
   .trade-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-  .delta-row { gap: 4px; }
-  .small-delta { padding: 4px 6px; font-size: 12px; }
   .fold-body { padding: 8px; }
   .metric { padding: 6px 8px; }
   .metric-value { font-size: 14px; }
@@ -448,7 +424,10 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
   .table.lineup .chip-team { display: none; }
   .table.lineup td:first-child { width: 44px; }
   .table.lineup th, .table.lineup td { padding-left: 4px; padding-right: 4px; }
-  .table.lineup .chip-name { max-width: 88px; }
+  .table.lineup .chip-name { max-width: 76px; }
+  .table.lineup .slot { min-width: 0; }
+  .table.lineup td:first-child { width: 34px; }
+  .table.lineup .why-cell { width: 20px; }
   .table.lineup .eff-hint { display: block; font-size: 10px; white-space: normal; }
   .table th, .table th.num { white-space: normal; }
   .table.values .owner { max-width: 60px; }
@@ -456,7 +435,6 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
   .table.values .player-cell .strong { max-width: 84px; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
   .table.values th { font-size: 10px; letter-spacing: 0; }
   .table.values th, .table.values td { padding-left: 4px; padding-right: 4px; }
-  .bench-list .chip-team { display: none; }
 
 }
 }
@@ -467,27 +445,12 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 
 /* ---------- import ---------- */
 textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; width: 100%; resize: vertical; min-height: 120px; box-sizing: border-box; }
-.bookmarklet { display: inline-block; cursor: grab; text-decoration: none; margin: 4px 0; }
+.bookmarklet { display: inline-block; cursor: grab; text-decoration: none; margin: 4px 0; user-select: none; -webkit-user-select: none; -webkit-user-drag: element; }
 .import-settings { border-top: 1px solid var(--border); padding-top: 12px; }
 .import-settings .filters .field { flex: 1 1 130px; }
 .banner { margin-bottom: var(--gap); }
-
-/* ---------- breakout targets ---------- */
-.targets-sub { margin: 0; }
-.targets-note { margin: 8px 0 0; }
-.targets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--gap); }
-@media (max-width: 420px) { .targets-grid { grid-template-columns: minmax(0, 1fr); } }
-.target-card { display: flex; flex-direction: column; gap: 10px; }
-.target-top { align-items: flex-start; }
-.target-who { min-width: 0; flex: 1; }
-.target-rank { font-size: 12px; font-weight: 700; flex: none; }
-.target-score { flex: none; }
-.score-num { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
-.fa-tag { background: var(--pos-bg); border-color: rgba(62, 207, 122, 0.4); color: var(--pos); }
-.owner-tag { background: rgba(79, 140, 255, 0.15); border-color: rgba(79, 140, 255, 0.4); color: #8fb4ff; }
 .path-tag { background: var(--warn-bg); border-color: rgba(245, 184, 65, 0.4); color: var(--warn); }
 .ahead { line-height: 1.6; }
-.ahead-item { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; }
 .strips { display: flex; flex-direction: column; gap: 6px; background: var(--bg-2); border-radius: var(--radius-sm); padding: 8px 10px; }
 .strip { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; align-items: end; }
 .strip-label { font-size: 11px; padding-bottom: 14px; }
@@ -500,9 +463,6 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .strip-bar.act { background: var(--pos); }
 .strip-val { font-size: 10.5px; font-variant-numeric: tabular-nums; line-height: 1.3; }
 .strip-wk { font-size: 9.5px; line-height: 1.1; }
-.thesis { margin: 0; }
-.ask { font-size: 13px; font-weight: 600; background: rgba(79, 140, 255, 0.1); border: 1px solid rgba(79, 140, 255, 0.3); border-radius: var(--radius-sm); padding: 6px 10px; }
-.ask.ask-fa { background: var(--pos-bg); border-color: rgba(62, 207, 122, 0.35); }
 
 /* ---- Trade finder v3: fairness band, pitch, notes, partners */
 .band { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--card-2); }
@@ -511,16 +471,11 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .band-favors-you { background: var(--neg-bg); border-color: rgba(255, 107, 107, 0.4); color: var(--neg); }
 .pitch { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; background: var(--bg-2); border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin: 10px 0; font-size: 13px; }
 .pitch-text { font-style: italic; min-width: 0; overflow-wrap: anywhere; }
-.trade-notes { margin: 8px 0 0; padding-left: 18px; }
 .tag.tag-good { background: var(--pos-bg); border-color: rgba(62, 207, 122, 0.4); }
 .tag.tag-warn { background: var(--warn-bg); border-color: rgba(245, 184, 65, 0.4); }
-.partner-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
 .tier-title { margin: 4px 0 2px; }
-.tier-sub { margin: 0; }
 .cheap-toggle { cursor: pointer; white-space: nowrap; }
 .price { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
-.strong-summary { font-weight: 600; font-size: 15px; }
-.empty-finder h3 { margin-top: 8px; }
 
 /* Import confirmation toast + roster changes list (Connect → Imported leagues) */
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50; max-width: calc(100vw - 32px); background: var(--card-2); color: var(--text); border: 1px solid rgba(62, 207, 122, 0.5); border-radius: var(--radius); padding: 10px 16px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); cursor: pointer; }
@@ -541,9 +496,7 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
   .account .btn, .view-as select { min-height: 44px; }
 }
 
-/* ---------- Release 4: collapsed rows everywhere (Trade Finder, Targets, Values help) ----------
-   Added as one block (no edits above). Trade cards and breakout targets are ExpandableRows now; the old
-   .trade-card / .targets-grid / .target-card rules above are unused and can be removed in a later cleanup. */
+/* ---------- Release 4: collapsed rows everywhere (Trade Finder, Targets, Values help) ---------- */
 .one-line { overflow-wrap: anywhere; }
 .notice .disclosure > summary { min-height: 32px; font-size: 12.5px; }
 .notice .disclosure-body { padding-top: 0; }
@@ -623,4 +576,30 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
   .table.values .player-cell .strong { max-width: 120px; }
   .th-why .why-btn { width: 15px; height: 15px; font-size: 9.5px; }
   .target-row .xrow-head { grid-template-columns: 30px minmax(0, 1fr) 44px 16px; }
+}
+
+/* ---------- release 5: My Team grid, bench rows, header, imported-league rows ---------- */
+.team-grid { align-items: stretch; }
+.side-stack { display: flex; flex-direction: column; }
+.side-stack > .card:last-child { flex: 1; }
+.table.lineup tr.bench-start td { border-top: 2px solid var(--border); }
+.table.lineup tr.bench-row .slot { opacity: 0.75; }
+.table.lineup td { padding-top: 4px; padding-bottom: 4px; }
+.bye-list li { flex-wrap: nowrap; align-items: baseline; font-size: 13px; }
+.bye-wk { flex: none; width: 34px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bye-names { min-width: 0; }
+.side-stack h2 { margin-bottom: 10px; }
+.plain-list { list-style: none; padding: 0; }
+.pill.updated { color: var(--text); }
+.pill .why-btn { width: 15px; height: 15px; font-size: 9.5px; }
+.imp-chips { display: flex; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.import-list { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-2); }
+.import-row .xrow-head { grid-template-columns: minmax(0, 1fr) auto 16px; padding: 8px 12px; }
+.import-row.active { box-shadow: inset 3px 0 0 var(--accent); }
+.imp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) {
+  .import-row .xrow-head { grid-template-columns: minmax(0, 1fr) 16px; grid-template-areas: "main chev" "actions chev"; row-gap: 6px; }
+  .import-row .imp-main { grid-area: main; min-width: 0; }
+  .import-row .imp-actions { grid-area: actions; }
+  .import-row .xrow-chevron { grid-area: chev; }
 }

@@ -2,7 +2,8 @@ import { useState } from "react";
 import { api, type Active, type Analysis, type AppState, type ImportResult, type Me, type YahooLeague } from "../api";
 import { ErrorBox, Loading } from "../components/common";
 import type { ApiError } from "../lib/errors";
-import { ago, record } from "../lib/format";
+import { ago, record, stamp } from "../lib/format";
+import { Disclosure } from "../components/ExpandableRow";
 import { toApiError, useAsync, type AsyncState } from "../lib/useAsync";
 import { ImportSection } from "./ImportSection";
 
@@ -32,10 +33,7 @@ export function ConnectTab({ me, state, active, analysis, justConnected, onChoos
         <div className="grid-2">
           <section className="card">
             <h2>Demo league</h2>
-            <p className="muted">
-              A 12-team half-PPR league drafted from real expert rankings. Everything works offline from Yahoo — the fastest way to see how the
-              model thinks.
-            </p>
+            <div className="muted small">12 teams, half-PPR, drafted from expert ranks. No Yahoo needed.</div>
             <button
               className="btn primary"
               onClick={() => {
@@ -49,9 +47,9 @@ export function ConnectTab({ me, state, active, analysis, justConnected, onChoos
 
           <section className="card">
             <h2>Yahoo Fantasy (API)</h2>
-            <p className="muted small">
-              Yahoo now approves API apps one by one (1–2 weeks). Until then, use <a href="#import">Import from Yahoo (browser)</a> below.
-            </p>
+            <div className="muted small">
+              Waiting on Yahoo's app approval: use <a href="#import">Import from Yahoo (browser)</a> below.
+            </div>
             {state.loading && !state.data && <Loading label="Checking server…" />}
             {state.data && <YahooSection state={state.data} reloadState={state.reload} active={active} onChoose={onChoose} />}
             {state.error && !state.data && <p className="muted">Yahoo status is unavailable until the server responds.</p>}
@@ -69,10 +67,13 @@ export function ConnectTab({ me, state, active, analysis, justConnected, onChoos
       />
 
       {state.data && (
-        <p className="muted small">
-          Season {state.data.season} · week {state.data.currentWeek} · regular season ends week {state.data.lastRegularWeek} ·{" "}
-          {state.data.playerCount.toLocaleString()} players · data built {ago(state.data.dbBuiltAt)}
-        </p>
+        <div className="imp-chips">
+          <span className="tag">Season {state.data.season}</span>
+          <span className="tag">Week {state.data.currentWeek}</span>
+          <span className="tag">Regular season ends wk {analysis.data?.league.settings.regularSeasonEnd ?? state.data.lastRegularWeek}</span>
+          <span className="tag">{state.data.playerCount.toLocaleString()} players</span>
+          <span className="tag">Stats {ago(state.data.dbBuiltAt)}</span>
+        </div>
       )}
     </div>
   );
@@ -107,9 +108,14 @@ function CurrentLeague({
           <div className="eyebrow">Active league · {active.provider === "demo" ? "Demo" : active.provider === "import" ? "Imported from Yahoo" : "Yahoo"}</div>
           <h2 className="no-margin">{league.data?.settings.name ?? active.id}</h2>
           {league.data && (
-            <div className="muted small">
-              {league.data.settings.numTeams} teams · week {league.data.settings.currentWeek} · {active.provider === "import" ? "imported" : "fetched"}{" "}
-              {ago(league.data.fetchedAt)}
+            <div className="imp-chips">
+              <span className="tag">{league.data.settings.numTeams} teams</span>
+              <span className="tag">Week {league.data.settings.currentWeek}</span>
+              <span className="tag">
+                {league.data.import
+                  ? `Updated ${stamp(league.data.import.importedAt)} by ${league.data.import.importedBy ?? "—"}`
+                  : `Fetched ${ago(league.data.fetchedAt)}`}
+              </span>
             </div>
           )}
         </div>
@@ -191,21 +197,20 @@ function YahooSection({ state, reloadState, active, onChoose }: { state: AppStat
 
   if (!state.yahooConfigured) {
     return (
-      <div>
-        <p>Yahoo isn't configured on this machine yet.</p>
+      <Disclosure title="Set up the Yahoo API (3 steps)">
         <ol className="steps">
           <li>
-            Create a Yahoo developer app (Fantasy Sports <b>read</b> permission, redirect URI <code>oob</code>).
+            Create a Yahoo app: Fantasy Sports <b>read</b>, redirect URI <code>oob</code>.
           </li>
           <li>
-            Create a <code>.env</code> file in the project folder with <code>YAHOO_CLIENT_ID</code> and <code>YAHOO_CLIENT_SECRET</code>.
+            Put <code>YAHOO_CLIENT_ID</code> and <code>YAHOO_CLIENT_SECRET</code> in <code>.env</code>.
           </li>
           <li>Restart the server, then reload this page.</li>
         </ol>
-        <p className="muted small">
-          Full walkthrough with screenshots: <code>docs/YAHOO_SETUP.md</code> in the project folder.
-        </p>
-      </div>
+        <div className="muted small">
+          Walkthrough: <code>docs/YAHOO_SETUP.md</code>
+        </div>
+      </Disclosure>
     );
   }
 

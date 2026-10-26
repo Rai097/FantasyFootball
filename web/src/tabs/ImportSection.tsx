@@ -1,11 +1,12 @@
 // Connect tab → "Import from Yahoo (browser)": bookmarklet link, paste box
 // (bookmarklet JSON or copied roster text), imported-league list, settings editor.
 // Guide for users: docs/IMPORT.md (served at /api/docs/import).
-import { useEffect, useRef, useState } from "react";
-import { api, type Active, type ImportResult, type ImportSummary, type StoredImport } from "../api";
+import { useCallback, useState } from "react";
+import { api, type Active, type ImportResult, type ImportSummary, type SettingsSource, type StoredImport } from "../api";
 import { ErrorBox, Loading } from "../components/common";
+import { DetailList, Disclosure, ExpandableList, ExpandableRow, type DetailLine } from "../components/ExpandableRow";
 import { ApiError } from "../lib/errors";
-import { ago } from "../lib/format";
+import { ago, stamp } from "../lib/format";
 import { removeImportBackup, saveImportBackup } from "../lib/storage";
 import { toApiError, useAsync } from "../lib/useAsync";
 
@@ -31,10 +32,7 @@ export function ImportSection({ active, canManage, onChoose, onImported, onSetti
           Step-by-step guide
         </a>
       </div>
-      <p className="muted no-margin">
-        No Yahoo API needed: a bookmark reads your league's pages while you are logged in to Yahoo, and you paste the result here. Only you
-        run it, on your own league pages.
-      </p>
+      <div className="muted small">No Yahoo API needed: a bookmark reads your league pages, you paste the result here.</div>
       <div className="grid-2">
         <BookmarkletCard />
         <PasteCard
@@ -56,38 +54,43 @@ export function ImportSection({ active, canManage, onChoose, onImported, onSetti
 }
 
 function BookmarkletCard() {
-  const ref = useRef<HTMLAnchorElement>(null);
   const bm = useAsync(() => api.bookmarkletUrl(), []);
-  useEffect(() => {
-    // Set javascript: href imperatively (React warns about javascript: URLs in JSX).
-    if (ref.current && bm.data) ref.current.setAttribute("href", bm.data.url);
-  }, [bm.data]);
+  const url = bm.data?.url;
+  // Set the javascript: href imperatively (React warns about javascript: URLs in JSX) on EVERY mount of the link:
+  // a link without href is plain text, so dragging it only selects the words instead of making a bookmark.
+  const ref = useCallback(
+    (el: HTMLAnchorElement | null) => {
+      if (el && url) el.setAttribute("href", url);
+    },
+    [url],
+  );
   return (
     <div className="stack-sm">
       <h3 className="no-margin">1 · Get the data from Yahoo</h3>
-      <ol className="steps">
-        <li>
-          Drag this button to your browser's bookmarks bar:{" "}
-          {bm.data ? (
-            <a ref={ref} className="btn primary bookmarklet" onClick={(e) => (e.preventDefault(), alert("Drag this button to your bookmarks bar, then click it while on your Yahoo league page."))}>
-              Trade Desk import
-            </a>
-          ) : bm.loading ? (
-            <span className="muted">loading…</span>
-          ) : null}
-        </li>
-        <li>
-          Open your league on <b>football.fantasysports.yahoo.com</b> (any page whose address contains <code>/f1/</code>).
-        </li>
-        <li>Click the bookmark. A box appears after ~10–30 s with the teams it found.</li>
-        <li>
-          Click <b>Copy to clipboard</b> (or Download JSON), then paste it in step 2.
-        </li>
-      </ol>
+      <div className="row gap wrap">
+        {bm.data ? (
+          <a ref={ref} draggable className="btn primary bookmarklet" onClick={(e) => (e.preventDefault(), alert("Drag this button to your bookmarks bar, then click it while on your Yahoo league page."))}>
+            Trade Desk import
+          </a>
+        ) : bm.loading ? (
+          <span className="muted">loading…</span>
+        ) : null}
+        <span className="muted small">Drag it to your bookmarks bar (desktop browser).</span>
+      </div>
       {bm.error && <ErrorBox error={bm.error} onRetry={bm.reload} />}
-      <p className="muted small no-margin">
-        On a phone, bookmarks are awkward: use a desktop browser, or paste roster text instead.
-      </p>
+      <Disclosure title="How to use it (4 steps)">
+        <ol className="steps">
+          <li>Drag the button above to your bookmarks bar.</li>
+          <li>
+            Open your league on <b>football.fantasysports.yahoo.com</b> (address contains <code>/f1/</code>).
+          </li>
+          <li>Click the bookmark and wait 10–30 s for the box.</li>
+          <li>
+            Click <b>Copy to clipboard</b>, then paste in step 2.
+          </li>
+        </ol>
+        <div className="muted small">On a phone: paste roster text instead.</div>
+      </Disclosure>
     </div>
   );
 }
@@ -153,9 +156,7 @@ function PasteCard({ imports, activeImport, onImported }: { imports: ImportSumma
           placeholder={'{"source":"yahoo-bookmarklet", …}\n\nor roster text, one player per line:\nPatrick Mahomes KC - QB\nJosh Allen (QB - BUF)\n=== Another Team ==='}
         />
       </label>
-      <p className="muted small no-margin">
-        <b>Re-import:</b> Pasting the same league again updates rosters and keeps your settings.
-      </p>
+      <div className="muted small">Same league again = rosters updated, settings kept.</div>
       {trimmed && !isJson && (
         <div className="row gap wrap">
           {!multi && (
@@ -216,74 +217,89 @@ function ImportList({
   return (
     <div className="stack-sm">
       <h3 className="no-margin">Imported leagues</h3>
-      <ul className="league-list">
+      <ExpandableList label="Imported leagues" className="import-list">
         {list.map((l) => {
           const isActive = active?.provider === "import" && active.id === l.id;
           return (
-            <li key={l.id} className={isActive ? "active" : ""}>
-              <div>
-                <div className="strong">{l.name}</div>
-                <div className="muted small">
-                  {l.teams} of {l.numTeams} teams · imported {ago(l.importedAt)}
-                  {l.settingsSource === "default" ? " · default settings" : ""}
-                </div>
-                <ImportChangesLine id={l.id} importedAt={l.importedAt} />
-              </div>
-              <div className="row gap">
-                <button className={`btn small${isActive ? "" : " primary"}`} disabled={isActive} onClick={() => onChoose({ provider: "import", id: l.id })}>
-                  {isActive ? "Active" : "Use"}
-                </button>
-                {canManage && (
-                  <button
-                    className="btn small"
-                    onClick={async () => {
-                      if (!confirm(`Delete "${l.name}" from Trade Desk? (Nothing changes on Yahoo.)`)) return;
-                      try {
-                        await api.importDelete(l.id);
-                        removeImportBackup(l.id);
-                        if (isActive) onChoose(null);
-                        reload();
-                      } catch (e) {
-                        setErr(toApiError(e));
-                      }
-                    }}
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-            </li>
+            <ExpandableRow
+              key={l.id}
+              label={l.name}
+              className={`import-row${isActive ? " active" : ""}`}
+              head={
+                <>
+                  <div className="imp-main">
+                    <div className="strong imp-name">{l.name}</div>
+                    <div className="imp-chips">
+                      <CapturedChip ok={l.hasStandings} label="Standings" />
+                      <CapturedChip ok={l.hasFreeAgents} label="Free agents" />
+                      <span className="tag">
+                        Updated {stamp(l.importedAt)} by {l.importedBy ?? "—"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="row gap imp-actions" onClick={(e) => e.stopPropagation()}>
+                    <button className={`btn small${isActive ? "" : " primary"}`} disabled={isActive} onClick={() => onChoose({ provider: "import", id: l.id })}>
+                      {isActive ? "Active" : "Use"}
+                    </button>
+                    {canManage && (
+                      <button
+                        className="btn small"
+                        onClick={async () => {
+                          if (!confirm(`Delete "${l.name}" from Trade Desk? (Nothing changes on Yahoo.)`)) return;
+                          try {
+                            await api.importDelete(l.id);
+                            removeImportBackup(l.id);
+                            if (isActive) onChoose(null);
+                            reload();
+                          } catch (e) {
+                            setErr(toApiError(e));
+                          }
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </>
+              }
+            >
+              <ImportDetails l={l} />
+            </ExpandableRow>
           );
         })}
-      </ul>
+      </ExpandableList>
       {err && <ErrorBox error={err} />}
     </div>
   );
 }
 
-/** "Last import: 2 h ago · 3 roster changes since previous (show)" with the added / dropped list. */
-function ImportChangesLine({ id, importedAt }: { id: string; importedAt: string }) {
-  const ch = useAsync(() => api.importChanges(id), [id, importedAt]);
-  const [open, setOpen] = useState(false);
-  const c = ch.data;
+const SOURCE_LABEL: Record<SettingsSource, string> = { page: "read from Yahoo", partial: "partly read from Yahoo", default: "Yahoo defaults (check them)", user: "edited by hand" };
+
+function CapturedChip({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <div className="muted small">
-      Last import: {ago(importedAt)}
-      {c?.from && (
-        <>
-          {" · "}
-          {c.playersChanged} roster change{c.playersChanged === 1 ? "" : "s"} since previous
-          {c.teams.length > 0 && (
-            <>
-              {" "}
-              <button type="button" className="link-btn small" onClick={() => setOpen(!open)}>
-                ({open ? "hide" : "show"})
-              </button>
-            </>
-          )}
-        </>
-      )}
-      {open && c && (
+    <span className={`tag ${ok ? "tag-good" : "tag-warn"}`} title={ok ? `${label} were captured by the last import.` : `${label} were not captured: re-import with the latest bookmark.`}>
+      {label}: {ok ? "yes" : "no"}
+    </span>
+  );
+}
+
+/** Details of one imported league (opened on tap): label/value lines plus the roster moves since the previous import. */
+function ImportDetails({ l }: { l: ImportSummary }) {
+  const ch = useAsync(() => api.importChanges(l.id), [l.id, l.importedAt]);
+  const c = ch.data;
+  const items: DetailLine[] = [
+    { label: "Teams", value: `${l.teams} of ${l.numTeams}` },
+    { label: "Updated", value: `${stamp(l.importedAt)} (${ago(l.importedAt)})` },
+    { label: "By", value: l.importedBy ?? "—" },
+    { label: "Standings", value: l.hasStandings ? "captured" : "not captured", tone: l.hasStandings ? undefined : "warn" },
+    { label: "Free agents", value: l.hasFreeAgents ? "captured" : "not captured", tone: l.hasFreeAgents ? undefined : "warn" },
+    { label: "Settings", value: SOURCE_LABEL[l.settingsSource], tone: l.settingsSource === "default" ? "warn" : undefined },
+  ];
+  if (c?.from) items.push({ label: "Roster moves", value: `${c.playersChanged} since ${stamp(c.from)}` });
+  return (
+    <>
+      <DetailList items={items} />
+      {c && c.teams.length > 0 && (
         <ul className="roster-changes">
           {c.teams.map((t) => (
             <li key={t.id}>
@@ -294,7 +310,7 @@ function ImportChangesLine({ id, importedAt }: { id: string; importedAt: string 
           ))}
         </ul>
       )}
-    </div>
+    </>
   );
 }
 

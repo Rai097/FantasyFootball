@@ -657,3 +657,22 @@ Owner: "make each recommendation collapsible … everything starts collapsed, wi
   "How they're ranked", partners as collapsed rows, smaller edges / near misses / bench upgrades as collapsed lists.
   Targets: title + filters + "How it's scored"; one row per target (# · player · score · owner · role), tapping opens the
   summary, snap / expected / actual strips, tags and the items. Screenshots: docs/screenshots/{trades,targets,values}-{390,1280}.png.
+
+## Release 5: My Team, Values, Connect cleanup + "League updated" header (2026-10-26)
+
+* **My Team**: one `LineupTable` for starters and bench (slot column BN / IR from `team.irPlayerIds`; `BenchList` deleted).
+  Lineup & bench card beside Position strength + Byes & injuries; `.team-grid` stretches both columns to equal height,
+  the last right card flexes. Byes: week grid plus one row per week with starters on bye (weeks without byes hidden).
+  Every stat card has a "?". The row "?" shows the value bullets (`ValuedPlayer.whyItems`, release 4's `explainItems`,
+  items clamped to 90 chars) instead of the prose `why` — the brief's "whyDetails" is this same list, not a second builder.
+  `/analysis` keeps `whyItems` only for the request team's roster (adds < 40 KB; test). `why` stays for chip titles.
+* **importedBy**: `StoredImport.importedBy` = the session's Discord display name ("Admin" in dev mode), stamped by POST
+  /api/import on every import, re-import and paste (never read from the payload; not an admin setting, so a member's
+  re-import sets it). Exposed on `league.import.importedBy`, the POST response and `ImportSummary` (which also gains
+  `hasStandings` / `hasFreeAgents`). Older imports show "—".
+* **Header**: imported leagues show "League updated <Mon D, h:mm AM> · by <name>" (replaces the "Imported league" status
+  pill); the old "Data Xm ago" pill is "Stats <ago>" with a "?" (player stats / expert ranks download time).
+* **Values**: Owner column never truncates at desktop; missing numbers are "—" everywhere (`f1` / `signed`).
+* **Connect**: instructions collapsed into `Disclosure`s with numbered short steps; imported leagues are `ExpandableRow`s
+  with chips (Standings yes/no, Free agents yes/no, Updated <date> by <name>) and label/value details incl. roster moves.
+* Removed unused CSS from releases 1–4 (trade cards, target cards/grid, bench list, why-list, …).
