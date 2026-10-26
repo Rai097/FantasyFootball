@@ -9,8 +9,14 @@ Release plan (in order; each = build → adversarial test → review → deploy 
    payload 1 MB → 97 KB.
 5. SHIPPED 2026-10-26 (live 28b0671): My Team one lineup+bench table, equal-height cards, bullet "why"; header
    "League updated <date> · by <name>"; Values/Connect tidy; bookmark renamed "Trade Desk import v2".
-NEXT: owner re-imports with the v2 bookmark → verify standings / waiver order / FA-vs-waivers / K-DEF against Yahoo's
-real pages from the import diagnostics, fix the readers if needed.
+VERIFIED 2026-10-26 on the owner's v2 import (real Yahoo pages): standings 12/12 (read from the league home page;
+   /standings has no table), waiver order 12/12, availability 172 W / 5 FA / 14 unknown (offense + K lists hit the
+   page cap, so a few stay unknown), 25 K + 16 DEF free agents. Bookmark link now served no-store (Cloudflare had
+   edge-cached the old ".js" bookmarklet for 4 h).
+NEXT (backlog, highest value first):
+- K/DEF streaming uses ECR only, so every K/DEF free agent is "pass"; add the week's matchup (opponent, implied
+  points / sacks / turnovers) so Waivers can name a streaming DEF/K for next week (owner wants a Week 8 DEF).
+- Page-cap unknowns: raise the waivers list cap or stop at the last available player so fewer statuses stay unknown.
 Open bug (not reproduced): tab clicks sometimes "don't register" until the mouse moves. Local repro: every click
 registered, 0 long tasks, API < 50 ms. Suspects: main-thread stalls from big payloads (values 1 MB, waivers 423 KB —
 trim in releases 1/4/5) or a Chrome/Windows repaint glitch. Asked the owner: does the underline move, which browser/OS.
