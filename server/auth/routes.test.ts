@@ -7,9 +7,14 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "ftd-routes-"));
+// Shared public-data cache (as in integration.test.ts) so league analysis can build the player DB.
+fs.mkdirSync(path.join(ROOT, ".cache"), { recursive: true });
+fs.symlinkSync(path.join(ROOT, ".cache"), path.join(work, ".cache"), "dir");
 process.chdir(work);
 const { createAuth, safeNext, signInLimiter } = await import("./routes.js");
 const { AccessFile } = await import("./access.js");
@@ -285,6 +290,27 @@ describe("scoped API", () => {
     assert.equal(put.json.name, "Renamed Z");
     assert.equal((await call(admin, "DELETE", "/api/import/yZ")).status, 200);
     assert.equal((await call(admin, "GET", "/api/import/yZ")).status, 404);
+  });
+
+  test("league API: a user's team comes from the guard (missing team → theirs), not the stored myTeamId", { timeout: 240_000 }, async () => {
+    const an = await call(a, "GET", "/api/league/import/yY/analysis");
+    assert.equal(an.status, 200, JSON.stringify(an.json).slice(0, 300));
+    assert.equal(an.json.myTeamId, "4");
+    assert.equal(an.json.league.myTeamId, "4");
+    assert.equal((await call(a, "GET", "/api/league/import/yY")).json.myTeamId, "4");
+    assert.equal((await call(a, "GET", "/api/league/import/yY/analysis?team=4")).json.myTeamId, "4");
+    const adm = await call(admin, "GET", "/api/league/import/yY/analysis");
+    assert.equal(adm.json.myTeamId, "1", "admin default: the stored myTeamId");
+    assert.equal(adm.json.league.myTeamId, "1");
+    assert.equal((await call(admin, "GET", "/api/league/import/yY/analysis?team=7")).json.myTeamId, "7");
+    await call(admin, "POST", "/api/auth/act-as", { discordId: B });
+    try {
+      const asB = await call(admin, "GET", "/api/league/import/yY/analysis");
+      assert.equal(asB.json.myTeamId, "7");
+      assert.equal(asB.json.league.myTeamId, "7");
+    } finally {
+      await call(admin, "POST", "/api/auth/act-as", { discordId: null });
+    }
   });
 
   test("user: Yahoo provider / Yahoo auth / other league → 403", async () => {
