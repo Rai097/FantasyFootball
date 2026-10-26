@@ -85,7 +85,7 @@ before(
     child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), path.join(ROOT, "server/index.ts")], {
       cwd: workDir,
       // Empty Yahoo credentials: dotenv never overwrites variables that are already set.
-      env: { ...process.env, PORT: String(port), NODE_ENV: "test", YAHOO_CLIENT_ID: "", YAHOO_CLIENT_SECRET: "", YAHOO_REDIRECT_URI: "" },
+      env: { ...process.env, PORT: String(port), NODE_ENV: "test", DISCORD_CLIENT_ID: "", YAHOO_CLIENT_ID: "", YAHOO_CLIENT_SECRET: "", YAHOO_REDIRECT_URI: "" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout!.on("data", (d) => (log += d));
@@ -658,28 +658,39 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
   });
 });
 
-test("production without APP_PASSWORD refuses to start (fail closed)", { timeout: 60_000 }, async () => {
+const NO_AUTH = { DISCORD_CLIENT_ID: "", DISCORD_CLIENT_SECRET: "", SESSION_SECRET: "", PUBLIC_URL: "" };
+
+test("production without the four Discord sign-in vars refuses to start (fail closed)", { timeout: 60_000 }, async () => {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "ftd-noauth-"));
   const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), path.join(ROOT, "server/index.ts")], {
     cwd: workDir,
-    // Empty APP_PASSWORD: dotenv never overwrites a variable that is already set.
-    env: { ...process.env, NODE_ENV: "production", APP_PASSWORD: "", PORT: "0" },
+    // Empty values: dotenv never overwrites a variable that is already set.
+    env: { ...process.env, NODE_ENV: "production", ...NO_AUTH, PORT: "0" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let log = "";
   child.stderr!.on("data", (d) => (log += d));
   const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
   assert.equal(code, 1, log);
-  assert.match(log, /refusing to start/);
+  assert.match(log, /refusing to start: missing DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, SESSION_SECRET, PUBLIC_URL/);
 });
 
-test("APP_PUBLIC=1 runs a production server without a password on purpose", { timeout: 60_000 }, async () => {
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "ftd-public-"));
+test("production WITH Discord config: /api/state without a cookie is 401 (dev mode cannot leak into production)", { timeout: 60_000 }, async () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "ftd-prodauth-"));
   fs.symlinkSync(path.join(ROOT, ".cache"), path.join(workDir, ".cache"), "dir");
   const port = await freePort();
   const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), path.join(ROOT, "server/index.ts")], {
     cwd: workDir,
-    env: { ...process.env, NODE_ENV: "production", APP_PASSWORD: "", APP_PUBLIC: "1", PORT: String(port), HOST: "127.0.0.1" },
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      DISCORD_CLIENT_ID: "dummy-client-id",
+      DISCORD_CLIENT_SECRET: "dummy-client-secret",
+      SESSION_SECRET: "dummy-session-secret-of-at-least-32-chars",
+      PUBLIC_URL: "https://ff.example",
+      PORT: String(port),
+      HOST: "127.0.0.1",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let log = "";
@@ -694,7 +705,15 @@ test("APP_PUBLIC=1 runs a production server without a password on purpose", { ti
       await new Promise((r) => setTimeout(r, 200));
     }
     assert.equal(status, 200, log);
-    assert.match(log, /APP_PUBLIC=1: no password/);
+    const r = await fetch(`http://127.0.0.1:${port}/api/state`);
+    assert.equal(r.status, 401);
+    assert.equal(((await r.json()) as { code: string }).code, "signin");
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/import`, { method: "POST" })).status, 401);
+    const login = await fetch(`http://127.0.0.1:${port}/auth/login`, { redirect: "manual" });
+    assert.equal(login.status, 302);
+    assert.match(login.headers.get("location") ?? "", /^https:\/\/discord\.com\/oauth2\/authorize\?.*redirect_uri=https%3A%2F%2Fff\.example%2Fauth%2Fcallback/);
+    assert.match(log, /event=startup mode=discord/);
+    assert.ok(!log.includes("dummy-session-secret") && !log.includes("dummy-client-secret"), "secrets never logged");
   } finally {
     child.kill();
   }

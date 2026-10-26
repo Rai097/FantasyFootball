@@ -4,11 +4,17 @@
 //   GET  /auth/yahoo/callback?code=   → 302 /?connected=1   (only when YAHOO_REDIRECT_URI is set)
 //   POST /auth/yahoo/disconnect       → { ok: true }
 // Errors: { error, hint? } with a 4xx/5xx status.
+// Admin-only: server/auth/guard.ts refuses every /auth/yahoo/* request from a non-admin before it gets here;
+// the check below repeats it so this router never runs unguarded.
 import express, { type NextFunction, type Request, type Response } from "express";
 import { yahoo, YahooError } from "./providers/yahoo.js";
 
 export const authRouter = express.Router();
 authRouter.use(express.json());
+authRouter.use("/auth/yahoo", (req, res, next) => {
+  if (req.auth?.role === "admin") return next();
+  res.status(req.auth ? 403 : 401).json(req.auth ? { error: "Only the league owner can do this.", code: "admin_only" } : { error: "Not signed in.", code: "signin" });
+});
 
 type Handler = (req: Request, res: Response) => Promise<unknown> | unknown;
 const wrap = (h: Handler) => (req: Request, res: Response, next: NextFunction) => {

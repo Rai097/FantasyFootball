@@ -1,42 +1,38 @@
 import express from "express";
 import fs from "node:fs";
 import path from "node:path";
-import { config } from "./config.js";
+import { AUTH_VARS, config } from "./config.js";
+import { createAuth } from "./auth/routes.js";
+import { SessionStore } from "./auth/sessions.js";
 import { apiRouter, errorMiddleware } from "./api.js";
 import { getPlayerDb } from "./data/players.js";
 
-// Fail closed: a production server without a password would publish the owner's league to anyone with the URL.
-// Running open is an explicit owner choice (APP_PUBLIC=1), never the result of a missing variable.
-const isPublic = process.env.APP_PUBLIC === "1";
-if (config.isProd && !process.env.APP_PASSWORD && !isPublic) {
-  console.error("[server] refusing to start: NODE_ENV=production requires APP_PASSWORD, or APP_PUBLIC=1 to run without a password on purpose.");
+// Fail closed: production without the four Discord sign-in vars would publish every league to anyone.
+if (config.auth.mode === "error" || (config.isProd && config.auth.mode !== "discord")) {
+  const why = config.auth.mode === "error" ? config.auth.message : "missing Discord config";
+  console.error(`[server] refusing to start: ${why}. Set ${AUTH_VARS.join(", ")} (see .env.example).`);
   process.exit(1);
 }
-if (config.isProd && isPublic && !process.env.APP_PASSWORD) console.warn("[server] APP_PUBLIC=1: no password; anyone with the URL can view and change imported leagues.");
 
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 app.get("/healthz", (_req, res) => res.send("ok"));
 
-// Optional password gate for hosted deployments: set APP_PASSWORD to require
-// HTTP Basic auth (any username) on every route.
-if (process.env.APP_PASSWORD) {
-  const expected = process.env.APP_PASSWORD;
-  app.use((req, res, next) => {
-    const header = req.headers.authorization ?? "";
-    const [scheme, encoded] = header.split(" ");
-    if (scheme === "Basic" && encoded) {
-      const decoded = Buffer.from(encoded, "base64").toString("utf8");
-      const pass = decoded.slice(decoded.indexOf(":") + 1);
-      if (pass === expected) return next();
-    }
-    res.set("WWW-Authenticate", 'Basic realm="Trade Desk"');
-    res.status(401).send("Password required");
-  });
-}
-
 async function start() {
+  // Discord sign-in: sessions load once into memory; the guard runs before every /api and /auth/yahoo route.
+  const a = config.auth;
+  const sessions = new SessionStore();
+  if (a.mode === "discord") await sessions.load();
+  const auth =
+    a.mode === "discord"
+      ? createAuth({ mode: "discord", clientId: a.clientId, clientSecret: a.clientSecret, sessionSecret: a.sessionSecret, publicUrl: a.publicUrl, sessions })
+      : createAuth({ mode: "dev", sessions });
+  if (a.mode === "discord") console.log(`[auth] event=startup mode=discord public_url=${a.publicUrl} sessions=${sessions.size}`);
+  else console.warn("[auth] event=startup mode=dev: no Discord config, every request is a built-in admin (development and tests only)");
+  app.use(auth.guard);
+  app.use(auth.router);
+
   // The Yahoo auth router lives in ./auth.ts (owned by the Yahoo provider); mount it when present.
   const authModule = "./auth.js";
   await import(authModule)

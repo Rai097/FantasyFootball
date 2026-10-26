@@ -42,6 +42,7 @@ import { rankWaivers, type FreeAgentInput } from "./model/waivers.js";
 import { findBreakouts, type MarketValue } from "./model/breakouts.js";
 import { getDepthChart } from "./data/depthCharts.js";
 import { getMarketData, pprBucket } from "./data/fantasycalc.js";
+import { errors as authErrors, pinnedTeam, scopeOf } from "./auth/guard.js";
 import type { BreakoutResult, League, Player, Trade, TradeFinderResult, ValuedPlayer, WaiverBreakout, WaiverTarget } from "./model/types.js";
 
 const CACHE_TTL_MS = 60_000;
@@ -158,11 +159,42 @@ function loadContext(provider: Provider, id: string, refresh: boolean): Promise<
   });
 }
 
-function teamParam(req: Request, league: League, key = "team"): string {
+/**
+ * The team a request acts for. Team scope comes only from the guard: a user (or an admin viewing as one) on
+ * their imported league is pinned to their access-list team; `league.myTeamId` (whoever imported) is only the
+ * admin's default.
+ */
+function teamParam(req: Request, league: League, provider: Provider, key = "team"): string {
   const raw = (req.query[key] ?? (req.body as Record<string, unknown> | undefined)?.[key]) as string | undefined;
+  const pinned = pinnedTeam(scopeOf(req), provider);
+  if (pinned) {
+    if (raw !== undefined && raw !== "" && raw !== pinned) throw authErrors.team();
+    if (!league.teams.some((t) => t.id === pinned)) throw new HttpError(400, `Your team "${pinned}" is not in this league's import`, "Ask the league owner to check your team in the access list, or re-import the league.");
+    return pinned;
+  }
   const team = raw && raw !== "" ? String(raw) : league.myTeamId ?? league.teams[0]?.id;
   if (!team || !league.teams.some((t) => t.id === team)) throw new HttpError(400, `Unknown team "${raw}"`, `Valid team ids: ${league.teams.map((t) => t.id).join(", ")}`);
   return team;
+}
+
+/** Defence in depth: the guard already refused these before routing. */
+function requireAdmin(req: Request): void {
+  if (scopeOf(req).role !== "admin") throw authErrors.adminOnly();
+}
+function requireOwnImport(req: Request, id: string): void {
+  const s = scopeOf(req);
+  if (s.role !== "admin" && id !== s.leagueId) throw authErrors.league();
+}
+
+/** "My team" for priority / FAAB data and the league response: the guard's pinned team, else the league's. */
+function myTeamOf(req: Request, provider: Provider, league: League): string | undefined {
+  return pinnedTeam(scopeOf(req), provider) ?? league.myTeamId;
+}
+
+/** The league as this request should see it (a pinned user sees their own team as "my team"). */
+function leagueFor(req: Request, provider: Provider, league: League): League {
+  const mine = pinnedTeam(scopeOf(req), provider);
+  return mine && mine !== league.myTeamId ? { ...league, myTeamId: mine } : league;
 }
 
 const isRefresh = (req: Request) => req.query.refresh === "1" || req.query.refresh === "true";
@@ -196,6 +228,7 @@ export function errorMiddleware(err: unknown, _req: Request, res: Response, _nex
   const status = upstream === 999 ? 429 : upstream >= 400 && upstream < 600 ? upstream : 500;
   if (status >= 500) console.error("[api]", err);
   const body: Record<string, unknown> = { error: message };
+  if (typeof (err as { code?: unknown })?.code === "string" && status < 500 && (err as { status?: number }).status) body.code = (err as { code: string }).code;
   const hint = e?.hint ?? errorHint(upstream, message);
   if (hint) body.hint = hint;
   if (e?.yahooBody !== undefined) {
@@ -212,6 +245,8 @@ async function freeAgentInputs(
   id: string,
   team: string,
   refresh: boolean,
+  /** The team whose waiver priority / FAAB the stored data describes (myTeamOf). */
+  mine: string | undefined,
 ): Promise<{ input: FreeAgentInput[]; myPriority?: number; league: League }> {
   let fas: { player: Player; onWaivers: boolean; percentOwned?: number }[];
   let myPriority: number | undefined;
@@ -224,12 +259,12 @@ async function freeAgentInputs(
     const stored = await mustReadImport(id);
     const d = importFreeAgents(l.league, l.db, stored, l.league.settings.currentWeek);
     fas = d.freeAgents;
-    myPriority = team === l.league.myTeamId ? d.myPriority : undefined;
+    myPriority = team === mine ? d.myPriority : undefined;
   } else {
     const y = await yahoo.getFreeAgents(l.db, id, { refresh });
     fas = y.freeAgents;
-    myPriority = team === l.league.myTeamId ? y.myPriority : undefined;
-    if (team === l.league.myTeamId && y.myFaabBalance !== undefined) {
+    myPriority = team === mine ? y.myPriority : undefined;
+    if (team === mine && y.myFaabBalance !== undefined) {
       league = { ...l.league, teams: l.league.teams.map((t) => (t.id === team ? { ...t, faabRemaining: y.myFaabBalance } : t)) };
     }
   }
@@ -308,7 +343,8 @@ apiRouter.get(
 
 apiRouter.get(
   "/api/yahoo/leagues",
-  h(async (_req, res) => {
+  h(async (req, res) => {
+    requireAdmin(req);
     res.json(await yahoo.listLeagues());
   }),
 );
@@ -316,8 +352,9 @@ apiRouter.get(
 apiRouter.get(
   "/api/league/:provider/:id",
   h(async (req, res) => {
-    const l = await loadContext(parseProvider(req.params.provider), req.params.id, isRefresh(req));
-    res.json(l.league);
+    const provider = parseProvider(req.params.provider);
+    const l = await loadContext(provider, req.params.id, isRefresh(req));
+    res.json(leagueFor(req, provider, l.league));
   }),
 );
 
@@ -326,10 +363,10 @@ apiRouter.get(
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
     const l = await loadContext(provider, req.params.id, isRefresh(req));
-    const team = teamParam(req, l.league);
+    const team = teamParam(req, l.league, provider);
     const players: Record<string, ValuedPlayer> = {};
     for (const p of relevantPlayers(l)) players[p.id] = p;
-    res.json({ league: l.league, players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes, valueSource: l.valueSource });
+    res.json({ league: leagueFor(req, provider, l.league), players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes, valueSource: l.valueSource });
   }),
 );
 
@@ -338,7 +375,7 @@ apiRouter.get(
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
     const l = await loadContext(provider, req.params.id, isRefresh(req));
-    const team = teamParam(req, l.league);
+    const team = teamParam(req, l.league, provider);
     const partner = req.query.partner ? String(req.query.partner) : undefined;
     if (partner && !l.league.teams.some((t) => t.id === partner)) throw new HttpError(400, `Unknown partner "${partner}"`);
     if (partner === team) throw new HttpError(400, "Partner must be a different team");
@@ -357,7 +394,7 @@ apiRouter.get(
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
     const l = await loadContext(provider, req.params.id, isRefresh(req));
-    const team = teamParam(req, l.league);
+    const team = teamParam(req, l.league, provider);
     const partner = req.query.partner ? String(req.query.partner) : undefined;
     if (partner && !l.league.teams.some((t) => t.id === partner)) throw new HttpError(400, `Unknown partner "${partner}"`);
     if (partner === team) throw new HttpError(400, "Partner must be a different team");
@@ -379,7 +416,7 @@ apiRouter.get(
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
     const l = await loadContext(provider, req.params.id, isRefresh(req));
-    const team = teamParam(req, l.league);
+    const team = teamParam(req, l.league, provider);
     const mode = parseMode(req.query.mode);
     const key = `${provider}:${req.params.id}:bench:${team}:${mode}`;
     // v3: same eligibility and QB rule as the finder; both players market ≥ 3 and value ≥ 3, the one I get market ≥ 8 or value ≥ 5; my season lineup +0.8 pts/week.
@@ -401,7 +438,7 @@ apiRouter.post(
     const provider = parseProvider(req.params.provider);
     const l = await loadContext(provider, req.params.id, false);
     const body = (req.body ?? {}) as { team?: string; partner?: string; give?: unknown; get?: unknown; mode?: unknown };
-    const team = teamParam(req, l.league);
+    const team = teamParam(req, l.league, provider);
     const partner = body.partner ? String(body.partner) : undefined;
     if (!partner || !l.league.teams.some((t) => t.id === partner)) throw new HttpError(400, `Unknown partner "${partner ?? ""}"`, "Pass { team, partner, give: string[], get: string[] }.");
     if (partner === team) throw new HttpError(400, "Partner must be a different team");
@@ -416,11 +453,11 @@ apiRouter.get(
     const provider = parseProvider(req.params.provider);
     const refresh = isRefresh(req);
     const l = await loadContext(provider, req.params.id, refresh);
-    const team = teamParam(req, l.league);
+    const team = teamParam(req, l.league, provider);
     const key = `${provider}:${req.params.id}:waivers:${team}`;
     const result = await cached(key, refresh, async () => {
       const [{ input, myPriority, league }, breakouts] = await Promise.all([
-        freeAgentInputs(l, provider, req.params.id, team, refresh),
+        freeAgentInputs(l, provider, req.params.id, team, refresh, myTeamOf(req, provider, l.league)),
         faBreakoutSignals(l, team),
       ]);
       return rankWaivers({ ...l.ctx, league }, team, input, { myPriority, breakouts });
@@ -436,7 +473,7 @@ apiRouter.get(
     const provider = parseProvider(req.params.provider);
     const refresh = isRefresh(req);
     const l = await loadContext(provider, req.params.id, refresh);
-    const team = teamParam(req, l.league);
+    const team = teamParam(req, l.league, provider);
     const rawPos = String(req.query.pos ?? "all").toUpperCase();
     if (!["RB", "WR", "TE", "ALL"].includes(rawPos)) throw new HttpError(400, `Unknown pos "${req.query.pos}"`, "Use pos=RB, WR, TE or all.");
     const pos = rawPos === "ALL" ? "all" : (rawPos as "RB" | "WR" | "TE");
@@ -447,7 +484,7 @@ apiRouter.get(
       const [depth, market, fa] = await Promise.all([
         getDepthChart(l.db.season),
         loadMarketValues(l.league).catch(() => null),
-        freeAgentInputs(l, provider, req.params.id, team, refresh).catch((e) => {
+        freeAgentInputs(l, provider, req.params.id, team, refresh, myTeamOf(req, provider, l.league)).catch((e) => {
           console.warn(`[breakouts] free agents unavailable: ${(e as Error).message}`);
           return null;
         }),
@@ -469,7 +506,7 @@ apiRouter.get(
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
     const l = await loadContext(provider, req.params.id, isRefresh(req));
-    if (req.query.team) teamParam(req, l.league); // validate only
+    if (req.query.team) teamParam(req, l.league, provider); // validate only
     const owner = new Map<string, string>();
     for (const t of l.league.teams) for (const id of t.playerIds) owner.set(id, t.id);
     const rows = relevantPlayers(l)
@@ -498,8 +535,10 @@ apiRouter.get(
 
 apiRouter.get(
   "/api/import",
-  h(async (_req, res) => {
-    res.json(await listImports());
+  h(async (req, res) => {
+    const s = scopeOf(req);
+    const all = await listImports();
+    res.json(s.role === "admin" ? all : all.filter((x) => x.id === s.leagueId));
   }),
 );
 
@@ -509,6 +548,9 @@ apiRouter.post(
     const body = req.body as Record<string, unknown> | undefined;
     if (!body || typeof body !== "object") throw new HttpError(400, "Expected a JSON body", "Send the bookmarklet JSON, or { text, teamName } for pasted roster text.");
     if (JSON.stringify(body).length > MAX_BYTES) throw new HttpError(413, "Import is larger than 1 MB");
+    // A user (or an admin viewing as one) may only (re-)import their own league, and never sets "my team".
+    const scope = scopeOf(req);
+    const ownLeague = scope.role === "admin" ? undefined : scope.leagueId;
     let stored: StoredImport;
     let previous: StoredImport | null = null;
     let changes: RosterChanges | undefined;
@@ -519,6 +561,7 @@ apiRouter.post(
       skippedLines = parsed.skippedLines;
       if (!parsed.teams.length) throw new HttpError(400, "No players found in the pasted text", 'Each player line should look like "Patrick Mahomes KC - QB" or "Josh Allen (QB - BUF)".');
       const targetId = typeof body.id === "string" && body.id ? body.id : undefined;
+      if (ownLeague !== undefined && (targetId !== ownLeague || parsed.teams.length !== 1)) throw authErrors.league();
       previous = targetId && parsed.teams.length === 1 ? await readImport(targetId) : null;
       if (targetId && parsed.teams.length === 1 && !previous) throw new HttpError(404, `No imported league "${targetId}"`);
       stored = previous ? mergeTeams(previous, parsed.teams) : newPasteImport(parsed.teams, parsed.teams.length > 1 ? "Pasted league" : `${teamName} (pasted)`);
@@ -528,8 +571,14 @@ apiRouter.post(
       const incoming = validateImport(body);
       // Same Yahoo league again: update rosters in place, keep the user's settings.
       previous = await findExistingImport(incoming);
+      if (ownLeague !== undefined && (previous?.id ?? incoming.id) !== ownLeague) throw authErrors.league();
+      if (ownLeague !== undefined) delete incoming.myTeamId;
       if (previous) ({ stored, changes } = upsertImport(previous, { ...incoming, importedAt: new Date().toISOString() }));
       else stored = incoming;
+    }
+    if (ownLeague !== undefined) {
+      if (previous?.myTeamId) stored.myTeamId = previous.myTeamId;
+      else delete stored.myTeamId;
     }
     await saveImport(stored);
     await recordHistory(stored, previous);
@@ -538,7 +587,7 @@ apiRouter.post(
       id: stored.id,
       name: stored.name,
       teams: stored.teams.map((t) => ({ id: t.id, name: t.name, players: t.players.length })),
-      myTeamId: stored.myTeamId,
+      myTeamId: ownLeague !== undefined ? scope.teamId : stored.myTeamId,
       settingsSource: stored.settingsSource,
       importedAt: stored.importedAt,
       updated: !!previous,
@@ -551,6 +600,7 @@ apiRouter.post(
 apiRouter.get(
   "/api/import/:id/history",
   h(async (req, res) => {
+    requireOwnImport(req, req.params.id);
     await mustReadImport(req.params.id);
     const h = await readHistory(req.params.id);
     res.json(h.map((x) => ({ importedAt: x.importedAt, teams: x.teams.map((t) => ({ id: t.id, name: t.name, count: t.playerIds.length })) })));
@@ -560,6 +610,7 @@ apiRouter.get(
 apiRouter.get(
   "/api/import/:id/changes",
   h(async (req, res) => {
+    requireOwnImport(req, req.params.id);
     const s = await mustReadImport(req.params.id);
     const c = latestChanges(await readHistory(req.params.id));
     res.json(
@@ -573,6 +624,7 @@ apiRouter.get(
 apiRouter.get(
   "/api/import/:id",
   h(async (req, res) => {
+    requireOwnImport(req, req.params.id);
     const { diagnostics: _d, ...rest } = await mustReadImport(req.params.id);
     res.json(rest);
   }),
@@ -581,6 +633,7 @@ apiRouter.get(
 apiRouter.put(
   "/api/import/:id/settings",
   h(async (req, res) => {
+    requireAdmin(req);
     const next = applySettings(await mustReadImport(req.params.id), req.body);
     await saveImport(next);
     invalidateLeague("import", next.id);
@@ -592,6 +645,7 @@ apiRouter.put(
 apiRouter.delete(
   "/api/import/:id",
   h(async (req, res) => {
+    requireAdmin(req);
     if (!isValidId(req.params.id) || !(await deleteImport(req.params.id))) throw new HttpError(404, `No imported league "${req.params.id}"`);
     await deleteHistory(req.params.id);
     invalidateLeague("import", req.params.id);
