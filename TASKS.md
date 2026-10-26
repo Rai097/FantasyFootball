@@ -11,6 +11,10 @@
 - Right after sign-in (owner, 2026-10-26): header shows "League updated <date, time> · by <Discord name>" at all
   times (store importedBy on each import/re-import; any user in the league can re-import, it upserts the shared
   league). Rename the existing "Data Xm ago" pill (player-stats download time) so the two are not confused.
+- In the Waivers deploy (owner, 2026-10-26): strip the league-name prefix from team names everywhere ("<League> - Team"
+  → "Team"). One normalisation in server/providers/import.ts on validate AND on read (existing stored imports), when
+  all teams share the same "<x> - " prefix; integration test: no team name in any API response starts with the league
+  name. Do it after the Waivers developer finishes (same files).
 - Then (owner, 2026-10-26): clean up tables, starting with Waivers. Every row shows a 1–2 sentence summary under
   255 characters; the full analysis opens when the row is tapped (rule for ALL tables: Waivers, Trades, Targets,
   Values, My Team). Waivers also only shows players "on waivers": the import has no on-waivers vs free-agent flag, so
