@@ -21,6 +21,10 @@
   fit, tap for why; the brown summary notice = one short line; details = bullets, no "Market package values…"
   paragraph, no "Proj … pulls to" run-on lines), then Targets, Values, My Team, Connect. Reuse the shared
   expandable-row component from the Waivers release.
+- Targets (owner, 2026-10-26 screenshot): header = title + filters only, the scoring/depth-chart/price text behind a
+  "How it's scored" tap; each breakout target = ONE collapsed row ("#1 Ollie Gordon II · RB · MIA · 84.5 · owner ·
+  RB1"); tap opens the snap / expected / actual charts and bullets (role, snap trend, expected vs actual, price,
+  suggested offer). No run-on "RB1; snaps 84%→56%…; touch opps …" lines.
 - Open bugs: none known beyond the backlog.
 
 ## Waiting on
