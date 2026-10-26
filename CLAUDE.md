@@ -54,5 +54,6 @@ Open work and "Resume here" live in TASKS.md.
   and who may sign in is ~/FantasyFootball-run/.data/access.json (missing = nobody). Smoke checks go through
   https://ff.raibot.us (writes from localhost fail the Origin check by design).
 - Mac deploy: `git -C ~/FantasyFootball-run checkout --detach <commit>` (+ `npm ci && npm run build` there when
-  dependencies or web/ changed), then `launchctl kickstart -k gui/$(id -u)/com.fantasy.tradedesk`; smoke-check the log
+  dependencies or web/ changed), then `launchctl kickstart -k gui/$(id -u)/com.fantasy.tradedesk` (when the plist
+  changed: `launchctl unload` + copy the template + `launchctl load`; kickstart keeps the old environment); smoke-check the log
   and one real request on https://ff.raibot.us. Restarting the shared tunnel needs the owner's OK (it blips perp.raibot.us).

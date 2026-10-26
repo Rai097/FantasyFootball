@@ -4,10 +4,10 @@
 - Release 1 (advice fixes) shipped 2026-10-26: injury-discounted My Team lineup; waivers claim future starters,
   new Stash call, no priority on injured/DNP players (DESIGN.md "Waivers v2").
 - Hosting: Mac mini service com.fantasy.tradedesk (127.0.0.1:5070) behind the raibot-dashboard Cloudflare tunnel at
-  https://ff.raibot.us; data on local disk in ~/FantasyFootball-run/.data. No password (APP_PUBLIC=1, owner's choice
-  2026-10-26) until Discord login ships. Render still runs (password-protected); owner to decide whether to suspend it.
-- Next feature (owner, 2026-10-26): Discord single sign-on like perp.raibot.us, multi-tenant: allow-listed Discord
-  user ids (owner will supply), each user manages their own team/league. Then release 2 = import fixes (Backlog).
+  https://ff.raibot.us; data on local disk in ~/FantasyFootball-run/.data. Render retired (owner suspends it).
+- Discord sign-in (multi-tenant) shipped 2026-10-26: admin = owner; league members are added by editing
+  ~/FantasyFootball-run/.data/access.json (re-read per request, no restart). Owner will supply member Discord ids.
+- Then release 2 = import fixes (Backlog).
 - Right after sign-in (owner, 2026-10-26): header shows "League updated <date, time> · by <Discord name>" at all
   times (store importedBy on each import/re-import; any user in the league can re-import, it upserts the shared
   league). Rename the existing "Data Xm ago" pill (player-stats download time) so the two are not confused.
