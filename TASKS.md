@@ -11,7 +11,8 @@ Release plan (in order; each = build → adversarial test → review → deploy 
 3. League tab (BUILT 2026-10-26, not yet deployed; DESIGN.md "League tab"): standings table, power rankings with a chart, "who is above me and why" (per-team position-group
    deltas vs mine, starter ppg vs bench), all collapsed rows + bullets on tap. Power rankings MOVE here from My Team.
 4. Trade Finder + Targets cleanup (collapsed cards/rows, bullet details, one-line notices) + tappable column help on
-   every table, Values first (Edge "—" when market missing).
+   every table, Values first (Edge "—" when market missing). BUILT 2026-10-26, not yet deployed (DESIGN.md "Collapsed
+   rows everywhere"). Leftovers: unused .trade-card / .targets-grid / .target-card CSS rules; My Team still shows prose why.
 5. Values, My Team, Connect cleanup + header "League updated <date> · by <name>" (rename the "Data Xm ago" pill).
    My Team (owner screenshot): power rankings removed (they live in the League tab, release 3); bench = same table as
    the starting lineup; dense layout, cards in a row equal height (no dead space under Byes & injuries).

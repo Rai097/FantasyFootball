@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { HelpTip } from "./HelpTip";
 import type { ApiError } from "../lib/errors";
 import { deltaClass, ordinal, signed } from "../lib/format";
 
@@ -41,32 +42,9 @@ export function Delta({ value, suffix = "" }: { value: number | null | undefined
   );
 }
 
-/** "Why" explanation: hover tooltip on desktop, tap to toggle on touch. */
+/** "Why" explanation: tap to toggle (hover title on desktop). The shared HelpTip with a one-sentence text. */
 export function Why({ text }: { text?: string }) {
-  const [open, setOpen] = useState(false);
-  if (!text) return null;
-  return (
-    <span className="why">
-      <button
-        type="button"
-        className="why-btn"
-        title={text}
-        aria-label="Why?"
-        aria-expanded={open}
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        }}
-      >
-        ?
-      </button>
-      {open && (
-        <span className="why-pop" role="tooltip" onClick={() => setOpen(false)}>
-          {text}
-        </span>
-      )}
-    </span>
-  );
+  return text ? <HelpTip text={text} label="Why?" /> : null;
 }
 
 export function RankBadge({ rank, of }: { rank: number; of: number }) {

@@ -606,3 +606,37 @@ tables first." Power rankings moved here from My Team.
   "Below you" as collapsed `ExpandableRow`s (rank, team, summary, power gap) that open a mini grouped-bar chart (their
   vs my group ppg) and bullet details. Column headers carry a tappable "?". My Team's Power rank stat opens this tab.
 
+
+## Collapsed rows everywhere (release 4, 2026-10-26) — Trade Finder, Targets, Values help; overrides earlier text where they differ
+
+Owner: "make each recommendation collapsible … everything starts collapsed, with the key detail like Loveland for Williams";
+"one simple row per breakout target, details as bullets"; "what does value mean? … each column should have a help text".
+
+* **Shared helpers**: `server/model/details.ts` (`detailBuilder`, `clampItem`, `toneOf`; limits and `makeSummary` from waivers.ts).
+  Tests use `summaryProblems` / `detailProblems` (testkit) on unit fixtures and on every demo-league row.
+* **Value bullets**: `projection.ts explainItems` builds `ValuedPlayer.whyItems` from the same numbers as the prose `why`
+  (projection, expert rank + weight, 2026, 2025, above replacement, games, consensus, value; `signals.ts` adds the riser
+  lines). `/analysis` strips `whyItems` (My Team still renders `why`; release 5).
+* **Trades v3** (`tradesV3.ts`): `Trade.summary` = "A for B: your team +x, their lineup +y pts/wk. <band>, ~P% accept."
+  (≤ 255); `Trade.details` = one item per fact (score parts, slot loss, risers, their lineup, market packages, cuts,
+  fairness, true value, acceptance factors, playoff / bye facts, QB rule, rank score). `why` and `notes` are gone from v3,
+  bench-upgrade and evaluate responses (`why` stays optional for the legacy v1 `/trades` and v2 evaluate). Evaluate prepends
+  Verdict / For you / For them / Outside the rules items. Partners: `{ teamId, complementarity, summary, details }`
+  (`pitch` removed). Finder: `summary` is one short line; the reasons are `summaryDetails`. Near misses keep `reason`
+  (one line) plus a "Why not on the list" item. Bench upgrades (`tradesV2.findBenchUpgrades`) build summary + items the same way.
+* **Breakouts**: `BreakoutTarget.summary` ("RB2 behind X (Out): 47% snaps (+21 pts), 10.7 expected pts/g lately. Offer Y.")
+  and `details` (depth chart, who is ahead, snaps / touches by week, expected vs actual, price, score parts, the offer or
+  waivers call). `BreakoutResult.how` (items) replaces the prose `notes`. `thesis` stays server-only (the waivers module
+  splits it); `GET /breakouts` returns `BreakoutResponse` rows without `thesis` and with a slim `CardPlayer`
+  (demo 216 KB → 160 KB).
+* **Values**: `GET /values` rows are `ValueRow` (only rendered fields; demo 1.04 MB → 97 KB, test < 250 KB). `edge` is unset
+  unless the market lists him with a real value (not estimated): the UI shows "—" and sorts unknowns last. `?id=<player>`
+  returns that one row with `whyItems` (fetched on the first tap of the row "?"). The table renders 100 rows + "Show more".
+* **UI**: `components/HelpTip.tsx` (`HelpTip` text / items / lazy `load`, `ColumnHelp` for headers and metric labels; `Why`
+  delegates to it; on phones the popup is a bottom sheet so scroll containers never clip it). Every numeric header in Values,
+  Trade Finder (Team, Accept, Fit, lineup metrics, fairness, package value) and Targets (Score, Owner, Role, strip labels)
+  has a tappable "?". `TradeCard` is an `ExpandableRow` (partner + summary | team Δ | accept %); details = both sides with
+  value bullets, the pitch, metrics, lineup changes, the items, tags. Trade Finder: summary notice + "Why" disclosure,
+  "How they're ranked", partners as collapsed rows, smaller edges / near misses / bench upgrades as collapsed lists.
+  Targets: title + filters + "How it's scored"; one row per target (# · player · score · owner · role), tapping opens the
+  summary, snap / expected / actual strips, tags and the items. Screenshots: docs/screenshots/{trades,targets,values}-{390,1280}.png.

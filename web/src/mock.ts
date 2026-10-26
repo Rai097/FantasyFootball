@@ -503,11 +503,13 @@ function route(method: string, url: URL, body: unknown): unknown {
   }
   if (sub === "waivers") return waivers(team);
   if (sub === "league") throw new ApiError("The League tab needs the real server", 400, "Run npm run dev and open the app without ?mock=1.");
-  if (sub === "breakouts") return { targets: [], notes: ["Mock mode: breakout targets need the real server (depth charts + snap trends)."] };
+  if (sub === "breakouts") return { targets: [], how: [{ label: "Mock mode", value: "Breakout targets need the real server (depth charts, snaps)" }] };
   if (sub === "values") {
     const owner = new Map<string, string>();
     for (const t of TEAMS) for (const pid of t.playerIds) owner.set(pid, t.id);
-    return [...PLAYERS].sort((a, b) => b.value - a.value).map((x): ValueRow => ({ ...x, ownerTeamId: owner.get(x.id) }));
+    return [...PLAYERS]
+      .sort((a, b) => b.value - a.value)
+      .map((x): ValueRow => ({ ...x, ownerTeamId: owner.get(x.id), rostered: owner.has(x.id), whyItems: x.why ? [{ label: "Mock", value: x.why.slice(0, 80) }] : undefined }));
   }
   throw new ApiError("Unknown mock route", 404);
 }

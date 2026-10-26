@@ -1,6 +1,6 @@
 // Typed fetch wrappers for every endpoint in docs/DESIGN.md "HTTP API contract".
 // With `?mock=1` in the page URL all calls are answered by ./mock.ts instead.
-import type { BreakoutResult, BreakoutTarget, DetailItem, WaiverRow, League, Position, Scoring, SlotKind, TeamAnalysis, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "../../server/model/types";
+import type { BreakoutResponse, BreakoutTargetRow, CardPlayer, DetailItem, ValueRow, WaiverRow, League, Position, Scoring, SlotKind, TeamAnalysis, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "../../server/model/types";
 
 export type TradeMode = "now" | "balanced" | "playoffs";
 export type { TradeFinderResult };
@@ -8,7 +8,7 @@ import type { LeagueView } from "../../server/model/league";
 import { ApiError } from "./lib/errors";
 
 export { ApiError };
-export type { WaiverTarget, WaiverRow, BreakoutTarget, BreakoutResult, DetailItem, LeagueView };
+export type { WaiverTarget, WaiverRow, BreakoutTargetRow, BreakoutResponse, CardPlayer, DetailItem, LeagueView, ValueRow };
 
 /** ValuedPlayer as served by the API. */
 export type VP = ValuedPlayer;
@@ -67,7 +67,6 @@ export interface WaiversResponse {
   faStatusKnown: boolean;
 }
 
-export type ValueRow = VP & { ownerTeamId?: string };
 
 export type ProviderId = "demo" | "yahoo" | "import";
 
@@ -266,10 +265,12 @@ export const api = {
   /** League tab: standings, power-score parts, who is above me and why. */
   leagueView: (a: Active) => request<LeagueView>("GET", `${base(a)}/league${qs({ team: a.team })}`),
   waivers: (a: Active) => request<WaiversResponse>("GET", `${base(a)}/waivers${qs({ team: a.team })}`),
+  /** Slim rows (no value explanation); `valueWhy` fetches one player's value bullets on tap. */
   values: (a: Active) => request<ValueRow[]>("GET", `${base(a)}/values${qs({ team: a.team })}`),
+  valueWhy: async (a: Active, id: string) => (await request<ValueRow[]>("GET", `${base(a)}/values${qs({ team: a.team, id })}`))[0]?.whyItems ?? [],
   /** Breakout Targets: rising role before rising points (RB / WR / TE). */
   breakouts: (a: Active, pos: "RB" | "WR" | "TE" | "all" | string = "all", limit = 30) =>
-    request<BreakoutResult>("GET", `${base(a)}/breakouts${qs({ team: a.team, pos, limit })}`),
+    request<BreakoutResponse>("GET", `${base(a)}/breakouts${qs({ team: a.team, pos, limit })}`),
 
   imports: () => request<ImportSummary[]>("GET", "/api/import"),
   importGet: (id: string) => request<StoredImport>("GET", `/api/import/${encodeURIComponent(id)}`),

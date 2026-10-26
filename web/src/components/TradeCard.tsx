@@ -1,8 +1,13 @@
+// One trade as a collapsed row (owner rule: key line visible, everything else on tap as bullets).
+// Row: partner + the ≤ 255-char summary ("A for B: your team +x …"), your-team delta and acceptance.
+// Details: both sides' players (value bullets behind "?"), the pasteable pitch, the three lineup numbers,
+// lineup changes per side, then one "label: value" item per fact from the server.
 import { useState } from "react";
 import type { Trade } from "../../../server/model/types";
 import type { VP } from "../api";
-import { deltaClass, f1, pct, signed } from "../lib/format";
-import { Why } from "./common";
+import { deltaClass, f1, signed } from "../lib/format";
+import { DetailList, ExpandableRow } from "./ExpandableRow";
+import { ColumnHelp, HelpTip } from "./HelpTip";
 import { PlayerChip } from "./PlayerChip";
 
 function verdictClass(v: string): string {
@@ -11,71 +16,58 @@ function verdictClass(v: string): string {
   return "warn";
 }
 
+export const TRADE_TIPS = {
+  team: "Your weighted roster score change for the chosen mode (this week, rest of season, playoffs, bench depth).",
+  accept: "Chance the other manager accepts: from their market-value edge (+5% → 65%), lower for extra players or their best player.",
+  yourLineup: "Your weekly lineup points over the rest of the season, byes and injuries included.",
+  theirLineup: "Their weekly lineup points over the rest of the season, by our projections.",
+  band: "Fairness by market value from their side: fair within ±5%, slightly 5–12%, favors beyond 12%.",
+  market: "Market value (FantasyCalc, from real trades; #1 = 100): what the other manager thinks he is worth.",
+  ours: "Our 0–100 rest-of-season value from projected points above replacement and games left.",
+};
+
 export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: { trade: Trade; partnerName: string; verdict?: string; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
   const { me, them } = trade;
   const accCls = trade.acceptance >= 0.6 ? "good" : trade.acceptance >= 0.4 ? "warn" : "bad";
-  return (
-    <article className="card trade-card">
-      <header className="trade-head">
-        <div>
-          <div className="eyebrow">with {partnerName}</div>
+  const head = (
+    <>
+      <div className="tr-main">
+        <div className="tr-eyebrow muted">
+          with {partnerName}
           {verdict && <span className={`verdict ${verdictClass(verdict)}`}>{verdict}</span>}
-          {trade.bandLabel && (
-            <span className={`band band-${trade.band}`} title="Fairness by market value, from their side: fair within ±5%, slightly 5–12%, favors beyond 12%">
-              {trade.bandLabel}
-            </span>
-          )}
         </div>
-        <div className={`accept ${accCls}`} title={trade.band ? "Chance the other manager accepts: logistic in their market-value edge (+5% → 65%), less for extra players they must roster or their best player, more if it fixes their weakest slot" : "Rough chance the other manager accepts, from value fairness and their lineup change"}>
-          <span className="accept-num">{pct(trade.acceptance)}</span>
-          <span className="accept-label">accept</span>
-        </div>
-      </header>
-
+        <div className="tr-summary">{trade.summary}</div>
+      </div>
+      <span className={`num tr-team delta ${deltaClass(me.scoreDelta)}`}>{signed(me.scoreDelta ?? me.lineupDelta)}</span>
+      <span className={`num tr-accept accept-chip ${accCls}`}>{Math.round(trade.acceptance * 100)}%</span>
+    </>
+  );
+  return (
+    <ExpandableRow className="trade-row" head={head} defaultOpen={defaultOpen} label={`Trade with ${partnerName}`}>
+      {trade.reason && <div className="notice warn small one-line">{trade.reason}</div>}
       <div className="trade-cols">
         <Side title="You give" players={me.gives} total={me.valueGiven} drops={me.drops} market={!!trade.band} />
         <Side title="You get" players={them.gives} total={them.valueGiven} market={!!trade.band} />
       </div>
-
       {trade.pitch && <Pitch text={trade.pitch} />}
-
-      {trade.reason && <div className="notice warn small">{trade.reason}</div>}
-
-      {trade.band ? (
-        <div className="trade-metrics">
-          <Metric label="Your lineup" value={me.seasonDelta ?? 0} unit=" /wk" title="Your weekly lineup points over the rest of the season (byes and injuries included)" />
-          <Metric label="Their lineup" value={them.seasonDelta ?? 0} unit=" /wk" title="Their weekly lineup points over the rest of the season, by our projections" />
-          <Metric label="Your team" value={me.scoreDelta ?? 0} unit="" title={`Weighted roster score for the ${trade.mode ?? "balanced"} mode (now / season / playoffs / depth)`} />
-        </div>
-      ) : me.scoreDelta != null ? (
-        <>
-          <div className="delta-row" aria-label="Your team, by component">
-            <SmallDelta label="Now" value={me.nowDelta} title="This week's optimal lineup, ppg" />
-            <SmallDelta label="Season" value={me.seasonDelta} title="Average weekly lineup over the rest of the season, with byes and injuries" />
-            <SmallDelta label="Playoffs" value={me.playoffDelta} title="Average lineup in the fantasy playoff weeks" />
-            <SmallDelta label="Depth" value={me.depthDelta} title="Top bench players' ppg above replacement" />
+      <div className="trade-metrics">
+        <Metric label="Your lineup" value={me.seasonDelta ?? me.lineupDelta} unit=" /wk" tip={TRADE_TIPS.yourLineup} />
+        <Metric label="Their lineup" value={them.seasonDelta ?? them.lineupDelta} unit=" /wk" tip={TRADE_TIPS.theirLineup} />
+        <Metric label="Your team" value={me.scoreDelta ?? me.lineupDelta} unit="" tip={TRADE_TIPS.team} />
+        {trade.bandLabel && (
+          <div className="metric">
+            <span className="metric-label">
+              <ColumnHelp tip={TRADE_TIPS.band}>Fairness</ColumnHelp>
+            </span>
+            <span className={`band band-${trade.band}`}>{trade.bandLabel}</span>
           </div>
-          <div className="trade-metrics">
-            <Metric label="Your team" value={me.scoreDelta} unit="" title={`Weighted roster score for the ${trade.mode ?? "balanced"} mode`} />
-            <Metric label="Their team" value={them.scoreDelta ?? them.lineupDelta} unit="" title="Their roster score in balanced terms (what their manager cares about)" />
-            <div className="metric" title="Value they receive ÷ value they give. Above 1.0 means they win on paper.">
-              <span className="metric-label">Fairness</span>
-              <span className="metric-value">{f1(trade.fairness)}</span>
-            </div>
-          </div>
-        </>
-      ) : (
-        <div className="trade-metrics">
-          <Metric label="Your lineup" value={me.lineupDelta} unit=" ppg" />
-          <Metric label="Their lineup" value={them.lineupDelta} unit=" ppg" />
-          <div className="metric" title="Value they receive ÷ value they give. Above 1.0 means they win on paper.">
-            <span className="metric-label">Fairness</span>
-            <span className="metric-value">{f1(trade.fairness)}</span>
-          </div>
-        </div>
-      )}
-
+        )}
+      </div>
+      <div className="trade-cols">
+        <Changes title="Your lineup" lines={me.lineupChanges} />
+        <Changes title={`${partnerName}'s lineup`} lines={them.lineupChanges} />
+      </div>
+      <DetailList items={trade.details ?? []} />
       {trade.tags.length > 0 && (
         <div className="tags">
           {trade.tags.map((t) => (
@@ -85,43 +77,7 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
           ))}
         </div>
       )}
-
-      {trade.notes && trade.notes.length > 0 && (
-        <ul className="trade-notes muted small">
-          {trade.notes.map((n, i) => (
-            <li key={i}>{n}</li>
-          ))}
-        </ul>
-      )}
-
-      <button className="link-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        {open ? "Hide details" : "Lineup changes & why"}
-      </button>
-      {open && (
-        <div className="trade-details">
-          <p>{trade.summary}</p>
-          {trade.why && <p className="muted small">{trade.why}</p>}
-          {them.drops && them.drops.length > 0 && (
-            <p className="muted small">
-              {partnerName} would have to drop {them.drops.map((p) => p.name).join(", ")} to make roster room.
-            </p>
-          )}
-          <div className="trade-cols">
-            <Changes title="Your lineup" lines={me.lineupChanges} />
-            <Changes title={`${partnerName}'s lineup`} lines={them.lineupChanges} />
-          </div>
-          <ul className="why-list">
-            {[...me.gives, ...them.gives].map((p) =>
-              p.why ? (
-                <li key={p.id}>
-                  <span className="strong">{p.name}:</span> {p.why}
-                </li>
-              ) : null,
-            )}
-          </ul>
-        </div>
-      )}
-    </article>
+    </ExpandableRow>
   );
 }
 
@@ -132,35 +88,30 @@ function Side({ title, players, total, drops, market: marketTotals }: { title: s
     <div className="trade-side">
       <div className="side-title">
         {title}{" "}
-        <span className="muted small" title={marketTotals ? "Market package value: best + 0.85·2nd + 0.70·3rd" : "Sum of our values"}>
+        <span className="muted small">
           {marketTotals ? "market" : "value"} {f1(total)}
         </span>
+        <HelpTip text={marketTotals ? "Market package value: best player + 85% of the 2nd + 70% of the 3rd." : "Sum of our values."} />
       </div>
-      {players.map((p) => (
-        <div key={p.id} className="side-player">
-          <PlayerChip player={p} showValue={!market} />
-          <span className="side-meta">
-            <span className="muted small">
+      <ul className="side-players">
+        {players.map((p) => (
+          <li key={p.id} className="side-player">
+            <PlayerChip player={p} showValue={!market} compact />
+            <span className="muted small side-meta">
               {p.pos}
-              {p.posRank} · {f1(p.ppg)} ppg
-              {p.floor !== undefined && (
-                <span title={`Weekly floor: 25th percentile of league-scored games (2025–26); consistency ${f1((p.consistency ?? 0) * 100)}%`}> · floor {f1(p.floor)}</span>
-              )}
-              {p.riser && <span title="Role rising: snaps and expected points up"> · riser</span>}
+              {p.posRank} {f1(p.ppg)} ppg
             </span>
             {market && (
-              <span
-                className="muted small"
-                title={`Market ${p.marketEstimated ? "(not in the market list: our estimate) " : ""}${f1(p.market ?? p.value)}${p.marketRank ? `, #${p.marketRank} overall` : ""}. Ours = our value ${f1(p.value)} (0–100 model scale); ${f1(p.trueMarket ?? p.value)} on the market scale.`}
-              >
+              <span className="muted small side-meta">
                 mkt {f1(p.market ?? p.value)}
-                {p.marketEstimated ? "*" : ""} · ours {f1(p.value)}
+                {p.marketEstimated ? "*" : ""} ours {f1(p.value)}
               </span>
             )}
-            <Why text={p.why} />
-          </span>
-        </div>
-      ))}
+            {p.riser && <span className="tag small-tag">riser</span>}
+            <HelpTip items={p.whyItems} label={`How ${p.name} is valued`} />
+          </li>
+        ))}
+      </ul>
       {drops && drops.length > 0 && (
         <div className="muted small drop-note">
           + you drop {drops.map((p) => `${p.name} (${f1(p.value)})`).join(", ")}
@@ -191,19 +142,12 @@ function Pitch({ text }: { text: string }) {
   );
 }
 
-function SmallDelta({ label, value, title }: { label: string; value?: number; title: string }) {
+function Metric({ label, value, unit, tip }: { label: string; value: number; unit: string; tip: string }) {
   return (
-    <div className="small-delta" title={title}>
-      <span className="metric-label">{label}</span>
-      <span className={`delta ${deltaClass(value)}`}>{signed(value)}</span>
-    </div>
-  );
-}
-
-function Metric({ label, value, unit, title }: { label: string; value: number; unit: string; title?: string }) {
-  return (
-    <div className="metric" title={title}>
-      <span className="metric-label">{label}</span>
+    <div className="metric">
+      <span className="metric-label">
+        <ColumnHelp tip={tip}>{label}</ColumnHelp>
+      </span>
       <span className={`metric-value delta ${deltaClass(value)}`}>
         {signed(value)}
         {unit}

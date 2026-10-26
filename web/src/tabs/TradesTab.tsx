@@ -2,8 +2,10 @@ import { useState } from "react";
 import { api, type Active, type Analysis, type TradeMode } from "../api";
 import type { Trade } from "../../../server/model/types";
 import { Empty, ErrorBox, Loading } from "../components/common";
+import { DetailList, Disclosure, ExpandableList, ExpandableRow } from "../components/ExpandableRow";
+import { ColumnHelp, HelpTip } from "../components/HelpTip";
 import { TradeBuilder } from "../components/TradeBuilder";
-import { TradeCard } from "../components/TradeCard";
+import { TRADE_TIPS, TradeCard } from "../components/TradeCard";
 import { useAsync } from "../lib/useAsync";
 import { f1 } from "../lib/format";
 
@@ -56,12 +58,20 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
   const data = res.data;
   const blurb = MODES.find((m) => m.id === mode)!.blurb;
 
+  const tradeList = (list: Trade[], label: string) => (
+    <ExpandableList className="trade-list" label={label} header={TRADE_HEADER}>
+      {list.map((t) => (
+        <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} />
+      ))}
+    </ExpandableList>
+  );
+
   return (
     <div className="grid-trades">
       <div className="stack">
-        {pastDeadline && <div className="notice warn">The trade deadline (week {tradeDeadlineWeek}) has passed — the finder returns no trades.</div>}
+        {pastDeadline && <div className="notice warn one-line">The trade deadline (week {tradeDeadlineWeek}) has passed: no trades to suggest.</div>}
         <section className="card stack-sm">
-          <div className="mode-picker">
+          <div className="row gap">
             <div className="seg" role="radiogroup" aria-label="What to optimise for">
               {MODES.map((m) => (
                 <button key={m.id} role="radio" aria-checked={mode === m.id} className={`seg-btn ${mode === m.id ? "active" : ""}`} onClick={() => setMode(m.id)} title={m.blurb}>
@@ -69,7 +79,7 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
                 </button>
               ))}
             </div>
-            <span className="muted small">{blurb}</span>
+            <HelpTip text={blurb} label="What this mode optimises" />
           </div>
           <div className="filters">
             <label className="field">
@@ -110,83 +120,83 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
         {!res.loading && data && (
           <>
             {data.valueSource === "model" && (
-              <div className="notice warn small">Market values (FantasyCalc) are unavailable right now, so "what the other manager thinks" uses our own values: fairness and acceptance are rougher, and buy-low / sell-high edges are not shown.</div>
+              <div className="notice warn one-line small">
+                Market values are unavailable: using our own values. <HelpTip text="FantasyCalc did not answer, so 'what the other manager thinks' uses our values: fairness and acceptance are rougher and buy-low / sell-high edges are not shown." />
+              </div>
             )}
-            {data.trades.length === 0 ? (
-              <section className="card stack-sm empty-finder">
-                <div className="notice warn finder-summary strong-summary">{data.summary}</div>
-                {(data.partners?.length ?? 0) > 0 && (
-                  <>
-                    <h3>Best-fit partners — where a plausible ask starts</h3>
-                    <ol className="partner-list">
-                      {data.partners!.slice(0, 3).map((p) => (
-                        <li key={p.teamId}>
-                          <span className="strong">{names.get(p.teamId) ?? p.teamId}</span> <span className="muted small">fit {f1(p.complementarity)}</span>
-                          <div className="small">{p.pitch}</div>
-                        </li>
-                      ))}
-                    </ol>
-                  </>
-                )}
-                {data.nearMisses.length > 0 && (
-                  <>
-                    <h3>Closest near misses</h3>
-                    {data.nearMisses.slice(0, 3).map((t) => (
-                      <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} defaultOpen />
-                    ))}
-                  </>
-                )}
-                <p className="muted small">Also check the smaller edges and bench upgrades below, or try another mode.</p>
-              </section>
-            ) : (
-              <>
-                <div className="notice finder-summary">{data.summary}</div>
-                <p className="muted small">
-                  {data.trades.length} trade{data.trades.length > 1 ? "s" : ""} a manager would plausibly accept (your team +1.0 or more, fair or better for them by market value, their lineup not worse), best first by min(your gain, theirs + 2) × acceptance.
-                </p>
-                {data.trades.slice(0, shown).map((t) => (
-                  <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} />
-                ))}
+            <div className={`notice finder-summary${data.trades.length === 0 ? " warn" : ""}`}>
+              <div className="one-line">{data.summary}</div>
+              {(data.summaryDetails?.length ?? 0) > 0 && (
+                <Disclosure title="Why">
+                  <DetailList items={data.summaryDetails!} />
+                </Disclosure>
+              )}
+            </div>
+            {data.trades.length > 0 && (
+              <section className="card flush">
+                <div className="row between card-head">
+                  <h2 className="card-title">
+                    Trades <span className="muted">({data.trades.length})</span>
+                  </h2>
+                  <Disclosure title="How they're ranked">
+                    <DetailList items={RANKING} />
+                  </Disclosure>
+                </div>
+                {tradeList(data.trades.slice(0, shown), "Suggested trades")}
                 {shown < data.trades.length && (
-                  <button className="btn" onClick={() => setShown((s) => s + 10)}>
-                    Show more ({data.trades.length - shown} left)
-                  </button>
+                  <div className="table-more">
+                    <button className="btn" onClick={() => setShown((s) => s + 10)}>
+                      Show more ({data.trades.length - shown} left)
+                    </button>
+                  </div>
                 )}
-              </>
+              </section>
             )}
-            <Fold title="Best-fit partners" count={data.partners?.length ?? 0} hint="ranked by how their needs match your surplus (and vice versa)">
-              <ol className="partner-list">
-                {data.partners?.map((p) => (
-                  <li key={p.teamId}>
-                    <span className="strong">{names.get(p.teamId) ?? p.teamId}</span> <span className="muted small">fit {f1(p.complementarity)}</span>
-                    <div className="muted small">{p.pitch}</div>
-                  </li>
-                ))}
-              </ol>
+            {(data.partners?.length ?? 0) > 0 && (
+              <section className="card flush">
+                <h2 className="card-title">
+                  Best-fit partners <HelpTip text="Teams whose needs match your spare depth (and the reverse): where a plausible ask starts." />
+                </h2>
+                <ExpandableList className="fit-list" label="Best-fit partners" header={PARTNER_HEADER}>
+                  {data.partners!.map((p, i) => (
+                    <ExpandableRow
+                      key={p.teamId}
+                      className="partner-row"
+                      label={names.get(p.teamId) ?? p.teamId}
+                      head={
+                        <>
+                          <span className="num muted">{i + 1}</span>
+                          <span className="strong p-name">{names.get(p.teamId) ?? p.teamId}</span>
+                          <span className="p-summary muted">{p.summary}</span>
+                          <span className="num">{f1(p.complementarity)}</span>
+                        </>
+                      }
+                    >
+                      <div className="p-summary-open">{p.summary}</div>
+                      <DetailList items={p.details} />
+                    </ExpandableRow>
+                  ))}
+                </ExpandableList>
+              </section>
+            )}
+            <Fold title="Smaller edges" count={data.smallerEdges.length} hint="smaller gains, still fair to them">
+              {tradeList(data.smallerEdges, "Smaller edges")}
             </Fold>
-            <Fold title="Smaller edges" count={data.smallerEdges.length} hint="smaller gains for you (or small-value deals), still fair to them">
-              {data.smallerEdges.map((t) => (
-                <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} />
-              ))}
-            </Fold>
-            <Fold
-              title={data.trades.length === 0 ? "More near misses" : "Near misses"}
-              count={data.trades.length === 0 ? Math.max(0, data.nearMisses.length - 3) : data.nearMisses.length}
-              hint="good for you, but they'd likely refuse — or only marginal for you"
-            >
-              {data.nearMisses.slice(data.trades.length === 0 ? 3 : 0).map((t) => (
-                <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} />
-              ))}
+            <Fold title="Near misses" count={data.nearMisses.length} hint="good for you, but they'd likely refuse">
+              {tradeList(data.nearMisses, "Near misses")}
             </Fold>
           </>
         )}
 
-        <h2 className="section-title">Bench upgrades</h2>
-        <p className="muted small">1-for-1 swaps of a bench player (or your weakest starter) for someone else's bench player that add 0.8+ pts/week to your rest-of-season lineup; same eligibility and QB rule as the finder; both players worth 3+ by market and by our value, and the one you get is a real asset (market 8+ or our value 5+).</p>
-        {bench.loading && <Loading label="Looking for bench upgrades…" />}
-        {bench.error && <ErrorBox error={bench.error} onRetry={bench.reload} />}
-        {!bench.loading && bench.data && bench.data.length === 0 && <Empty>No bench swap raises your season or playoff lineup at a price the other side would take.</Empty>}
-        {!bench.loading && bench.data?.map((t) => <TradeCard key={t.key} trade={t} partnerName={nameOf(t)} />)}
+        <section className="card flush">
+          <h2 className="card-title">
+            Bench upgrades <HelpTip text={BENCH_TIP} />
+          </h2>
+          {bench.loading && <Loading label="Looking for bench upgrades…" />}
+          {bench.error && <ErrorBox error={bench.error} onRetry={bench.reload} />}
+          {!bench.loading && bench.data && bench.data.length === 0 && <Empty>No bench swap raises your season lineup at a price they would take.</Empty>}
+          {!bench.loading && bench.data && bench.data.length > 0 && tradeList(bench.data, "Bench upgrades")}
+        </section>
       </div>
       <aside>
         <TradeBuilder analysis={analysis} active={active} />
@@ -195,14 +205,49 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
   );
 }
 
+const TRADE_HEADER = (
+  <>
+    <span>Trade</span>
+    <span className="num">
+      <ColumnHelp tip={TRADE_TIPS.team}>Team</ColumnHelp>
+    </span>
+    <span className="num">
+      <ColumnHelp tip={TRADE_TIPS.accept}>Accept</ColumnHelp>
+    </span>
+  </>
+);
+
+const PARTNER_HEADER = (
+  <>
+    <span className="num">#</span>
+    <span>Team</span>
+    <span>Why they fit</span>
+    <span className="num">
+      <ColumnHelp tip="Fit score: their weak groups × your spare depth, plus the reverse (higher = more to trade about).">Fit</ColumnHelp>
+    </span>
+  </>
+);
+
+const BENCH_TIP =
+  "1-for-1 swaps of a bench player (or your weakest starter) that add 0.8+ pts/week to your rest-of-season lineup; both players worth 3+, the one you get a real asset.";
+
+const RANKING = [
+  { label: "Your team", value: "+1.0 or more in the chosen mode" },
+  { label: "Their side", value: "Fair or better by market value" },
+  { label: "Their lineup", value: "Not worse after the trade" },
+  { label: "Acceptance", value: "40% or more" },
+  { label: "Order", value: "min(your gain, their gain + 2) × acceptance" },
+  { label: "Variety", value: "At most 2 per partner and 2 per player you give" },
+];
+
 function Fold({ title, count, hint, children }: { title: string; count: number; hint: string; children: React.ReactNode }) {
   if (!count) return null;
   return (
     <details className="fold">
       <summary>
-        {title} ({count}) <span className="muted small">— {hint}</span>
+        {title} ({count}) <span className="muted small">{hint}</span>
       </summary>
-      <div className="fold-body">{children}</div>
+      <div className="fold-body flush-body">{children}</div>
     </details>
   );
 }

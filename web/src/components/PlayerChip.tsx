@@ -16,7 +16,10 @@ export function InjuryDot({ player }: { player: Pick<VP, "injury"> }) {
   return <span className={`inj-dot ${lvl}`} title={label} aria-label={label} />;
 }
 
-export function PlayerChip({ player, showValue = true, compact = false }: { player: VP | null | undefined; showValue?: boolean; compact?: boolean }) {
+/** What a chip renders: full players and the slim card players (breakouts) both fit. */
+type ChipPlayer = Pick<VP, "name" | "pos" | "team" | "injury" | "value"> & { why?: string };
+
+export function PlayerChip({ player, showValue = true, compact = false }: { player: ChipPlayer | null | undefined; showValue?: boolean; compact?: boolean }) {
   if (!player) return <span className="chip empty-chip">Empty</span>;
   return (
     <span className={`chip${compact ? " compact" : ""}`} title={player.why}>

@@ -5,6 +5,7 @@ import { f1 } from "../lib/format";
 import { toApiError } from "../lib/useAsync";
 import { ErrorBox, Loading, PosBadge } from "./common";
 import { PlayerChip } from "./PlayerChip";
+import { ExpandableList } from "./ExpandableRow";
 import { TradeCard } from "./TradeCard";
 
 type Result = Awaited<ReturnType<typeof api.evaluateTrade>>;
@@ -86,7 +87,11 @@ export function TradeBuilder({ analysis, active }: { analysis: Analysis; active:
       </div>
       {busy && <Loading label="Rebuilding both lineups…" />}
       {err && <ErrorBox error={err} />}
-      {result && <TradeCard trade={result} partnerName={partnerName} verdict={result.verdict} defaultOpen />}
+      {result && (
+        <ExpandableList className="trade-list" label="Evaluated trade">
+          <TradeCard trade={result} partnerName={partnerName} verdict={result.verdict} defaultOpen />
+        </ExpandableList>
+      )}
     </section>
   );
 }

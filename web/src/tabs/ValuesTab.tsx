@@ -1,26 +1,28 @@
 import { useMemo, useState } from "react";
-import { api, type Active, type Analysis, type ValueRow } from "../api";
-import { Empty, ErrorBox, Loading, PosBadge, Why } from "../components/common";
+import { api, type Active, type Analysis, type DetailItem, type ValueRow } from "../api";
+import { Empty, ErrorBox, Loading, PosBadge } from "../components/common";
+import { ColumnHelp, HelpTip } from "../components/HelpTip";
 import { InjuryDot } from "../components/PlayerChip";
 import { deltaClass, f1, signed } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
 import { PosFilter } from "./WaiversTab";
 
 type SortKey = "value" | "market" | "marketRank" | "edge" | "ppg" | "ppg26" | "ppgExp26" | "posRank" | "ecrOverall" | "name" | "owner";
-const COLS: { key: SortKey; label: string; num: boolean; title?: string; hideSm?: boolean; market?: boolean }[] = [
+// One-sentence meanings behind each column's tappable "?" (server/model/projection.ts and market.ts definitions).
+const COLS: { key: SortKey; label: string; num: boolean; tip?: string; hideSm?: boolean; market?: boolean }[] = [
   { key: "name", label: "Player", num: false },
-  { key: "value", label: "Value", num: true, title: "Our (true) 0–100 rest-of-season trade value (points above replacement × games left)" },
-  { key: "market", label: "Market", num: true, market: true, title: "Market value, 0–100 (FantasyCalc, from real trades; #1 = 100). * = not in the market list, our estimate" },
-  { key: "marketRank", label: "Mkt rk", num: true, market: true, hideSm: true, title: "Market overall rank (FantasyCalc)" },
-  { key: "edge", label: "Edge", num: true, market: true, hideSm: true, title: "Our value on the market scale minus market value: + the market undervalues him (buy low), − overvalues him (sell high)" },
-  { key: "ppg", label: "PPG", num: true, title: "Projected points per game rest of season, your scoring" },
-  { key: "ppg26", label: "2026", num: true, title: "Actual ppg this season", hideSm: true },
-  { key: "ppgExp26", label: "Exp 26", num: true, title: "Expected (opportunity-based) ppg this season", hideSm: true },
-  { key: "posRank", label: "Pos rk", num: true },
-  { key: "ecrOverall", label: "ECR", num: true, title: "FantasyPros rest-of-season consensus overall rank", hideSm: true },
+  { key: "value", label: "Value", num: true, tip: "Our 0–100 rest-of-season trade value: projected points above replacement × games left, blended 35% with the expert consensus rank." },
+  { key: "market", label: "Market", num: true, market: true, tip: "What managers trade him for: FantasyCalc value from real trades (#1 = 100); * = not in their list, our estimate." },
+  { key: "marketRank", label: "Mkt rk", num: true, market: true, hideSm: true, tip: "His overall rank in the FantasyCalc market list (— = not listed)." },
+  { key: "edge", label: "Edge", num: true, market: true, hideSm: true, tip: "Our value mapped onto the market's scale minus his market value: + the market undervalues him (buy low), − overvalues him (sell high), — when the market has no real value for him." },
+  { key: "ppg", label: "PPG", num: true, tip: "Projected points per game for the rest of the season in your scoring: a weighted blend of expert ranks, this season and last season." },
+  { key: "ppg26", label: "2026", num: true, hideSm: true, tip: "Actual points per game this season in your scoring (— = no games yet)." },
+  { key: "ppgExp26", label: "Exp 26", num: true, hideSm: true, tip: "Expected points per game this season from his opportunities (targets, carries, air yards), your scoring." },
+  { key: "posRank", label: "Pos rk", num: true, tip: "His rank at his position by projected points per game." },
+  { key: "ecrOverall", label: "ECR", num: true, hideSm: true, tip: "FantasyPros expert consensus rest-of-season overall rank (— = unranked)." },
   { key: "owner", label: "Owner", num: false },
 ];
-const PAGE = 150;
+const PAGE = 100;
 
 export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Active & { team: string } }) {
   const res = useAsync(() => api.values(active), [active.provider, active.id, active.team]);
@@ -29,6 +31,17 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
   const [availOnly, setAvailOnly] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "value", dir: -1 });
   const [limit, setLimit] = useState(PAGE);
+  // A player's value bullets, fetched on the first tap of his "?" (kept out of the list payload).
+  const whyCache = useMemo(() => new Map<string, Promise<DetailItem[]>>(), [active.provider, active.id, active.team]); // eslint-disable-line react-hooks/exhaustive-deps
+  const whyOf = (id: string) => {
+    let p = whyCache.get(id);
+    if (!p) {
+      p = api.valueWhy(active, id);
+      p.catch(() => whyCache.delete(id));
+      whyCache.set(id, p);
+    }
+    return p;
+  };
   const teamNames = useMemo(() => new Map(analysis.teams.map((t) => [t.team.id, t.team.name])), [analysis]);
 
   const owner = (r: ValueRow) => (r.ownerTeamId ? (teamNames.get(r.ownerTeamId) ?? r.ownerTeamId) : "FA");
@@ -39,20 +52,21 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
     const filtered = res.data.filter(
       (r) => (!pos || r.pos === pos) && (!availOnly || !r.ownerTeamId) && (!needle || r.name.toLowerCase().includes(needle) || r.team.toLowerCase() === needle),
     );
-    const get = (r: ValueRow): string | number => {
+    // null = unknown (no market edge, no ECR …): always sorted last, whichever direction.
+    const get = (r: ValueRow): string | number | null => {
       switch (sort.key) {
         case "name":
           return r.name;
         case "owner":
           return r.ownerTeamId ? owner(r) : "~"; // free agents last
         case "ecrOverall":
-          return r.ecrOverall ?? Number.POSITIVE_INFINITY;
+          return r.ecrOverall ?? null;
         case "marketRank":
-          return r.marketRank ?? Number.POSITIVE_INFINITY;
+          return r.marketRank ?? null;
         case "market":
-          return r.market ?? -1;
+          return r.market ?? null;
         case "edge":
-          return r.edge ?? 0;
+          return r.edge ?? null;
         default:
           return r[sort.key];
       }
@@ -60,6 +74,7 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
     return [...filtered].sort((a, b) => {
       const x = get(a);
       const y = get(b);
+      if (x === null || y === null) return x === y ? b.value - a.value : x === null ? 1 : -1;
       const c = typeof x === "string" || typeof y === "string" ? String(x).localeCompare(String(y)) : x === y ? 0 : x < y ? -1 : 1;
       return c * sort.dir || b.value - a.value;
     });
@@ -93,11 +108,13 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
             <thead>
               <tr>
                 {cols.map((c) => (
-                  <th key={c.key} className={`${c.num ? "num" : ""}${c.hideSm ? " hide-sm" : ""}`} title={c.title} aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
-                    <button className={`sort-btn${sort.key === c.key ? " active" : ""}`} onClick={() => clickSort(c.key)}>
-                      {c.label}
-                      <span className="sort-arrow">{sort.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : ""}</span>
-                    </button>
+                  <th key={c.key} className={`${c.num ? "num" : ""}${c.hideSm ? " hide-sm" : ""}`} aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
+                    <ColumnHelp tip={c.tip}>
+                      <button className={`sort-btn${sort.key === c.key ? " active" : ""}`} onClick={() => clickSort(c.key)}>
+                        {c.label}
+                        <span className="sort-arrow">{sort.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : ""}</span>
+                      </button>
+                    </ColumnHelp>
                   </th>
                 ))}
               </tr>
@@ -111,18 +128,18 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
                       <span className="strong">{r.name}</span>
                       <span className="muted small hide-sm">{r.team}</span>
                       <InjuryDot player={r} />
-                      <Why text={r.why} />
+                      <HelpTip load={() => whyOf(r.id)} label={`How ${r.name} is valued`} />
                     </div>
                   </td>
                   <td className="num strong">{f1(r.value)}</td>
                   {hasMarket && (
                     <>
                       <td className="num">
-                        {r.market !== undefined ? f1(r.market) : "–"}
+                        {r.market !== undefined ? f1(r.market) : "—"}
                         {r.marketEstimated ? "*" : ""}
                       </td>
-                      <td className="num hide-sm">{r.marketRank ?? "–"}</td>
-                      <td className={`num hide-sm delta ${Math.abs(r.edge ?? 0) >= 8 ? deltaClass(r.edge) : "neutral"}`}>{r.edge !== undefined ? signed(r.edge) : "–"}</td>
+                      <td className="num hide-sm">{r.marketRank ?? "—"}</td>
+                      <td className={`num hide-sm delta ${Math.abs(r.edge ?? 0) >= 8 ? deltaClass(r.edge) : "neutral"}`}>{r.edge !== undefined ? signed(r.edge) : "—"}</td>
                     </>
                   )}
                   <td className="num">{f1(r.ppg)}</td>
@@ -148,11 +165,13 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
         </div>
       )}
       {analysis.valueSource === "model" && <div className="notice warn small">Market values (FantasyCalc) are unavailable right now: only our own values are shown.</div>}
-      <p className="muted small">
-        {rows.length} players · replacement ppg:{" "}
-        {Object.entries(analysis.replacement)
-          .map(([k, v]) => `${k} ${f1(v)}`)
-          .join(" · ")}
+      <p className="muted small row gap">
+        {rows.length} players
+        <HelpTip
+          text="Replacement level: projected ppg of the best player you could add for free at each position (Value counts points above it)."
+          items={Object.entries(analysis.replacement).map(([k, v]) => ({ label: k, value: `${f1(v)} ppg` }))}
+          label="Replacement levels"
+        />
       </p>
     </div>
   );

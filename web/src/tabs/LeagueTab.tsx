@@ -3,6 +3,7 @@
 import { api, type Active, type Analysis } from "../api";
 import type { LeagueTeamRow, TeamComparison } from "../../../server/model/league";
 import { ErrorBox, Loading, Stat, Why } from "../components/common";
+import { ColumnHelp } from "../components/HelpTip";
 import { DetailList, ExpandableList, ExpandableRow, type DetailLine } from "../components/ExpandableRow";
 import { deltaClass, f1, ordinal, signed } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
@@ -116,10 +117,7 @@ function StandingsTable({ teams }: { teams: LeagueTeamRow[] }) {
   const rows = [...teams].sort((a, b) => (a.standingsRank ?? 99) - (b.standingsRank ?? 99) || a.powerRank - b.powerRank);
   const H = ({ label, tip, cls = "" }: { label: string; tip: string; cls?: string }) => (
     <th className={`num ${cls}`.trim()}>
-      <span className="th-why">
-        {label}
-        <Why text={tip} />
-      </span>
+      <ColumnHelp tip={tip}>{label}</ColumnHelp>
     </th>
   );
   return (
