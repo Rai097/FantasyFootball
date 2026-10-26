@@ -6,10 +6,13 @@ import { apiRouter, errorMiddleware } from "./api.js";
 import { getPlayerDb } from "./data/players.js";
 
 // Fail closed: a production server without a password would publish the owner's league to anyone with the URL.
-if (config.isProd && !process.env.APP_PASSWORD) {
-  console.error("[server] refusing to start: NODE_ENV=production requires APP_PASSWORD (set it in .env or the host's environment).");
+// Running open is an explicit owner choice (APP_PUBLIC=1), never the result of a missing variable.
+const isPublic = process.env.APP_PUBLIC === "1";
+if (config.isProd && !process.env.APP_PASSWORD && !isPublic) {
+  console.error("[server] refusing to start: NODE_ENV=production requires APP_PASSWORD, or APP_PUBLIC=1 to run without a password on purpose.");
   process.exit(1);
 }
+if (config.isProd && isPublic && !process.env.APP_PASSWORD) console.warn("[server] APP_PUBLIC=1: no password; anyone with the URL can view and change imported leagues.");
 
 const app = express();
 app.disable("x-powered-by");

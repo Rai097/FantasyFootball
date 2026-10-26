@@ -672,3 +672,30 @@ test("production without APP_PASSWORD refuses to start (fail closed)", { timeout
   assert.equal(code, 1, log);
   assert.match(log, /refusing to start/);
 });
+
+test("APP_PUBLIC=1 runs a production server without a password on purpose", { timeout: 60_000 }, async () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "ftd-public-"));
+  fs.symlinkSync(path.join(ROOT, ".cache"), path.join(workDir, ".cache"), "dir");
+  const port = await freePort();
+  const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), path.join(ROOT, "server/index.ts")], {
+    cwd: workDir,
+    env: { ...process.env, NODE_ENV: "production", APP_PASSWORD: "", APP_PUBLIC: "1", PORT: String(port), HOST: "127.0.0.1" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let log = "";
+  child.stdout!.on("data", (d) => (log += d));
+  child.stderr!.on("data", (d) => (log += d));
+  try {
+    const deadline = Date.now() + 30_000;
+    let status = 0;
+    while (Date.now() < deadline && child.exitCode === null) {
+      status = await fetch(`http://127.0.0.1:${port}/healthz`).then((r) => r.status).catch(() => 0);
+      if (status === 200) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    assert.equal(status, 200, log);
+    assert.match(log, /APP_PUBLIC=1: no password/);
+  } finally {
+    child.kill();
+  }
+});

@@ -9,7 +9,7 @@
   <!-- Trade Desk on the Mac mini (127.0.0.1:5070, exposed at https://ff.raibot.us via the raibot-dashboard tunnel).
        PINNED: code and the built UI (web/dist) come from the release worktree /Users/raitsai/FantasyFootball-run
        (git worktree of ~/FantasyFootball, detached at the release commit). League imports persist in its .data/;
-       APP_PASSWORD lives in its .env (owner-written, never committed).
+       No password while APP_PUBLIC=1 (owner's choice until Discord login); otherwise APP_PASSWORD in its .env.
        Install: cp scripts/com.fantasy.tradedesk.plist ~/Library/LaunchAgents/ &&
          launchctl load ~/Library/LaunchAgents/com.fantasy.tradedesk.plist
        Stop: launchctl unload ~/Library/LaunchAgents/com.fantasy.tradedesk.plist -->
@@ -27,6 +27,9 @@
     <string>5070</string>
     <key>HOST</key>
     <string>127.0.0.1</string>
+    <!-- Owner's choice 2026-10-26: no password until Discord login ships; remove this line to require APP_PASSWORD. -->
+    <key>APP_PUBLIC</key>
+    <string>1</string>
     <key>PATH</key>
     <string>/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
   </dict>

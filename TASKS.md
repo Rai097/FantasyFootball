@@ -3,15 +3,16 @@
 ## Resume here
 - Release 1 (advice fixes) shipped 2026-10-26: injury-discounted My Team lineup; waivers claim future starters,
   new Stash call, no priority on injured/DNP players (DESIGN.md "Waivers v2").
-- Next: release 2 = import fixes (see Backlog). Then the hosting decision (persistent league data; maybe ff.raibot.us).
+- Hosting: Mac mini service com.fantasy.tradedesk (127.0.0.1:5070) behind the raibot-dashboard Cloudflare tunnel at
+  https://ff.raibot.us; data on local disk in ~/FantasyFootball-run/.data. No password (APP_PUBLIC=1, owner's choice
+  2026-10-26) until Discord login ships. Render still runs (password-protected); owner to decide whether to suspend it.
+- Next feature (owner, 2026-10-26): Discord single sign-on like perp.raibot.us, multi-tenant: allow-listed Discord
+  user ids (owner will supply), each user manages their own team/league. Then release 2 = import fixes (Backlog).
 - Open bugs: none known beyond the backlog.
 
 ## Waiting on
 - Yahoo Fantasy API approval for the app's Client ID (applied; still pending as of 2026-10-26).
   Until then use the browser import (docs/IMPORT.md). No code change needed once approved.
-
-## To confirm
-- Local test run: `npm ci && npm run typecheck && npm test` not yet run on this machine.
 
 ## Backlog
 Release 2 — import fixes (verified against the owner's raw browser import, 2026-10-26):
@@ -26,7 +27,3 @@ Known limitations (not scheduled):
 - Trade lineups do not apply the Q/D/O discount (only My Team / power ranks do).
 - Waivers now loads the depth chart (~55 MB, cached 12 h; wiped on Render restarts), so the first Waivers load after a
   wake is slower.
-
-Hosting (decision needed from the owner):
-- Imports vanish on every Render restart; only the importing browser can restore them. Options: Render paid disk
-  (~$7/mo), a free external DB, or move to the owner's raibot.us host (ff.raibot.us) if it has persistent storage.
