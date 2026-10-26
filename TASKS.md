@@ -25,6 +25,10 @@
   "How it's scored" tap; each breakout target = ONE collapsed row ("#1 Ollie Gordon II · RB · MIA · 84.5 · owner ·
   RB1"); tap opens the snap / expected / actual charts and bullets (role, snap trend, expected vs actual, price,
   suggested offer). No run-on "RB1; snaps 84%→56%…; touch opps …" lines.
+- Column help everywhere (owner, 2026-10-26, Values screenshot): every numeric column header gets a visible, tappable
+  "?" with a one-sentence meaning (header `title=` tooltips are hover-only, invisible on phones). Values first: Value,
+  Market, Mkt Rk, Edge, PPG, 2026, Exp 26, Pos Rk, ECR. Edge shows "—" (not 0.0) when the market value is missing or
+  estimated (e.g. Burden, Evans). Owner names lose the league prefix (import fix).
 - Open bugs: none known beyond the backlog.
 
 ## Waiting on
