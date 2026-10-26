@@ -13,6 +13,11 @@ Release plan (in order; each = build → adversarial test → review → deploy 
 4. Trade Finder + Targets cleanup (collapsed cards/rows, bullet details, one-line notices) + tappable column help on
    every table, Values first (Edge "—" when market missing).
 5. Values, My Team, Connect cleanup + header "League updated <date> · by <name>" (rename the "Data Xm ago" pill).
+   My Team (owner screenshot): power rankings removed (they live in the League tab, release 3); bench = same table as
+   the starting lineup; dense layout, cards in a row equal height (no dead space under Byes & injuries).
+Open bug (not reproduced): tab clicks sometimes "don't register" until the mouse moves. Local repro: every click
+registered, 0 long tasks, API < 50 ms. Suspects: main-thread stalls from big payloads (values 1 MB, waivers 423 KB —
+trim in releases 1/4/5) or a Chrome/Windows repaint glitch. Asked the owner: does the underline move, which browser/OS.
 - Release 1 (advice fixes) shipped 2026-10-26: injury-discounted My Team lineup; waivers claim future starters,
   new Stash call, no priority on injured/DNP players (DESIGN.md "Waivers v2").
 - Hosting: Mac mini service com.fantasy.tradedesk (127.0.0.1:5070) behind the raibot-dashboard Cloudflare tunnel at

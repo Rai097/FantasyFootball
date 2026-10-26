@@ -40,6 +40,9 @@ Open work and "Resume here" live in TASKS.md.
 - Site-wide: everything starts COLLAPSED — each recommendation card, list item and section shows only its key line
   (e.g. "Loveland → J. Williams · Caw · +1.9/wk"; Best-fit partners = who + fit), details open on tap. Notices and
   banners are one short line with the reasoning behind a tap. No page needs long scrolling through text.
+- Layout (owner, 2026-10-26): dense, little empty space; cards in the same row stretch to equal height (no dead space
+  under a short card, e.g. Byes & injuries); the same kind of data uses the same component everywhere (bench = the same
+  table as the starting lineup, never a different two-column list). Charts, graphs and tables before text.
 - Never commit `.env`, `.cache/`, `.data/` (already in .gitignore).
 - Yahoo API access is pending Yahoo's approval (since July 2026 apps need it); until then
   the `import` provider is the real-league path. Yahoo code must stay defensive and
