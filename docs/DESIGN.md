@@ -212,7 +212,7 @@ GET  /api/league/:provider/:id/trades2?team=ID&mode=now|balanced|playoffs&partne
        → { trades: Trade[] (clear wins), smallerEdges: Trade[], nearMisses: (Trade & { reason })[], mode, summary: string }   (UI uses this)
 GET  /api/league/:provider/:id/bench-upgrades?team=ID&mode= → Trade[] (≤ 15 one-for-one bench swaps)
 POST /api/league/:provider/:id/trade/evaluate  { team, partner, give: string[], get: string[], mode? } → Trade & { verdict: string }  (v2 scoring)
-GET  /api/league/:provider/:id/waivers?team=ID → { freeAgents: WaiverRow[], myPriority?: number, numTeams, advice: string, rules, faStatusKnown }  (see "Waivers v3")
+GET  /api/league/:provider/:id/waivers?team=ID → { freeAgents: WaiverRow[], myPriority?: number, numTeams, advice: string, rules, faStatusKnown, notes?: string[] }  (see "Waivers v3")
        WaiverTarget = ValuedPlayer & { gain: number, benchGain: number, drop: ValuedPlayer|null, trend: number, recommendation: "claim"|"wait"|"optional"|"pass", why: string, onWaivers: boolean, percentOwned?: number }
 GET  /api/league/:provider/:id/values?team=ID  → ValuedPlayer[] sorted by value, rostered flag { ...ValuedPlayer, ownerTeamId?: string }
 ```
@@ -477,6 +477,23 @@ Owner: "it shows only waivers, not free agents worth picking up; too much text u
   reusable summary-row → details pattern (button role, Enter/Space, aria-expanded, ≥ 44 px rows, same look as `.table`).
   1280 px: Player, Summary, PPG, Value, Gain, Call columns; 390 px: a card with name + badge + call, then the summary
   (2-line clamp); numbers move into the details as stat tiles. Everything starts collapsed.
+* **Fix round 1 (adversarial review)**:
+  - Waivers lists are judged per position group (offense, K, DEF; `WaiverList.groups`): a status=W page that fails
+    (HTTP or network error) or hits the page cap makes that group's list partial, so non-members stay unknown; an
+    empty group list with no owner-column reading in that group is unknown, never "all free agents". "Yahoo ignored
+    the filter" = a W row whose owner cell says FA, or the W set holds every available player read for the group
+    (set comparison, not page order). A bare "W" cell is a last-game win, not waivers ("W (Wed)" / "Waivers" are).
+    DEF links with a long slug (/nfl/teams/kansas-city/) map to the standard abbreviation via server/data/names.ts.
+  - Row cap: the best 60 rows plus the best 5 of every position (`capRows`), so the K and DEF chips always list
+    their streaming options. K/DEF with no weekly gain is a pass (never "+0.0 ppg").
+  - Long-term injured (projection.ts `injuryKind` "long": IR, PUP, NFI, NA, "Out (IR)", "Out (ACL)") is never a
+    claim: a would-be claim is a stash ("confirm his status"); no games left → pass. FAAB leagues: rows, rules, cost
+    and tooltips talk about bids, never priority. Missing breakout numbers show "—".
+  - Yahoo provider: priority / FAAB balance belong to the connected account's team (`league.myTeamId`) only,
+    whoever asks; the waivers cache key includes the team.
+  - Imported free agents that match no player are reported in the response `notes` (count + first 5 names) and
+    shown as a warning line. `stripLeaguePrefix` is idempotent: on save an ambiguous nested prefix
+    ("L - Team - One") is kept; on read only "<stored league name> - " is stripped (imports saved before the rule).
 
 ## Discord sign-in, multi-tenant (2026-10-26) — replaces the APP_PASSWORD / APP_PUBLIC gate
 
