@@ -48,3 +48,11 @@ Open work and "Resume here" live in TASKS.md.
   Batch docs-only commits with a code change; ask before pushing. Imported league data lives
   only on the server disk and in the browser's localStorage — not in git, not readable via Render MCP.
 - A claude.ai/code cloud session may also push to this branch: `git fetch` before starting work.
+- Mac mini (primary since 2026-10-26): https://ff.raibot.us → Cloudflare tunnel `raibot-dashboard`
+  (~/.cloudflared/config.yml, shared with dashboard/perp.raibot.us) → launchd `com.fantasy.tradedesk` on 127.0.0.1:5070,
+  running the release worktree ~/FantasyFootball-run (detached at the release commit; template
+  scripts/com.fantasy.tradedesk.plist). Data persists in ~/FantasyFootball-run/.data; log ~/FantasyFootball-run/server.log.
+  No password: APP_PUBLIC=1 (owner's choice until Discord login).
+- Mac deploy: `git -C ~/FantasyFootball-run checkout --detach <commit>` (+ `npm ci && npm run build` there when
+  dependencies or web/ changed), then `launchctl kickstart -k gui/$(id -u)/com.fantasy.tradedesk`; smoke-check the log
+  and one real request on https://ff.raibot.us. Restarting the shared tunnel needs the owner's OK (it blips perp.raibot.us).
