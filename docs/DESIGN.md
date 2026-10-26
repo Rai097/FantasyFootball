@@ -212,7 +212,7 @@ GET  /api/league/:provider/:id/trades2?team=ID&mode=now|balanced|playoffs&partne
        → { trades: Trade[] (clear wins), smallerEdges: Trade[], nearMisses: (Trade & { reason })[], mode, summary: string }   (UI uses this)
 GET  /api/league/:provider/:id/bench-upgrades?team=ID&mode= → Trade[] (≤ 15 one-for-one bench swaps)
 POST /api/league/:provider/:id/trade/evaluate  { team, partner, give: string[], get: string[], mode? } → Trade & { verdict: string }  (v2 scoring)
-GET  /api/league/:provider/:id/waivers?team=ID → { freeAgents: WaiverTarget[], myPriority?: number, numTeams, advice: string }
+GET  /api/league/:provider/:id/waivers?team=ID → { freeAgents: WaiverRow[], myPriority?: number, numTeams, advice: string, rules, faStatusKnown }  (see "Waivers v3")
        WaiverTarget = ValuedPlayer & { gain: number, benchGain: number, drop: ValuedPlayer|null, trend: number, recommendation: "claim"|"wait"|"optional"|"pass", why: string, onWaivers: boolean, percentOwned?: number }
 GET  /api/league/:provider/:id/values?team=ID  → ValuedPlayer[] sorted by value, rostered flag { ...ValuedPlayer, ownerTeamId?: string }
 ```
@@ -448,6 +448,35 @@ Why: the owner uses waivers to find players who can *become* starters, not only 
   (`injuryRisk.ts`: Q 0.85 / D 0.70 / O 0.55, shared with trades). Used by team analysis (My Team, power ranks, group
   ranks) for every team. `LineupSlot.riskFactor` marks discounted starters; the UI shows "×0.85 · check status".
   Trade and waiver lineups are unchanged; `value` is unchanged.
+
+## Waivers v3: rows + free agents (2026-10-26) — overrides "Waivers", "Waivers v2" and the waivers API line where they differ
+
+Owner: "it shows only waivers, not free agents worth picking up; too much text under Why". Rule for every table: a
+1–2 sentence summary under 255 characters per row, details on tap as one-idea lines (CLAUDE.md Rules).
+
+* **Row text**: `WaiverTarget.why` is gone. `summary` = lead fact + action, ≤ 255 chars, 1–2 sentences, built per
+  call branch (e.g. "Starts at WR1 over X (+2.8 ppg). Free agent: add now, no priority cost." / "Rising role: 11.4
+  expected pts/g, breakout score 68. Claim him before he starts."). `details: DetailItem[]` = `{ label, value, tone? }`
+  items ≤ 90 chars each: rule behind the call, lineup slot, gain, drop, value change, expected-points and snap trends,
+  injury, breakout score / path / expected pts, the breakout thesis split into one item per fact (`thesisItems`), cost.
+  Tests (`summaryProblems`, `detailProblems` in testkit) enforce both on unit fixtures and the demo league.
+* **Response**: `{ freeAgents: WaiverRow[], myPriority?, numTeams, advice, rules: DetailItem[], faStatusKnown }`.
+  `WaiverRow` is a slim row (only what the tab renders; `drop` is `{ id, name, pos, value }`, no weekly lines) to keep
+  the demo payload well under 150 KB (was ~420 KB). `advice` is one line ≤ 255 chars (priority, counts and up to two
+  names per group); `rules` feeds the collapsed "How calls work".
+* **Free agent vs waivers**: `availability: "fa" | "waivers" | "unknown"` per row; `onWaivers` stays (unknown counts as
+  on waivers, the safe assumption). The import bookmarklet reads the Yahoo player list's Owner cell ("FA" / "W (Wed)")
+  per row, plus `players?status=W` (offense, K, DEF) as fallback and cross-check (ignored when Yahoo seems to ignore
+  the filter; a truncated list never marks non-members as free agents), and now also K and DEF free agents (25 each).
+  `StoredImport.freeAgents[].onWaivers` is optional; old imports → `faStatusKnown: false` and the UI says "re-import".
+  The markup is reconstructed (fixture `yahoo-web-players.html`), verified on the owner's next real import via the
+  `waiverStatus` / `availability` diagnostics. The demo league marks about a third of free agents as on waivers.
+* **Ordering**: unchanged (call, then score) — free agents and waiver players interleave; the fix was that nothing was
+  ever marked FA. The tab filters All / Free agents / On waivers with a count each, plus position chips.
+* **UI**: `web/src/components/ExpandableRow.tsx` (`ExpandableList`, `ExpandableRow`, `DetailList`, `Disclosure`) is the
+  reusable summary-row → details pattern (button role, Enter/Space, aria-expanded, ≥ 44 px rows, same look as `.table`).
+  1280 px: Player, Summary, PPG, Value, Gain, Call columns; 390 px: a card with name + badge + call, then the summary
+  (2-line clamp); numbers move into the details as stat tiles. Everything starts collapsed.
 
 ## Discord sign-in, multi-tenant (2026-10-26) — replaces the APP_PASSWORD / APP_PUBLIC gate
 

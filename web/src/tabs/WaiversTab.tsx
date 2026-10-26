@@ -1,21 +1,32 @@
 import { useState } from "react";
-import { api, type Active, type Analysis } from "../api";
-import { Empty, ErrorBox, Loading, PosBadge, Why } from "../components/common";
+import { api, type Active, type Analysis, type WaiverRow } from "../api";
+import { Empty, ErrorBox, Loading, PosBadge } from "../components/common";
+import { DetailList, Disclosure, ExpandableList, ExpandableRow } from "../components/ExpandableRow";
 import { InjuryDot } from "../components/PlayerChip";
 import { deltaClass, f1, signed } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
 
 const POSITIONS = ["QB", "RB", "WR", "TE", "K", "DEF"];
+type Avail = "all" | "fa" | "waivers";
+
+const TIPS = {
+  ppg: "Projected fantasy points per game for the rest of the season, in your league's scoring.",
+  value: "Trade value on a 0–100 scale; 0 means no better than a typical free agent.",
+  gain: "How many points per game your best starting lineup gains if you add him (and drop the player shown in details).",
+  call: "What to do: claim, optional, stash, wait or pass. Tap the row for the reasons.",
+};
 
 export function WaiversTab({ analysis, active }: { analysis: Analysis; active: Active & { team: string } }) {
   const [pos, setPos] = useState("");
+  const [avail, setAvail] = useState<Avail>("all");
   const res = useAsync(() => api.waivers(active), [active.provider, active.id, active.team]);
 
   if (res.error) return <ErrorBox error={res.error} onRetry={res.reload} />;
   if (!res.data) return <Loading label="Ranking free agents…" />;
-  const { freeAgents, myPriority, numTeams, advice } = res.data;
-  const rows = freeAgents.filter((p) => !pos || p.pos === pos);
-  const showOwned = freeAgents.some((p) => p.percentOwned != null);
+  const { freeAgents, myPriority, numTeams, advice, rules, faStatusKnown } = res.data;
+  const byPos = freeAgents.filter((p) => !pos || p.pos === pos);
+  const counts = { all: byPos.length, fa: byPos.filter((p) => !p.onWaivers).length, waivers: byPos.filter((p) => p.onWaivers).length };
+  const rows = byPos.filter((p) => avail === "all" || !faStatusKnown || (avail === "fa" ? !p.onWaivers : p.onWaivers));
   const { usesFaab, faabBudget } = analysis.league.settings;
   const faabLeft = analysis.league.teams.find((t) => t.id === active.team)?.faabRemaining;
 
@@ -24,105 +35,155 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
       <section className="card waiver-head">
         <div className="row gap wrap">
           {myPriority != null ? (
-            <span className="pill big">
+            <span className="pill big" title="Your place in the rolling waiver order; a successful claim moves you to last.">
               Waiver priority <b>#{myPriority}</b> of {numTeams}
             </span>
           ) : (
             <span className="pill big muted">Waiver priority unknown</span>
           )}
           {usesFaab && (
-            <span className="pill big">
-              FAAB <b>${faabLeft ?? "?"}</b>
+            <span className="pill big" title="Free-agent budget you have left to bid with this season.">
+              FAAB <b>{faabLeft != null ? `$${faabLeft}` : "—"}</b>
               {faabBudget != null ? ` of $${faabBudget}` : ""} left
             </span>
           )}
-          <PosFilter value={pos} onChange={setPos} options={POSITIONS} />
         </div>
         <p className="advice">{advice}</p>
+        {!faStatusKnown && (
+          <p className="notice warn small">Free agent or on waivers: status unknown. Re-import your league to see free agents.</p>
+        )}
+        <div className="row gap wrap">
+          {faStatusKnown && (
+            <div className="seg" role="group" aria-label="Available now">
+              {(
+                [
+                  ["all", "All"],
+                  ["fa", "Free agents"],
+                  ["waivers", "On waivers"],
+                ] as const
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  className={`seg-btn${avail === k ? " active" : ""}`}
+                  onClick={() => setAvail(k)}
+                  aria-pressed={avail === k}
+                  title={k === "fa" ? "Free agents: add any time, no waiver priority used." : k === "waivers" ? "On waivers: needs a claim, which uses your priority." : undefined}
+                >
+                  {label} <span className="seg-count">{counts[k]}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <PosFilter value={pos} onChange={setPos} options={POSITIONS} />
+        </div>
+        <Disclosure title="How calls work">
+          <DetailList items={rules} />
+        </Disclosure>
       </section>
 
       {rows.length === 0 ? (
-        <Empty>No free agents{pos ? ` at ${pos}` : ""}.</Empty>
+        <Empty>
+          No {avail === "fa" ? "free agents" : avail === "waivers" ? "players on waivers" : "available players"}
+          {pos ? ` at ${pos}` : ""}.
+        </Empty>
       ) : (
-        <div className="table-wrap card flush">
-          <table className="table waivers">
-            <thead>
-              <tr>
-                <th>Player</th>
-                <th className="num">PPG</th>
-                <th className="num">Value</th>
-                <th className="num" title="Starting-lineup ppg change if you add him and drop your weakest bench player">
-                  Gain
-                </th>
-                <th className="hide-sm">Drop</th>
-                <th className="num" title="Expected points last 2 weeks vs season average">
-                  Trend
-                </th>
-                {showOwned && <th className="num hide-sm">% own</th>}
-                <th>Call</th>
-                <th className="hide-sm why-col">Why</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((p) => (
-                <tr key={p.id}>
-                  <td className="player-td">
-                    <div className="player-cell">
-                      <PosBadge pos={p.pos} />
-                      <span className="strong">{p.name}</span>
-                      <span className="muted small">{p.team}</span>
-                      <InjuryDot player={p} />
-                      {p.onWaivers && (
-                        <span className="tag small-tag" title="On waivers: needs a claim">
-                          W
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="num" data-label="PPG">{f1(p.ppg)}</td>
-                  <td className="num" data-label="Value">{f1(p.value)}</td>
-                  <td className="num" data-label="Gain">
-                    <span className={`delta ${deltaClass(p.gain)}`}>{signed(p.gain)}</span>
-                    <div className={`small delta ${deltaClass(p.benchGain)}`} title="Value gained vs the player you'd drop">
-                      {signed(p.benchGain)} val
-                    </div>
-                  </td>
-                  <td className="hide-sm small">{p.drop ? `${p.drop.name} (${f1(p.drop.value)})` : "–"}</td>
-                  <td className="num" data-label="Trend">
-                    <Trend value={p.trend} />
-                    {p.snapTrend != null && Number.isFinite(p.snapTrend) && Math.abs(p.snapTrend) >= 0.05 && (
-                      <div className={`small delta ${p.snapTrend > 0 ? "pos" : "neg"}`} title="Last-week snap share vs earlier weeks">
-                        {p.snapTrend > 0 ? "+" : ""}
-                        {f1(p.snapTrend * 100)}% snaps
-                      </div>
-                    )}
-                  </td>
-                  {showOwned && <td className="num hide-sm">{p.percentOwned != null ? `${f1(p.percentOwned)}%` : "–"}</td>}
-                  <td className="call-td">
-                    <span className={`rec rec-${p.recommendation}`}>{p.recommendation}</span>
-                    <span className="show-sm">
-                      <Why text={p.summary} />
-                    </span>
-                  </td>
-                  <td className="hide-sm why-col small muted">{p.summary}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="card flush">
+          <ExpandableList
+            label="Available players"
+            className="waiver-list"
+            header={
+              <>
+                <span>Player</span>
+                <span>Summary</span>
+                <span className="num" title={TIPS.ppg}>PPG</span>
+                <span className="num" title={TIPS.value}>Value</span>
+                <span className="num" title={TIPS.gain}>Gain</span>
+                <span title={TIPS.call}>Call</span>
+              </>
+            }
+          >
+            {rows.map((p) => (
+              <WaiverRow key={p.id} p={p} />
+            ))}
+          </ExpandableList>
         </div>
       )}
     </div>
   );
 }
 
-export function Trend({ value }: { value: number | undefined }) {
-  if (value == null || !Number.isFinite(value)) return <span className="muted">–</span>;
-  const cls = deltaClass(value, 0.5);
-  const arrow = cls === "pos" ? "▲" : cls === "neg" ? "▼" : "▬";
+function AvailBadge({ p }: { p: WaiverRow }) {
+  if (p.availability === "fa")
+    return (
+      <span className="tag small-tag avail-fa" title="Free agent: add any time, no waiver priority used.">
+        FA
+      </span>
+    );
+  if (p.availability === "waivers")
+    return (
+      <span className="tag small-tag avail-w" title="On waivers: needs a claim, which uses your priority.">
+        W
+      </span>
+    );
   return (
-    <span className={`trend delta ${cls}`} title={`${signed(value)} expected pts vs season average`}>
-      {arrow} {signed(value)}
+    <span className="tag small-tag" title="Status unknown: re-import your league to see free agents vs waivers.">
+      ?
     </span>
+  );
+}
+
+function WaiverRow({ p }: { p: WaiverRow }) {
+  return (
+    <ExpandableRow
+      className="waiver-row"
+      label={p.name}
+      head={
+        <>
+          <span className="w-player">
+            <PosBadge pos={p.pos} />
+            <span className="strong w-name">{p.name}</span>
+            <span className="muted small">{p.team}</span>
+            <InjuryDot player={p} />
+            <AvailBadge p={p} />
+          </span>
+          <span className="w-summary">{p.summary}</span>
+          <span className="num w-stat" title={TIPS.ppg}>
+            {f1(p.ppg)}
+          </span>
+          <span className="num w-stat" title={TIPS.value}>
+            {f1(p.value)}
+          </span>
+          <span className={`num w-stat delta ${deltaClass(p.gain)}`} title={TIPS.gain}>
+            {signed(p.gain)}
+          </span>
+          <span className="w-call" title={TIPS.call}>
+            <span className={`rec rec-${p.recommendation}`}>{p.recommendation}</span>
+          </span>
+        </>
+      }
+    >
+      <div className="stat-tiles" aria-label="Numbers">
+        <span className="stat-tile" title={TIPS.ppg}>
+          <span className="stat-label">PPG</span>
+          <b>{f1(p.ppg)}</b>
+        </span>
+        <span className="stat-tile" title={TIPS.value}>
+          <span className="stat-label">Value</span>
+          <b>{f1(p.value)}</b>
+        </span>
+        <span className="stat-tile" title={TIPS.gain}>
+          <span className="stat-label">Gain</span>
+          <b className={`delta ${deltaClass(p.gain)}`}>{signed(p.gain)}</b>
+        </span>
+        {p.percentOwned != null && (
+          <span className="stat-tile" title="Share of Yahoo leagues where he is on a roster.">
+            <span className="stat-label">Rostered</span>
+            <b>{f1(p.percentOwned)}%</b>
+          </span>
+        )}
+      </div>
+      <DetailList items={p.details} />
+    </ExpandableRow>
   );
 }
 

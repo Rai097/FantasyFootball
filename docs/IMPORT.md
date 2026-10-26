@@ -76,7 +76,10 @@ in `.data/import-<id>-history.json`) for this comparison.
   (receptions, passing TDs, yards, …) and playoff weeks. If it cannot read
   them it uses Yahoo's defaults (half-PPR; QB, 2 WR, 2 RB, TE, W/R/T, K, DEF,
   6 bench, IR) and Trade Desk shows a yellow warning until you check them.
-* The top ~150 available players (free agents and players on waivers).
+* The top ~150 available players, plus 25 kickers and 25 defenses, and for each
+  one whether he is a free agent ("FA", add any time) or on waivers ("W", needs a
+  claim). Imports made before 2026-10-26 do not have this or K/DEF: re-import once
+  to see free agents vs waivers and kicker/defense streaming advice.
 
 It only makes requests to Yahoo pages of *your* league, in *your* browser,
 and never sends the data anywhere. You carry it over by copy and paste.
