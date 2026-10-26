@@ -3,16 +3,10 @@
 ## Resume here
 Owner (2026-10-26): Claude is the architect; work the queue autonomously, stop only for critical issues.
 Release plan (in order; each = build → adversarial test → review → deploy to the Mac → smoke check):
-1. Waivers cleanup (IN PROGRESS, developer agent): summary ≤255 + bullet details on tap, free agents vs waivers
-   (import captures FA/W), K/DEF free agents, shared expandable-row component. Same deploy: strip league-name prefix
-   from team names everywhere.
-2. Import enabler: bookmarklet captures standings (W-L-T, points for/against, rank) and waiver priority; parser
-   fixtures + defensive diagnostics. Needs the owner's next re-import to show real data.
-3. League tab (BUILT 2026-10-26, not yet deployed; DESIGN.md "League tab"): standings table, power rankings with a chart, "who is above me and why" (per-team position-group
-   deltas vs mine, starter ppg vs bench), all collapsed rows + bullets on tap. Power rankings MOVE here from My Team.
-4. Trade Finder + Targets cleanup (collapsed cards/rows, bullet details, one-line notices) + tappable column help on
-   every table, Values first (Edge "—" when market missing). BUILT 2026-10-26, not yet deployed (DESIGN.md "Collapsed
-   rows everywhere"). Leftovers: unused .trade-card / .targets-grid / .target-card CSS rules; My Team still shows prose why.
+1–4 SHIPPED 2026-10-26 (live 993c6d9): Waivers rows + FA/waivers + K/DEF; league-name prefix stripped; import captures
+   standings + waiver order (needs the owner's re-import; Yahoo markup unverified — check the import diagnostics);
+   League tab (standings, power chart, who is above me); Trade Finder + Targets collapsed rows, column help, Values
+   payload 1 MB → 97 KB.
 5. Values, My Team, Connect cleanup + header "League updated <date> · by <name>" (rename the "Data Xm ago" pill).
    My Team (owner screenshot): power rankings removed (they live in the League tab, release 3); bench = same table as
    the starting lineup; dense layout, cards in a row equal height (no dead space under Byes & injuries).
