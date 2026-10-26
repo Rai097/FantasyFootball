@@ -7,6 +7,7 @@ import {
   appendSnapshot,
   applySettings,
   buildImportLeague,
+  cleanRecord,
   diffSnapshots,
   HISTORY_CAP,
   ImportError,
@@ -18,6 +19,7 @@ import {
   stripLeaguePrefix,
   upsertImport,
   validateImport,
+  waiverPriorityOf,
   type StoredImport,
 } from "./import.js";
 import { parseRosterText } from "./import-text.js";
@@ -268,4 +270,89 @@ test("league-name prefix is stripped from team names when every team shares it",
   assert.deepEqual(stripLeaguePrefix([t("Run - DMC"), t("Ball - Hogs")]).map((x) => x.name), ["Run - DMC", "Ball - Hogs"]);
   const v = validateImport({ teams: [{ id: "1", name: L + "No Cap Rai", players: [] }, { id: "2", name: L + "Caw", players: [] }] });
   assert.deepEqual(v.teams.map((x) => x.name), ["No Cap Rai", "Caw"]);
+});
+
+// ------------------------------------------------------------------ standings and waiver order (2026-10-26)
+const withStandings = () => {
+  const b = body();
+  return {
+    ...b,
+    teams: [
+      { ...b.teams[0], record: { wins: 5, losses: 1, ties: 0, pointsFor: "1,043.2", pointsAgainst: 870.5, rank: 1, streak: "W-3", seed: 1 }, waiverRank: 9 },
+      { ...b.teams[1], record: { wins: 1, losses: 5, ties: 0, rank: 12 }, waiverRank: 2 },
+    ],
+  };
+};
+
+test("cleanRecord: whole-number W-L-T required; bad optional fields are dropped one by one, never guessed", () => {
+  assert.deepEqual(cleanRecord({ wins: "5", losses: 1, ties: 0, pointsFor: "1,043.25", pointsAgainst: 870.5, rank: 1, streak: "w 3", seed: 2 }), {
+    wins: 5, losses: 1, ties: 0, pointsFor: 1043.25, pointsAgainst: 870.5, rank: 1, streak: "W3", seed: 2,
+  });
+  assert.equal(cleanRecord({ wins: 5, losses: 1 }), undefined, "ties missing = no record");
+  assert.equal(cleanRecord({ wins: 5.5, losses: 1, ties: 0 }), undefined);
+  assert.equal(cleanRecord({ wins: -1, losses: 1, ties: 0 }), undefined);
+  assert.equal(cleanRecord({ wins: 15, losses: 6, ties: 0 }), undefined, "more games than a season holds");
+  assert.equal(cleanRecord("5-1-0"), undefined);
+  assert.equal(cleanRecord(null), undefined);
+  const r = cleanRecord({ wins: 3, losses: 3, ties: 0, pointsFor: "NaN", pointsAgainst: Infinity, rank: 0, seed: 99, streak: "hot" })!;
+  assert.deepEqual(r, { wins: 3, losses: 3, ties: 0 });
+});
+
+test("validateImport keeps standings and waiver ranks per team; old payloads are unchanged", () => {
+  const s = validateImport(withStandings());
+  assert.deepEqual(s.teams[0].record, { wins: 5, losses: 1, ties: 0, pointsFor: 1043.2, pointsAgainst: 870.5, rank: 1, streak: "W3", seed: 1 });
+  assert.deepEqual(s.teams[1].record, { wins: 1, losses: 5, ties: 0, rank: 12 });
+  assert.equal(s.teams[0].waiverRank, 9);
+  assert.equal(s.waiverPriority, 2, "the importer's team (myTeamId 2) priority = its waiver rank");
+  const old = validateImport(body());
+  assert.ok(old.teams.every((t) => !("record" in t) && !("waiverRank" in t)));
+  assert.equal(old.waiverPriority, undefined);
+  // An explicit waiverPriority wins; out-of-range ranks are dropped; duplicate ranks mean a misread page: all dropped.
+  assert.equal(validateImport({ ...withStandings(), waiverPriority: 4 }).waiverPriority, 4);
+  const bad = withStandings();
+  bad.teams[0].waiverRank = 21;
+  assert.equal(validateImport(bad).teams[0].waiverRank, undefined);
+  const dup = withStandings();
+  dup.teams[0].waiverRank = 2;
+  const d = validateImport(dup);
+  assert.ok(d.teams.every((t) => t.waiverRank === undefined));
+  assert.equal(d.waiverPriority, undefined);
+});
+
+test("buildImportLeague fills Team.record and waiverRank; waiver priority per team", () => {
+  const s = validateImport(withStandings());
+  const l = buildImportLeague(db, s, { season: 2026, currentWeek: 4 });
+  assert.equal(l.teams[0].record?.wins, 5);
+  assert.equal(l.teams[0].record?.pointsFor, 1043.2);
+  assert.equal(l.teams[1].waiverRank, 2);
+  assert.equal(buildImportLeague(db, validateImport(body()), { season: 2026, currentWeek: 4 }).teams[0].record, undefined);
+  // Each team's own rank; without ranks the stored number belongs to the importer's team only.
+  assert.equal(waiverPriorityOf(s, "1"), 9);
+  assert.equal(waiverPriorityOf(s, "2"), 2);
+  const noRanks = { ...validateImport(body()), waiverPriority: 6 };
+  assert.equal(waiverPriorityOf(noRanks, "2"), 6);
+  assert.equal(waiverPriorityOf(noRanks, "1"), undefined, "another member never sees the importer's priority");
+  assert.equal(waiverPriorityOf(noRanks, undefined), undefined);
+  const fdb = { ...db, players: new Map(PLAYERS.map((p) => [p.id, p])) } as unknown as PlayerDb;
+  assert.equal(importFreeAgents(l, fdb, s, 4, "1").myPriority, 9);
+});
+
+test("re-import refreshes standings; a hand-entered priority is kept; a paste keeps the team's standings", () => {
+  const first = validateImport({ ...withStandings(), leagueId: "1405188", settingsSource: "page" });
+  const later = withStandings();
+  later.teams[1].record = { wins: 2, losses: 5, ties: 0, rank: 11 };
+  later.teams[1].waiverRank = 5;
+  later.teams[0].waiverRank = 6;
+  const incoming = validateImport({ ...later, leagueId: "1405188", settingsSource: "page" });
+  const up = upsertImport(first, incoming).stored;
+  assert.equal(up.teams[1].record?.wins, 2);
+  assert.equal(up.waiverPriority, 5, "never hand-edited: the freshly captured priority replaces the old copy");
+  const edited = applySettings(first, { waiverPriority: 8 });
+  assert.equal(upsertImport(edited, incoming).stored.waiverPriority, 8, "hand-entered value kept");
+  // A re-import whose standings could not be read: records are unknown again, never carried forward as current.
+  assert.equal(upsertImport(first, validateImport({ ...body(), leagueId: "1405188" })).stored.teams[0].record, undefined);
+  const pasted = mergeTeams(first, [{ id: "x", name: "A", players: [{ name: "Josh Allen", pos: "QB" }] }]);
+  assert.equal(pasted.teams[0].record?.wins, 5);
+  assert.equal(pasted.teams[0].waiverRank, 9);
+  assert.equal(pasted.teams[0].players[0].name, "Josh Allen");
 });

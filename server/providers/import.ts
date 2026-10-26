@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import type { PlayerDb } from "../data/players.js";
 import { normPos, normTeam } from "../data/names.js";
 import { HALF_PPR } from "../model/scoring.js";
-import type { Availability, League, Player, Scoring, SlotKind, Team } from "../model/types.js";
+import type { Availability, League, Player, Scoring, SlotKind, Team, TeamRecord } from "../model/types.js";
 import { draftBoard } from "./demo.js";
 import { DATA_DIR, readJson, removeJson, writeJson } from "./store.js";
 import { findPlayer, withYahooStatus, type YahooPlayerEntry } from "./yahoo-parse.js";
@@ -35,6 +35,10 @@ export interface ImportTeamRaw {
   name: string;
   owner?: string;
   players: ImportPlayerRaw[];
+  /** Standings row (bookmarklet, from 2026-10-26). Absent = not captured: shown as unknown. */
+  record?: TeamRecord;
+  /** This team's place in the rolling waiver order (1 = first claim). Absent = not captured. */
+  waiverRank?: number;
 }
 export type SettingsSource = "page" | "partial" | "default" | "user";
 
@@ -143,6 +147,45 @@ function cleanPlayer(v: unknown, where: string): ImportPlayerRaw {
   return p;
 }
 
+/** Most games a team can have played in one season (wins + losses + ties). */
+const MAX_GAMES = 20;
+const num = (v: unknown, lo: number, hi: number): number | undefined => {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v.replace(/,/g, "")) : v;
+  return typeof n === "number" && Number.isFinite(n) && n >= lo && n <= hi ? Math.round(n * 100) / 100 : undefined;
+};
+
+/**
+ * A standings row from the payload. Wins, losses and ties must all be whole numbers or there is no record (unknown);
+ * each optional field that is missing or out of range is left out on its own. Never throws.
+ */
+export function cleanRecord(v: unknown): TeamRecord | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const o = v as Record<string, unknown>;
+  const wins = int(o.wins, 0, MAX_GAMES);
+  const losses = int(o.losses, 0, MAX_GAMES);
+  const ties = int(o.ties, 0, MAX_GAMES);
+  if (wins === undefined || losses === undefined || ties === undefined || wins + losses + ties > MAX_GAMES) return undefined;
+  const r: TeamRecord = { wins, losses, ties };
+  const pf = num(o.pointsFor, 0, 20_000);
+  if (pf !== undefined) r.pointsFor = pf;
+  const pa = num(o.pointsAgainst, 0, 20_000);
+  if (pa !== undefined) r.pointsAgainst = pa;
+  const rank = int(o.rank, 1, MAX_TEAMS);
+  if (rank) r.rank = rank;
+  const seed = int(o.seed, 1, MAX_TEAMS);
+  if (seed) r.seed = seed;
+  const streak = typeof o.streak === "string" ? /^\s*([WLT])\s*-?\s*(\d{1,2})\s*$/i.exec(o.streak) : null;
+  if (streak) r.streak = `${streak[1].toUpperCase()}${Number(streak[2])}`;
+  return r;
+}
+
+/** Waiver ranks only when every captured rank is distinct (two teams at #3 means the page was misread). */
+function keepDistinctWaiverRanks(teams: ImportTeamRaw[]): ImportTeamRaw[] {
+  const ranks = teams.map((t) => t.waiverRank).filter((r): r is number => r !== undefined);
+  if (new Set(ranks).size === ranks.length) return teams;
+  return teams.map(({ waiverRank: _w, ...t }) => t);
+}
+
 function cleanScoring(v: unknown): Scoring | undefined {
   if (!v || typeof v !== "object") return undefined;
   const o = v as Record<string, unknown>;
@@ -202,9 +245,13 @@ export function validateImport(body: unknown, now = new Date()): StoredImport {
     const team: ImportTeamRaw = { id, name: str(t.name, 80) ?? `Team ${id}`, players: players.map((p, j) => cleanPlayer(p, `team ${id} player ${j + 1}`)) };
     const owner = str(t.owner, 60);
     if (owner) team.owner = owner;
+    const record = cleanRecord(t.record);
+    if (record) team.record = record;
+    const waiverRank = int(t.waiverRank, 1, MAX_TEAMS);
+    if (waiverRank) team.waiverRank = waiverRank;
     return team;
   });
-  const teams = stripLeaguePrefix(teamsIn);
+  const teams = keepDistinctWaiverRanks(stripLeaguePrefix(teamsIn));
   const fa = Array.isArray(o.freeAgents) ? o.freeAgents : undefined;
   if (fa && fa.length > MAX_FREE_AGENTS) throw new ImportError(`Too many free agents (${fa.length}); the limit is ${MAX_FREE_AGENTS}`);
 
@@ -236,7 +283,8 @@ export function validateImport(body: unknown, now = new Date()): StoredImport {
   const deadline = int(o.tradeDeadlineWeek, 1, 18);
   if (deadline) out.tradeDeadlineWeek = deadline;
   if (myTeamId && teams.some((t) => t.id === myTeamId)) out.myTeamId = myTeamId;
-  const wp = int(o.waiverPriority, 1, MAX_TEAMS);
+  // The importer's own waiver priority: given explicitly, else their team's place in the captured waiver order.
+  const wp = int(o.waiverPriority, 1, MAX_TEAMS) ?? teams.find((t) => t.id === out.myTeamId)?.waiverRank;
   if (wp) out.waiverPriority = wp;
   if (fa)
     out.freeAgents = fa.map((v, j) => {
@@ -367,7 +415,16 @@ export function buildImportLeague(db: Finder, s: StoredImport, ctx: { season: nu
       const copy = withYahooStatus(p, entryOf(raw), ctx.currentWeek);
       if (copy) overrides[p.id] = copy;
     }
-    return { id: t.id, name: t.name, owner: t.owner ?? "", playerIds, unmatched, ...(irPlayerIds.length ? { irPlayerIds } : {}) };
+    return {
+      id: t.id,
+      name: t.name,
+      owner: t.owner ?? "",
+      playerIds,
+      unmatched,
+      ...(irPlayerIds.length ? { irPlayerIds } : {}),
+      ...(t.record ? { record: { ...t.record } } : {}),
+      ...(t.waiverRank ? { waiverRank: t.waiverRank } : {}),
+    };
   });
   return {
     provider: "import",
@@ -394,8 +451,19 @@ export function buildImportLeague(db: Finder, s: StoredImport, ctx: { season: nu
 }
 
 /**
+ * Waiver priority of `teamId`: its place in the captured waiver order (fresh on every import), else the stored
+ * priority, which belongs to the importer's team (`s.myTeamId`) only. Unknown → undefined.
+ */
+export function waiverPriorityOf(s: StoredImport, teamId: string | undefined): number | undefined {
+  if (!teamId) return undefined;
+  const rank = s.teams.find((t) => t.id === teamId)?.waiverRank;
+  if (rank) return rank;
+  return teamId === s.myTeamId ? s.waiverPriority : undefined;
+}
+
+/**
  * Free agents: the imported list when present (resolved, minus anyone rostered),
- * else every ECR-ranked player not on a roster (like demo). Waiver priority is whatever the user entered.
+ * else every ECR-ranked player not on a roster (like demo). Waiver priority: see waiverPriorityOf.
  * Free agent vs on waivers comes from the import; when it was not captured (older imports, or the fallback list)
  * the player counts as on waivers (the safe assumption) with availability "unknown".
  */
@@ -404,6 +472,8 @@ export function importFreeAgents(
   db: PlayerDb,
   s: StoredImport,
   week: number,
+  /** The team the priority is for (the request's own team); none → no priority. */
+  teamId?: string,
 ): { freeAgents: { player: Player; onWaivers: boolean; availability: Availability }[]; myPriority?: number } {
   const rostered = new Set(league.teams.flatMap((t) => t.playerIds));
   const out: { player: Player; onWaivers: boolean; availability: Availability }[] = [];
@@ -419,7 +489,7 @@ export function importFreeAgents(
   } else {
     for (const p of draftBoard(db.players.values())) if (!rostered.has(p.id)) out.push({ player: p, onWaivers: true, availability: "unknown" });
   }
-  return { freeAgents: out, myPriority: s.waiverPriority };
+  return { freeAgents: out, myPriority: waiverPriorityOf(s, teamId) };
 }
 
 /** Paste mode: add or replace teams (matched by name, case-insensitive) in an existing import. */
@@ -427,7 +497,8 @@ export function mergeTeams(s: StoredImport, incoming: ImportTeamRaw[]): StoredIm
   const teams = [...s.teams];
   for (const t of incoming) {
     const i = teams.findIndex((x) => x.name.toLowerCase() === t.name.toLowerCase());
-    if (i >= 0) teams[i] = { ...t, id: teams[i].id, owner: teams[i].owner };
+    // A paste carries a roster only: the team keeps its id, owner and standings.
+    if (i >= 0) teams[i] = { ...teams[i], ...t, id: teams[i].id, owner: teams[i].owner };
     else {
       let n = teams.length + 1;
       while (teams.some((x) => x.id === String(n))) n++;
@@ -599,7 +670,9 @@ export function upsertImport(existing: StoredImport, incoming: StoredImport): { 
     settingsSource: takeNewSettings ? incoming.settingsSource : existing.settingsSource,
   };
   if (base.tradeDeadlineWeek) next.tradeDeadlineWeek = base.tradeDeadlineWeek;
-  const wp = existing.waiverPriority ?? incoming.waiverPriority;
+  // A hand-entered priority (settingsSource "user") is kept; otherwise a freshly captured one replaces the old copy.
+  const capturedNow = incoming.waiverPriority !== undefined && existing.settingsSource !== "user";
+  const wp = capturedNow ? incoming.waiverPriority : existing.waiverPriority ?? incoming.waiverPriority;
   if (wp) next.waiverPriority = wp;
   // My team: the previously chosen team, found by name when Yahoo's team ids changed.
   const oldMine = existing.myTeamId ? existing.teams.find((t) => t.id === existing.myTeamId) : undefined;

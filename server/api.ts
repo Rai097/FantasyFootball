@@ -257,9 +257,10 @@ async function freeAgentInputs(
     myPriority = d.myPriority;
   } else if (provider === "import") {
     const stored = await mustReadImport(id);
-    const d = importFreeAgents(l.league, l.db, stored, l.league.settings.currentWeek);
+    // Priority: the team's own place in the captured waiver order, else the importer's stored number (their team only).
+    const d = importFreeAgents(l.league, l.db, stored, l.league.settings.currentWeek, team);
     fas = d.freeAgents;
-    myPriority = team === mine ? d.myPriority : undefined;
+    myPriority = d.myPriority;
   } else {
     const y = await yahoo.getFreeAgents(l.db, id, { refresh });
     fas = y.freeAgents;

@@ -146,13 +146,30 @@ export interface LeagueSettings {
   faabBudget?: number;
 }
 
+export interface TeamRecord {
+  wins: number;
+  losses: number;
+  ties: number;
+  pointsFor?: number;
+  pointsAgainst?: number;
+  /** Standings rank (1 = first). */
+  rank?: number;
+  /** Current streak as Yahoo shows it, e.g. "W3" / "L1". */
+  streak?: string;
+  /** Playoff seed, when the standings page shows one. */
+  seed?: number;
+}
+
 export interface Team {
   id: string;
   name: string;
   owner: string;
   playerIds: string[]; // internal player ids
   unmatched: string[]; // names we could not map to our player db
-  record?: { wins: number; losses: number; ties: number; pointsFor?: number };
+  /** Season record. Points and the extras are absent when the source did not show them (unknown, never 0). */
+  record?: TeamRecord;
+  /** Place in the league's rolling waiver order (1 = first claim), when the import captured it. */
+  waiverRank?: number;
   /** Players currently parked in an IR/IL slot (never suggested as drops). */
   irPlayerIds?: string[];
   /** Remaining FAAB budget, when the league uses FAAB. */
