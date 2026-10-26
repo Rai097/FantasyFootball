@@ -59,6 +59,7 @@ test("D: riser = snaps +12 pts and expected +2 (new high, not already full-time,
   assert.equal(love.riser, true);
   assert.ok(Math.abs(love.ppg - (0.7 * 8 + 0.3 * level)) < 0.01);
   assert.match(love.why, /Riser/);
+  assert.ok(love.whyItems?.some((d) => d.label === "Riser") && love.whyItems.some((d) => d.label === "Riser ppg"), "riser bullets");
   attachRisers(players, S);
   assert.ok(Math.abs(love.ppg - (0.7 * 8 + 0.3 * level)) < 0.01, "idempotent");
 });

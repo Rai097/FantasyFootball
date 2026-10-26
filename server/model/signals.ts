@@ -75,6 +75,12 @@ export function attachRisers(players: Map<string, ValuedPlayer>, S: LeagueSettin
     const ratio = ppg / p.ppg;
     p.riser = true;
     p.why += ` Riser: snaps ${r.roleTrend >= 0 ? "+" : ""}${Math.round(r.roleTrend * 100)} pts, expected pts ${r.oppTrend >= 0 ? "+" : ""}${r1(r.oppTrend)} last week; ppg ${r1(p.ppg)} → ${r1(ppg)} (30% last-2-week expected ${r1(r.oppLevel)}).`;
+    const sg = (x: number) => (x >= 0 ? "+" : "");
+    p.whyItems = [
+      ...(p.whyItems ?? []),
+      { label: "Riser", value: `snaps ${sg(r.roleTrend)}${Math.round(r.roleTrend * 100)} pts, expected pts ${sg(r.oppTrend)}${r1(r.oppTrend)} last week` },
+      { label: "Riser ppg", value: `${r1(p.ppg)} → ${r1(ppg)} (30% of last-2-week expected ${r1(r.oppLevel)})` },
+    ];
     p.ppg = r2(ppg);
     if (p.effPpg !== undefined) p.effPpg = r2(p.effPpg * ratio);
   }

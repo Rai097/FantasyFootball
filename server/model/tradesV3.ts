@@ -1,6 +1,6 @@
 // Trade Finder v3: market-value packages that another manager would actually send or accept.
 // Perceived value = FantasyCalc market (fallback: our value); true value = our model. See docs/DESIGN.md "Trade finder v3".
-import type { FairnessBand, LeagueSettings, Position, SlotKind, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
+import type { DetailItem, FairnessBand, LeagueSettings, Position, SlotKind, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
 import { FLEX_SLOTS, effPpg, eligible, optimalLineup, slotLabels, usable, type LineupResult } from "./lineup.js";
 import { applyTrade, combos, fmtSigned, lineupChanges, names, tradeDeadlinePassed, type TradeContext } from "./trades.js";
 import { state2, type State2 } from "./tradesV2.js";
@@ -9,6 +9,7 @@ import { riskAdjusted } from "./injuryRisk.js";
 import { injuryKind } from "./projection.js";
 import { edgeOf, marketOf, trueOf, type ValueSource } from "./market.js";
 import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";
+import { detailBuilder, makeSummary, toneOf } from "./details.js";
 
 /** Config for Trade Finder v3 (architect's design after user feedback on v2). */
 export const V3 = {
@@ -266,17 +267,23 @@ export function complementarity(me: TeamV3, them: TeamV3): number {
 
 const GROUP_NAME: Record<Group, string> = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", FLEX: "FLEX" };
 
-export function partnerPitch(me: TeamV3, them: TeamV3): string {
-  const bits: string[] = [];
-  if (them.weakest && them.weakest.deficit > 0.02) bits.push(`${them.team.name}'s weakest spot is ${them.weakest.slot} (${GROUP_NAME[them.weakest.group]} ${Math.round(them.weakest.deficit * 100)}% below league average)`);
-  const mySpare = (["RB", "WR", "TE"] as const).filter((p) => me.surplus[p] > 0.5).sort((a, b) => me.surplus[b] - me.surplus[a]);
-  const theirSpare = (["RB", "WR", "TE"] as const).filter((p) => them.surplus[p] > 0.5).sort((a, b) => them.surplus[b] - them.surplus[a]);
-  if (mySpare.length) bits.push(`you have spare ${mySpare[0]} depth (${me.surplusNames[mySpare[0]].slice(0, 2).join(", ")})`);
-  if (theirSpare.length) bits.push(`they have spare ${theirSpare[0]} depth (${them.surplusNames[theirSpare[0]].slice(0, 2).join(", ")})`);
-  if (me.weakest && me.weakest.deficit > 0.02) bits.push(`your weakest spot is ${me.weakest.slot}`);
-  if (!bits.length) return `Little overlap between your needs and ${them.team.name}'s.`;
-  const t = bits.join("; ");
-  return `${t[0].toUpperCase()}${t.slice(1)}.`;
+/** Best-fit partner row: a ≤ 255-char summary (their need, then what either side has spare) + one item per fact. */
+export function partnerCard(me: TeamV3, them: TeamV3, fit: number): { summary: string; details: DetailItem[] } {
+  const { items, add } = detailBuilder();
+  const spare = (t: TeamV3) => (["RB", "WR", "TE"] as const).filter((p) => t.surplus[p] > 0.5).sort((a, b) => t.surplus[b] - t.surplus[a]);
+  const mySpare = spare(me);
+  const theirSpare = spare(them);
+  const need = them.weakest && them.weakest.deficit > 0.02 ? them.weakest : null;
+  const mine = me.weakest && me.weakest.deficit > 0.02 ? me.weakest : null;
+  if (need) add("Their weakest spot", `${need.slot}: ${GROUP_NAME[need.group]} ${Math.round(need.deficit * 100)}% below league average`);
+  if (mySpare.length) add("Your spare depth", `${mySpare[0]}: ${me.surplusNames[mySpare[0]].slice(0, 2).join(", ")}`);
+  if (theirSpare.length) add("Their spare depth", `${theirSpare[0]}: ${them.surplusNames[theirSpare[0]].slice(0, 2).join(", ")}`);
+  if (mine) add("Your weakest spot", mine.slot);
+  add("Fit score", `${fit.toFixed(1)} (their needs × your surplus, and the reverse)`);
+  const lead = need ? `Needs help at ${need.slot} (${Math.round(need.deficit * 100)}% below average).` : "No clear weak spot.";
+  const offer = [mySpare.length ? `you have spare ${mySpare[0]}` : "", theirSpare.length ? `they have spare ${theirSpare[0]}` : ""].filter(Boolean).join(", ");
+  const action = offer ? `${offer[0].toUpperCase()}${offer.slice(1)}.` : "Little overlap between your needs and theirs.";
+  return { summary: makeSummary(lead, action), details: items };
 }
 
 // ---------------------------------------------------------------- judging one package
@@ -309,9 +316,9 @@ export interface Judged3 {
   losesTheirTop: boolean;
   score: number;
   edgeSum: number;
-  /** v3.1 tags (overlap, stack, slot downgrade, thin, riser) and why-notes. */
+  /** v3.1 tags (overlap, stack, slot downgrade, thin, riser) and their details items. */
   tags31: string[];
-  why31: string[];
+  items31: DetailItem[];
   /** Slot-loss penalty subtracted from myDelta (≥ 0). */
   slotPenalty: number;
   /** A received player shares NFL team + group with one of my players (kept out of the main list). */
@@ -327,7 +334,7 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
   const repl = ctx.replacement;
   return (give: ValuedPlayer[], get: ValuedPlayer[]): Judged3 => {
     const tags31: string[] = [];
-    const why31: string[] = [];
+    const items31: DetailItem[] = [];
     let overlap = false;
     // A: same-NFL-team overlap / stacks, judged against each receiver's remaining core.
     const myCore = my.core.filter((p) => !give.includes(p));
@@ -372,15 +379,18 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
           }
         }
       });
-      if (slotPenalty > 0) why31.push(`Slot loss aversion: −${slotPenalty.toFixed(1)} (a starting slot losing ≥ ${V3.slotLossMin} ppg counts ×1.5${tags31.some((t) => t.startsWith("thin")) ? "; −1.0 for being thin with an injured replacement" : ""}).`);
+      if (slotPenalty > 0) {
+        items31.push({ label: "Slot loss", value: `−${slotPenalty.toFixed(1)}: a starter losing ≥ ${V3.slotLossMin} ppg counts ×1.5`, tone: "neg" });
+        if (tags31.some((t) => t.startsWith("thin"))) items31.push({ label: "Thin", value: `−${V3.thinPenalty.toFixed(1)}: thin at the spot, with an injured replacement`, tone: "neg" });
+      }
     }
     const myDelta = combine(myParts, MODE_WEIGHTS[mode]) - slotPenalty;
     const theirLineup = theirParts.season;
 
     // D: selling a riser means selling upside: his value counts ×1.15 on the giving side.
     const riserUp = (v: (p: ValuedPlayer) => number) => (p: ValuedPlayer) => v(p) * (p.riser ? V3.riserPremium : 1);
-    for (const p of give) if (p.riser) why31.push(`${p.name} is a riser: his value counts ×${V3.riserPremium} in what you give (you sell upside).`);
-    for (const p of get) if (p.riser) why31.push(`${p.name} is a riser: ${their.team.name} values him ×${V3.riserPremium}.`);
+    for (const p of give) if (p.riser) items31.push({ label: "Riser you give", value: `${p.name}: counts ×${V3.riserPremium} (you sell upside)` });
+    for (const p of get) if (p.riser) items31.push({ label: "Riser you get", value: `${p.name}: they value him ×${V3.riserPremium}` });
     const marketGive = packageValue(give.map(marketOf));
     const marketGet = packageValue(get.map(riserUp(marketOf)));
     const trueGive = packageValue(give.map(riserUp(trueOf)));
@@ -433,7 +443,7 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     return {
       give, get, myParts, theirParts, myDrops: me.drops, theirDrops: th.drops, myDelta, theirLineup,
       marketGive, marketGet, trueGive, trueGet, fairness, theirMarketChange, myTrueChange, bestToMe, premiumOk,
-      myOk: !myFail, partnerOk: !theirFail, acceptance, fixesWorst, losesTheirTop, score, edgeSum, myFail, theirFail, tags31, why31, slotPenalty, overlap,
+      myOk: !myFail, partnerOk: !theirFail, acceptance, fixesWorst, losesTheirTop, score, edgeSum, myFail, theirFail, tags31, items31, slotPenalty, overlap,
     };
   };
 }
@@ -463,22 +473,23 @@ function edgeTags(j: Judged3): string[] {
   return tags;
 }
 
-function byeNotes(S: LeagueSettings, j: Judged3, myAfter: LineupResult): string[] {
-  const notes: string[] = [];
+/** Bye-overlap and playoff-week bye facts, one item each. */
+function byeItems(S: LeagueSettings, j: Judged3, myAfter: LineupResult): DetailItem[] {
+  const out: DetailItem[] = [];
   const starters = myAfter.lineup.map((l) => l.player).filter((p): p is ValuedPlayer => !!p && p.pos !== "K" && p.pos !== "DEF");
   for (const p of j.get) {
     if (p.bye === undefined || p.bye < S.currentWeek) continue;
     const same = starters.filter((s) => s.id !== p.id && s.bye === p.bye);
-    if (same.length >= 2) notes.push(`Bye overlap: ${p.name}'s week ${p.bye} bye lines up with ${same.map((s) => s.name).join(", ")}.`);
+    if (same.length >= 2) out.push({ label: "Bye overlap", value: `${p.name} (week ${p.bye}) with ${same.map((s) => s.name).join(", ")}`, tone: "warn" });
   }
   const po0 = S.regularSeasonEnd + 1;
   const inPO = (p: ValuedPlayer) => p.bye !== undefined && p.bye >= po0 && p.bye <= S.finalWeek;
   const poGet = j.get.filter(inPO);
   const poGive = j.give.filter(inPO);
-  if (poGet.length) notes.push(`Playoffs: ${poGet.map((p) => `${p.name} is on bye in week ${p.bye}`).join("; ")}.`);
-  if (poGive.length) notes.push(`Playoffs: you move ${poGive.map((p) => `${p.name}'s week ${p.bye} bye`).join(", ")}.`);
-  if (!poGet.length && !poGive.length) notes.push(`No playoff-week (${po0}–${S.finalWeek}) byes involved; your playoff lineup ${fmtSigned(j.myParts.playoffs)} pts/week.`);
-  return notes;
+  for (const p of poGet) out.push({ label: "Playoff bye", value: `${p.name}: week ${p.bye}`, tone: "warn" });
+  for (const p of poGive) out.push({ label: "Playoff bye you move", value: `${p.name}: week ${p.bye}`, tone: "pos" });
+  if (!poGet.length && !poGive.length) out.push({ label: "Playoff byes", value: `None in weeks ${po0}–${S.finalWeek}` });
+  return out;
 }
 
 function tradePitch(j: Judged3, their: TeamV3): string {
@@ -493,13 +504,14 @@ function tradePitch(j: Judged3, their: TeamV3): string {
   return `${Deal} — fair by market value; ${gains}.`;
 }
 
-function qbNote(my: TeamV3, their: TeamV3, give: ValuedPlayer[], get: ValuedPlayer[]): string[] | null {
+/** "QB rule" items when a QB moves (null when none does); used for trade and bench-upgrade cards. */
+function qbItems(my: TeamV3, their: TeamV3, give: ValuedPlayer[], get: ValuedPlayer[]): DetailItem[] | null {
   const qbs = [...give, ...get].filter((p) => p.pos === "QB");
   if (!qbs.length) return null;
   return qbs.map((q) => {
     const [from, to] = give.includes(q) ? [my, their] : [their, my];
     const ok = qbTradeable(from.roster, to.roster)?.id === q.id;
-    return `QB rule: ${q.name} is ${from.team.name}'s second QB (QB${qbRank(q)}, both top-${V3.qbDepthRank}) and ${to.team.name}'s best QB ranks ${bestQbRank(to.roster)} (> ${V3.qbNeedRank}) → ${ok ? "allowed" : "NOT allowed"}.`;
+    return { label: "QB rule", value: `${q.name} ${ok ? "allowed" : "NOT allowed"}: spare QB${qbRank(q)}, receiver's best is QB${bestQbRank(to.roster)}`, ...(ok ? {} : { tone: "warn" as const }) };
   });
 }
 
@@ -525,22 +537,31 @@ function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, m
   if (give.some((p) => p.pos === "QB") || get.some((p) => p.pos === "QB")) tags.push("spare starting QB");
   if (j.losesTheirTop) tags.push("asks for their best player");
   if (j.theirLineup > 0 && j.myParts.season > 0) tags.push("helps both");
-  const summary = `Give ${names(give)} to ${their.team.name} for ${names(get)}: your team ${fmtSigned(j.myDelta)} (${mode}), their lineup ${fmtSigned(j.theirLineup)} pts/week; ${band.label}; ~${p100}% accept.`;
-  const why =
-    (j.why31.length ? `${j.why31.join(" ")} ` : "") +
-    `Market package values (best + 0.85·2nd + 0.70·3rd): you give ${j.marketGive.toFixed(1)}, get ${j.marketGet.toFixed(1)}` +
-    (them.drops?.length ? `; they must cut ${them.drops.map((p) => p.name).join(", ")} (drop cost counted)` : "") +
-    (me.drops?.length ? `; you cut ${me.drops.map((p) => p.name).join(", ")}` : "") +
-    `. Fairness to them ${j.fairness.toFixed(2)} (${band.label}). True value (our model): you give ${j.trueGive.toFixed(1)}, get ${j.trueGet.toFixed(1)} → ${fmtSigned(j.myTrueChange)}.` +
-    ` Your roster score ${fmtSigned(j.myDelta)} (${mode}: now ${fmtSigned(j.myParts.now)}, season ${fmtSigned(j.myParts.season)}, playoffs ${fmtSigned(j.myParts.playoffs)}, depth ${fmtSigned(j.myParts.depth)}).` +
-    (me.lineupChanges.length ? ` Your lineup: ${me.lineupChanges.join("; ")}.` : "") +
-    ` ${their.team.name}: weekly lineup ${fmtSigned(j.theirLineup)} pts (our projections)` +
-    (them.lineupChanges.length ? `; ${them.lineupChanges.join("; ")}` : "") +
-    `. Acceptance ${p100}% = logistic(${((j.fairness - 1) * 100).toFixed(1)}% edge)` +
-    (give.length > get.length ? ` × ${V3.extraPlayerMult}^${give.length - get.length} (extra players)` : "") +
-    (j.losesTheirTop ? ` × ${V3.loseTopMult} (their best player)` : "") +
-    (j.fixesWorst ? ` × ${V3.fixesWorstMult} (fixes their weakest slot)` : "") +
-    `; score = min(your gain, their gain + ${V3.margin}) × acceptance${j.fairness > 1 + V3.slightBand ? " ÷ overpay penalty" : ""} = ${j.score.toFixed(2)}.`;
+  const summary = makeSummary(
+    `${names(give)} for ${names(get)}: your team ${fmtSigned(j.myDelta)}, their lineup ${fmtSigned(j.theirLineup)} pts/wk.`,
+    `${band.label}, ~${p100}% accept.`,
+  );
+  const { items: details, add } = detailBuilder();
+  add("Your team score", `${fmtSigned(j.myDelta)} (${mode} mode)`, toneOf(j.myDelta));
+  add("Now", `${fmtSigned(j.myParts.now)} pts this week`, toneOf(j.myParts.now));
+  add("Season", `${fmtSigned(j.myParts.season)} pts/wk rest of season`, toneOf(j.myParts.season));
+  add("Playoffs", `${fmtSigned(j.myParts.playoffs)} pts/wk in weeks ${S.regularSeasonEnd + 1}–${S.finalWeek}`, toneOf(j.myParts.playoffs));
+  add("Depth", `${fmtSigned(j.myParts.depth)} (bench above replacement)`, toneOf(j.myParts.depth));
+  for (const d of j.items31) add(d.label, d.value, d.tone);
+  add("Their weekly lineup", `${fmtSigned(j.theirLineup)} pts (our projections)`, toneOf(j.theirLineup));
+  add("Market: you give", j.marketGive.toFixed(1));
+  add("Market: you get", j.marketGet.toFixed(1));
+  if (them.drops?.length) add("They must cut", them.drops.map((p) => p.name).join(", "));
+  if (me.drops?.length) add("You cut", me.drops.map((p) => p.name).join(", "));
+  add("Fairness to them", `${j.fairness.toFixed(2)}: ${band.label}`);
+  add("True value (ours)", `give ${j.trueGive.toFixed(1)}, get ${j.trueGet.toFixed(1)} (${fmtSigned(j.myTrueChange)})`, toneOf(j.myTrueChange));
+  add("Acceptance", `${p100}% from their ${fmtSigned((j.fairness - 1) * 100)}% market edge`);
+  if (give.length > get.length) add("Extra players", `× ${V3.extraPlayerMult} per extra player they must roster`);
+  if (j.losesTheirTop) add("Their best player", `× ${V3.loseTopMult}: you ask for their market #1`);
+  if (j.fixesWorst) add("Fixes their weakest slot", `× ${V3.fixesWorstMult}`);
+  for (const d of byeItems(S, j, meAfter.lineup)) add(d.label, d.value, d.tone);
+  for (const d of qbItems(my, their, give, get) ?? []) add(d.label, d.value, d.tone);
+  add("Rank score", `${j.score.toFixed(2)} = min(your gain, theirs + ${V3.margin}) × acceptance`);
   return {
     key,
     me,
@@ -549,14 +570,13 @@ function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, m
     acceptance: r3(j.acceptance),
     score: r3(j.score),
     summary,
+    details,
     tags,
-    why,
     mode,
     band: band.band,
     bandLabel: band.label,
     fairnessPct: band.pct,
     pitch: tradePitch(j, their),
-    notes: [...byeNotes(S, j, meAfter.lineup), ...(qbNote(my, their, give, get) ?? [])],
     packages: { marketGive: r1(j.marketGive), marketGet: r1(j.marketGet), trueGive: r1(j.trueGive), trueGet: r1(j.trueGet), myTrueChange: r1(j.myTrueChange), theirMarketChange: r1(j.theirMarketChange) },
   };
 }
@@ -661,7 +681,7 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
   const valueSource = opts.valueSource ?? "model";
   const S = ctx.league.settings;
   if (tradeDeadlinePassed(ctx.league)) {
-    return { trades: [], smallerEdges: [], nearMisses: [], mode, valueSource, partners: [], summary: `The trade deadline (week ${S.tradeDeadlineWeek}) has passed, so there are no trades to suggest.`, simulated: 0 };
+    return { trades: [], smallerEdges: [], nearMisses: [], mode, valueSource, partners: [], summary: `The trade deadline (week ${S.tradeDeadlineWeek}) has passed: no trades to suggest.`, summaryDetails: [], simulated: 0 };
   }
   const maxGive = Math.max(1, Math.min(3, opts.maxGive ?? 2));
   const maxGet = Math.max(1, Math.min(2, opts.maxGet ?? 2));
@@ -671,7 +691,7 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
   const ranked = others
     .map((their) => ({ their, c: complementarity(my, their) }))
     .sort((a, b) => b.c - a.c || a.their.team.id.localeCompare(b.their.team.id));
-  const partners = ranked.map((r) => ({ teamId: r.their.team.id, complementarity: r.c, pitch: partnerPitch(my, r.their) }));
+  const partners = ranked.map((r) => ({ teamId: r.their.team.id, complementarity: r.c, ...partnerCard(my, r.their, r.c) }));
 
   const cands: Cand[] = [];
   let simulated = 0;
@@ -706,34 +726,41 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
   const smallerEdges = edgesC.map(build);
   const nearMisses = nmC.map((c) => {
     const t = build(c);
-    return { ...t, reason: reasonOf(c), tags: [...t.tags, c.cls === "marginal" ? "marginal" : "they'd likely refuse"] };
+    const reason = makeSummary(reasonOf(c));
+    return { ...t, reason, details: [{ label: "Why not on the list", value: c.cls === "marginal" ? "Marginal for you" : c.cls === "unlikely" ? "Unlikely to accept" : "They'd likely refuse" }, ...(t.details ?? [])], tags: [...t.tags, c.cls === "marginal" ? "marginal" : "they'd likely refuse"] };
   });
-  const summary = summarize(my, ranked, trades, smallerEdges, valueSource, mode);
-  return { trades, smallerEdges, nearMisses, mode, valueSource, partners, summary, simulated };
+  const { summary, details: summaryDetails } = summarize(my, ranked, trades, smallerEdges, valueSource, mode);
+  return { trades, smallerEdges, nearMisses, mode, valueSource, partners, summary, summaryDetails, simulated };
 }
 
-function summarize(my: TeamV3, ranked: { their: TeamV3; c: number }[], trades: Trade[], edges: Trade[], source: ValueSource, mode: TradeMode): string {
-  const src = source === "fantasycalc" ? "Perceived values are FantasyCalc market values" : "Market values are unavailable, so perceived values fall back to our model (edges are not shown)";
+/** Finder headline: one short line (≤ 255) + the reasons as items (shown on tap). */
+function summarize(my: TeamV3, ranked: { their: TeamV3; c: number }[], trades: Trade[], edges: Trade[], source: ValueSource, mode: TradeMode): { summary: string; details: DetailItem[] } {
+  const { items, add } = detailBuilder();
   const n = trades.length;
   const best = ranked.slice(0, 3).map((r) => r.their);
-  const weak = my.weakest && my.weakest.deficit > 0.02 ? ` Your weakest spot: ${my.weakest.slot}.` : "";
-  const fits = best.length ? ` Best fits: ${best.map((t) => t.team.name).join(", ")}.` : "";
-  if (n) {
-    return `${n} trade${n > 1 ? "s" : ""} another manager would plausibly accept in ${mode} mode${edges.length ? ` (+${edges.length} smaller edge${edges.length > 1 ? "s" : ""})` : ""}.${weak}${fits} ${src}.`;
-  }
-  // Empty main list: say why.
-  const why: string[] = [];
+  const weak = my.weakest && my.weakest.deficit > 0.02 ? my.weakest : null;
+  add("Mode", MODE_LABEL[mode]);
+  if (weak) add("Your weakest spot", weak.slot);
   const groups = my.analysis?.groups ?? {};
   const top3 = (["QB", "RB", "WR", "TE"] as const).filter((g) => groups[g] && groups[g].rank <= 3);
-  if (!weak) why.push(`your starters are at or above the league average at every slot${top3.length ? ` (top-3 at ${top3.join("/")})` : ""}, so few players would start for you`);
-  else if (top3.length) why.push(`your starters rank top-3 at ${top3.join("/")}; your weakest spot is ${my.weakest!.slot}`);
-  else why.push(`your weakest spot is ${my.weakest!.slot}`);
-  const topC = ranked[0]?.c ?? 0;
-  if (topC < 5) why.push("nobody has a bench surplus where you need help, and nobody needs what you have spare");
-  else why.push(`the best fit is ${ranked[0].their.team.name} (fit ${topC.toFixed(1)}), but no package there is fair by market value and raises both lineups`);
-  const txt = why.join("; ");
-  return `No ${mode} trade clears both sides' bars right now${edges.length ? ` (${edges.length} smaller edge${edges.length > 1 ? "s" : ""} below)` : ""}: ${txt}. See the best-fit partners and near misses for a plausible ask. ${src}.`;
+  if (top3.length) add("Your top-3 groups", top3.join(", "));
+  if (best.length) add("Best fits", best.map((t) => t.team.name).join(", "));
+  const edgesTxt = edges.length ? ` (+${edges.length} smaller edge${edges.length > 1 ? "s" : ""})` : "";
+  let summary: string;
+  if (n) summary = `${n} trade${n > 1 ? "s" : ""} another manager would plausibly accept${edgesTxt}.`;
+  else {
+    summary = `No ${mode === "balanced" ? "balanced" : MODE_LABEL[mode].toLowerCase()} trade clears both sides' bars right now${edgesTxt}.`;
+    if (!weak) add("Why none", "Your starters are at or above average at every slot");
+    const topC = ranked[0]?.c ?? 0;
+    if (topC < 5) add("Why none", "Nobody's surplus matches your needs, or needs your spare players");
+    else add("Why none", `No fair package with ${ranked[0].their.team.name} raises both lineups`);
+    add("Next step", "Check best-fit partners and near misses for a plausible ask");
+  }
+  add("Perceived values", source === "fantasycalc" ? "FantasyCalc market values" : "Our model (market values unavailable, no edges)");
+  return { summary: makeSummary(summary), details: items };
 }
+
+const MODE_LABEL: Record<TradeMode, string> = { now: "Win now", balanced: "Balanced", playoffs: "Playoffs" };
 
 // ---------------------------------------------------------------- evaluate
 
@@ -759,13 +786,13 @@ export function evaluateTradeV3(
   if (!give.length && !get.length) throw Object.assign(new Error("Trade must include at least one player"), { status: 400 });
   const j = judge3(ctx, my, their, mode)(give, get);
   const trade = buildTrade3(ctx, j, my, their, mode);
-  const notes: string[] = [];
+  const { items: pre, add } = detailBuilder();
   const qbOk = (p: ValuedPlayer, from: TeamV3, to: TeamV3) => p.pos !== "QB" || qbTradeable(from.roster, to.roster)?.id === p.id;
+  const QB_RULE = "QB rule (only a spare top-14 QB, to a team whose best QB ranks worse than 18)";
   const flagged = [
-    ...give.map((p) => [p, ineligibleReason(p, S, my.irIds) || (qbOk(p, my, their) ? "" : "QB rule (only a spare top-14 QB, to a team whose best QB ranks worse than 18)")] as const),
-    ...get.map((p) => [p, ineligibleReason(p, S, their.irIds) || (qbOk(p, their, my) ? "" : "QB rule (only a spare top-14 QB, to a team whose best QB ranks worse than 18)")] as const),
+    ...give.map((p) => [p, ineligibleReason(p, S, my.irIds) || (qbOk(p, my, their) ? "" : QB_RULE)] as const),
+    ...get.map((p) => [p, ineligibleReason(p, S, their.irIds) || (qbOk(p, their, my) ? "" : QB_RULE)] as const),
   ].filter(([, r]) => r);
-  if (flagged.length) notes.push(`Outside the finder's rules: ${flagged.map(([p, r]) => `${p.name} (${r})`).join("; ")}.`);
   let verdict: string;
   if (j.myOk && j.partnerOk) verdict = j.acceptance >= 0.5 ? "Accept" : "Accept if they will";
   else if (j.myOk) verdict = `They won't accept (${j.theirFail})`;
@@ -773,19 +800,20 @@ export function evaluateTradeV3(
   else verdict = "Decline";
   // The QB rule applies to hand-built trades too: a starting QB for a non-needy team is not a trade chip.
   if (flagged.some(([p, r]) => p.pos === "QB" && r.startsWith("QB rule"))) verdict = "Decline — QB rule";
-  notes.unshift(
-    `Verdict "${verdict}": ${trade.bandLabel}, ~${Math.round(j.acceptance * 100)}% accept. You: ${j.myOk ? `team ${fmtSigned(j.myDelta)}, true value ${fmtSigned(j.myTrueChange)}` : j.myFail}.`,
-  );
-  if (tradeDeadlinePassed(ctx.league)) notes.push("The trade deadline has passed.");
-  return { ...trade, why: `${notes.join(" ")} ${trade.why}`, verdict };
+  add("Verdict", verdict.replace(/ \(.*\)$/, ""), /^accept/i.test(verdict) ? "pos" : /decline/i.test(verdict) ? "neg" : "warn");
+  if (!j.myOk) add("For you", j.myFail, "neg");
+  if (!j.partnerOk) add("For them", j.theirFail, "neg");
+  for (const [p, r] of flagged) add("Outside the rules", `${p.name}: ${r.startsWith("QB rule") ? "QB rule" : r}`, "warn");
+  if (tradeDeadlinePassed(ctx.league)) add("Deadline", "The trade deadline has passed", "warn");
+  return { ...trade, details: [...pre, ...(trade.details ?? [])], verdict };
 }
 
 // ---------------------------------------------------------------- QB rule note / bench upgrades
 
-/** "QB rule: …" notes when a QB moves (null when none does); used for bench-upgrade cards. */
-export function qbRuleNote(ctx: TradeContext, myTeamId: string, partnerId: string, give: ValuedPlayer[], get: ValuedPlayer[]): string[] | null {
+/** "QB rule" items when a QB moves (null when none does); used for bench-upgrade cards. */
+export function qbRuleItems(ctx: TradeContext, myTeamId: string, partnerId: string, give: ValuedPlayer[], get: ValuedPlayer[]): DetailItem[] | null {
   if (![...give, ...get].some((p) => p.pos === "QB")) return null;
-  return qbNote(teamV3(ctx, myTeamId), teamV3(ctx, partnerId), give, get);
+  return qbItems(teamV3(ctx, myTeamId), teamV3(ctx, partnerId), give, get);
 }
 
 /**

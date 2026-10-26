@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { V2, evaluateTradeV2, findBenchUpgrades, findTradesV2, judge, nearMissClass, state2 } from "./tradesV2.js";
 import { acceptanceOf, fairnessOf, type TradeContext } from "./trades.js";
 import { analyzeTeams } from "./analysis.js";
-import { league, team, vp } from "./testkit.js";
+import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { League, ValuedPlayer } from "./types.js";
 
 const G = { remainingGames: 14 };
@@ -81,7 +81,7 @@ test("C: received injured players are risk-adjusted for me only", () => {
   assert.ok(Math.abs(out.sim.themDeltaRaw - ok.sim.themDeltaRaw) < 1e-9, "partner sees healthy projections");
   const ev = evaluateTradeV2(ctx, "me", "them", ["mRB3"], ["tWRout"]);
   assert.ok(ev.tags.includes("injury risk"));
-  assert.match(ev.why, /Risk-adjusted for Out \(tWRout ×0\.55\)/);
+  assert.match(ev.why!, /Risk-adjusted for Out \(tWRout ×0\.55\)/);
   assert.equal(ev.them.gives[0].ppg, 12.5, "UI keeps the healthy ppg");
 });
 
@@ -150,7 +150,10 @@ test("bench upgrades: 1-for-1, their bench player for my bench (or lowest starte
     assert.ok(!mySt.has(t.me.gives[0].id) || t.me.gives[0].id === lowest.id, `${t.key}: my starter`);
     assert.ok(t.fairness >= 0.9);
     assert.ok((t.me.seasonDelta ?? 0) > 0 || (t.me.playoffDelta ?? 0) > 0, t.key);
-    assert.ok(t.why.length > 20);
+    assert.equal(t.why, undefined, `${t.key}: bench upgrades carry details, not prose`);
+    assert.deepEqual(summaryProblems(t.summary), [], t.summary);
+    assert.ok((t.details ?? []).length >= 4, t.key);
+    assert.deepEqual(detailProblems(t.details ?? []), [], t.key);
   }
   for (let i = 1; i < ups.length; i++) assert.ok((ups[i - 1].me.scoreDelta ?? 0) >= (ups[i].me.scoreDelta ?? 0));
 });

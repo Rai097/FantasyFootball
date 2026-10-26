@@ -36,7 +36,7 @@ import { attachFloor, attachRisers } from "./model/signals.js";
 import { getPriorWeeks } from "./data/priorWeeks.js";
 import { findTrades } from "./model/trades.js";
 import { findBenchUpgrades } from "./model/tradesV2.js";
-import { benchUpgradeFilter, evaluateTradeV3, findTradesV3, qbRuleNote } from "./model/tradesV3.js";
+import { benchUpgradeFilter, evaluateTradeV3, findTradesV3, qbRuleItems } from "./model/tradesV3.js";
 import { attachMarket, marketQuery, type ValueSource } from "./model/market.js";
 import { parseMode } from "./model/rosterScore.js";
 import { rankWaivers, toWaiversResponse, type FreeAgentInput } from "./model/waivers.js";
@@ -44,7 +44,7 @@ import { findBreakouts, type MarketValue } from "./model/breakouts.js";
 import { getDepthChart } from "./data/depthCharts.js";
 import { getMarketData, pprBucket } from "./data/fantasycalc.js";
 import { errors as authErrors, pinnedTeam, scopeOf } from "./auth/guard.js";
-import type { Availability, BreakoutResult, League, Player, Trade, TradeFinderResult, ValuedPlayer, WaiverBreakout, WaiverTarget } from "./model/types.js";
+import type { Availability, BreakoutResponse, BreakoutResult, BreakoutTarget, CardPlayer, League, Player, Trade, TradeFinderResult, ValuedPlayer, ValueRow, WaiverBreakout, WaiverTarget } from "./model/types.js";
 
 const CACHE_TTL_MS = 60_000;
 
@@ -204,6 +204,37 @@ const isRefresh = (req: Request) => req.query.refresh === "1" || req.query.refre
 function relevantPlayers(l: Loaded): ValuedPlayer[] {
   const rostered = new Set(l.league.teams.flatMap((t) => t.playerIds));
   return [...l.ctx.players.values()].filter((p) => rostered.has(p.id) || p.value > 0 || p.ecrOverall !== undefined || p.ecrPos !== undefined);
+}
+
+/** GET /values row (types.ts ValueRow): only the rendered fields; edge unset when the market value is missing or estimated. */
+export function toValueRow(p: ValuedPlayer, ownerTeamId: string | undefined, withWhy = false): ValueRow {
+  const row: ValueRow = {
+    id: p.id, name: p.name, pos: p.pos, team: p.team, value: p.value, ppg: p.ppg, ppg26: p.ppg26, ppgExp26: p.ppgExp26,
+    games: p.games, posRank: p.posRank, rostered: ownerTeamId !== undefined,
+  };
+  if (ownerTeamId !== undefined) row.ownerTeamId = ownerTeamId;
+  if (p.injury) row.injury = p.injury;
+  if (p.ecrOverall !== undefined) row.ecrOverall = p.ecrOverall;
+  if (p.market !== undefined) row.market = p.market;
+  if (p.marketRank !== undefined) row.marketRank = p.marketRank;
+  if (p.marketEstimated) row.marketEstimated = true;
+  // Listed in the market (rank known) and not our estimate → a real edge; otherwise unknown ("—").
+  if (p.edge !== undefined && p.marketRank !== undefined && !p.marketEstimated) row.edge = p.edge;
+  if (withWhy && p.whyItems?.length) row.whyItems = p.whyItems;
+  return row;
+}
+
+/** The slim player for card rows (no weekly lines). */
+export function toCardPlayer(p: ValuedPlayer): CardPlayer {
+  const c: CardPlayer = { id: p.id, name: p.name, pos: p.pos, team: p.team, value: p.value, ppg: p.ppg };
+  if (p.injury) c.injury = p.injury;
+  if (p.whyItems?.length) c.whyItems = p.whyItems;
+  return c;
+}
+
+/** GET /breakouts response: prose thesis dropped (server-only), slim players. */
+export function toBreakoutResponse(r: BreakoutResult): BreakoutResponse {
+  return { how: r.how, targets: r.targets.map(({ thesis: _t, player, ...t }: BreakoutTarget) => ({ ...t, player: toCardPlayer(player) })) };
 }
 
 // ---------------------------------------------------------------- errors
@@ -368,7 +399,9 @@ apiRouter.get(
     const team = teamParam(req, l.league, provider);
     const players: Record<string, ValuedPlayer> = {};
     for (const p of relevantPlayers(l)) players[p.id] = p;
-    res.json({ league: leagueFor(req, provider, l.league), players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes, valueSource: l.valueSource });
+    const body = { league: leagueFor(req, provider, l.league), players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes, valueSource: l.valueSource };
+    // My Team still renders the prose `why` (release 5 moves it to bullets): leave the item copy out of this big payload.
+    res.type("application/json").send(JSON.stringify(body, (k, v) => (k === "whyItems" ? undefined : v)));
   }),
 );
 
@@ -437,8 +470,8 @@ apiRouter.get(
       await cached<Trade[]>(key, false, async () => {
         const ok = benchUpgradeFilter(l.ctx, team);
         return findBenchUpgrades(l.ctx, team, { mode, accept: (m, g, j, partnerId) => ok(m, g, j.sim.myParts.season, partnerId) }).map((t) => {
-          const qb = qbRuleNote(l.ctx, team, t.them.teamId, t.me.gives, t.them.gives);
-          return qb ? { ...t, notes: [...(t.notes ?? []), ...qb] } : t;
+          const qb = qbRuleItems(l.ctx, team, t.them.teamId, t.me.gives, t.them.gives);
+          return qb ? { ...t, details: [...(t.details ?? []), ...qb] } : t;
         });
       }),
     );
@@ -493,7 +526,7 @@ apiRouter.get(
     const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 30) || 30));
     const cheapOnly = req.query.cheap === "1" || req.query.cheap === "true";
     const key = `${provider}:${req.params.id}:breakouts:${team}:${pos}:${limit}:${cheapOnly ? 1 : 0}`;
-    const result = await cached<BreakoutResult>(key, refresh, async () => {
+    const result = await cached<BreakoutResponse>(key, refresh, async () => {
       const [depth, market, fa] = await Promise.all([
         getDepthChart(l.db.season),
         loadMarketValues(l.league).catch(() => null),
@@ -508,7 +541,7 @@ apiRouter.get(
         const w = rankWaivers({ ...l.ctx, league: fa.league }, team, fa.input, { myPriority: fa.myPriority, limit: fa.input.length, breakouts });
         waivers = new Map(w.freeAgents.map((x) => [x.id, x]));
       }
-      return findBreakouts({ league: l.league, players: l.ctx.players, teams: l.ctx.teams, myTeamId: team, depth, market, waivers, pos, limit, cheapOnly });
+      return toBreakoutResponse(findBreakouts({ league: l.league, players: l.ctx.players, teams: l.ctx.teams, myTeamId: team, depth, market, waivers, pos, limit, cheapOnly }));
     });
     res.json(result);
   }),
@@ -522,9 +555,15 @@ apiRouter.get(
     if (req.query.team) teamParam(req, l.league, provider); // validate only
     const owner = new Map<string, string>();
     for (const t of l.league.teams) for (const id of t.playerIds) owner.set(id, t.id);
+    // ?id=<player>: that one row with its value explanation (the Values "?" fetches it on tap, keeping the list small).
+    if (req.query.id) {
+      const p = l.ctx.players.get(String(req.query.id));
+      if (!p) throw new HttpError(404, `Unknown player "${req.query.id}"`);
+      return res.json([toValueRow(p, owner.get(p.id), true)]);
+    }
     const rows = relevantPlayers(l)
       .sort((a, b) => b.value - a.value || b.ppg - a.ppg || a.name.localeCompare(b.name))
-      .map((p) => ({ ...p, ownerTeamId: owner.get(p.id), rostered: owner.has(p.id) }));
+      .map((p) => toValueRow(p, owner.get(p.id)));
     res.json(rows);
   }),
 );

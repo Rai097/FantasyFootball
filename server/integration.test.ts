@@ -184,10 +184,12 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     for (const pos of ["QB", "RB", "WR", "TE", "K", "DEF"]) assert.ok(Number.isFinite(json.replacement[pos]), `replacement.${pos}`);
   });
 
-  test("GET values: sorted, top ≈ 100", async () => {
+  test("GET values: sorted, top ≈ 100, slim rows (< 250 KB), Edge only when the market lists him, bullets on ?id=", async () => {
     const { status, json } = await get(`${L}/values`);
     assert.equal(status, 200);
     assert.ok(json.length > 200);
+    const bytes = JSON.stringify(json).length;
+    assert.ok(bytes < 250_000, `values payload ${bytes} bytes (rows carry only what the tab renders)`);
     assertClean(json, "values");
     assert.ok(json[0].value >= 99 && json[0].value <= 100.05, `top value ${json[0].value}`);
     for (let i = 1; i < json.length; i++) assert.ok(json[i - 1].value >= json[i].value, "values not sorted");
@@ -195,18 +197,34 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     const withMarket = json.filter((p: any) => typeof p.market === "number");
     if (withMarket.length) {
       assert.ok(withMarket.some((p: any) => p.marketRank === 1 && p.market === 100), "market #1 = 100");
-      for (const p of withMarket) assert.ok(p.market >= 0 && p.market <= 100 && Number.isFinite(p.edge), `${p.name} market ${p.market}`);
+      for (const p of withMarket) assert.ok(p.market >= 0 && p.market <= 100, `${p.name} market ${p.market}`);
+      for (const p of withMarket) {
+        if (p.marketEstimated || p.marketRank === undefined) assert.equal(p.edge, undefined, `${p.name}: no edge without a real market value`);
+        else assert.ok(Number.isFinite(p.edge), `${p.name}: edge`);
+      }
     }
     for (const p of json.slice(0, 300)) {
-      assertValuedPlayer(p, "values");
+      for (const k of ["value", "ppg", "ppg26", "ppgExp26", "games", "posRank"]) assert.ok(Number.isFinite(p[k]), `${p.name}: ${k}=${p[k]}`);
+      assert.equal(typeof p.rostered, "boolean");
+      for (const k of ["weeks", "why", "whyItems", "prior", "snapShare", "ids"]) assert.equal(p[k], undefined, `${p.name}: ${k} must not be in the list`);
       assert.ok(p.value >= 0 && p.value <= 100.05, `${p.name} value ${p.value}`);
-      assert.ok(p.remainingGames >= 0, `${p.name} remainingGames ${p.remainingGames}`);
       assert.ok(p.ppg >= 0 && p.ppg < 40, `${p.name} ppg ${p.ppg}`);
       if (p.pos === "K" || p.pos === "DEF") assert.ok(p.value <= 15, `${p.pos} ${p.name} value ${p.value}`);
     }
     const rostered = json.filter((p: any) => p.rostered);
     assert.ok(rostered.length >= 12 * 15);
     assert.ok(rostered.every((p: any) => typeof p.ownerTeamId === "string"));
+    // The "?" bullets: one row with whyItems per tap; every item short and chain-free (all players of the demo league).
+    const rows = await Promise.all(json.map((p: any) => get(`${L}/values?id=${encodeURIComponent(p.id)}`)));
+    for (const [i, r] of rows.entries()) {
+      assert.equal(r.status, 200);
+      const one = r.json[0];
+      assert.equal(one.id, json[i].id);
+      assert.ok(Array.isArray(one.whyItems) && one.whyItems.length >= 3, `${one.name}: whyItems`);
+      assert.deepEqual(detailProblems(one.whyItems), [], one.name);
+      assert.ok(one.whyItems.some((d: any) => d.label === "Value"), `${one.name}: value line`);
+    }
+    assert.equal((await get(`${L}/values?id=nope`)).status, 404);
   });
 
   let trades: any[] = [];
@@ -288,7 +306,7 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
             assert.ok(p.pos !== "K" && p.pos !== "DEF", `${t.key}: ${p.pos}`);
             if (p.pos !== "QB") continue;
             assert.ok(ruleOk(p, from, to), `${t.key}: QB ${p.name} moves ${from}→${to} without the QB rule`);
-            assert.ok((t.notes ?? []).some((n: string) => n.startsWith("QB rule:") && /allowed/.test(n) && !/NOT allowed/.test(n)), `${t.key}: QB rule not logged`);
+            assert.ok((t.details ?? []).some((d: any) => d.label === "QB rule" && d.value.startsWith(`${p.name} allowed`)), `${t.key}: QB rule not logged`);
           }
         }
       }
@@ -315,7 +333,9 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.equal(lop.status, 200, JSON.stringify(lop.json));
     assertClean(lop.json, "evaluate");
     assert.ok(String(lop.json.verdict).startsWith("Decline"), lop.json.verdict);
-    assert.ok(lop.json.why.length > 0);
+    assert.equal(lop.json.details[0].label, "Verdict");
+    assert.deepEqual(detailProblems(lop.json.details), []);
+    assert.deepEqual(summaryProblems(lop.json.summary), [], lop.json.summary);
 
     // A v3 finder trade should evaluate to an accept verdict with its band and acceptance.
     const t = (await get(`${L}/trades2`)).json.trades[0];
@@ -367,9 +387,29 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.equal(json.mode, "balanced");
     assert.ok(["fantasycalc", "model"].includes(json.valueSource), `valueSource ${json.valueSource}`);
     assert.ok(Array.isArray(json.partners) && json.partners.length === 11);
-    for (const p of json.partners) assert.ok(typeof p.teamId === "string" && Number.isFinite(p.complementarity) && p.pitch.length > 10);
-    assert.equal(typeof json.summary, "string");
+    for (const p of json.partners) {
+      assert.ok(typeof p.teamId === "string" && Number.isFinite(p.complementarity), p.teamId);
+      assert.deepEqual(summaryProblems(p.summary), [], p.summary);
+      assert.ok(Array.isArray(p.details) && p.details.length > 0, `${p.teamId}: partner details`);
+      assert.deepEqual(detailProblems(p.details), [], p.teamId);
+      assert.equal(p.pitch, undefined, "partner prose pitch replaced by summary + details");
+    }
+    assert.deepEqual(summaryProblems(json.summary), [], json.summary);
     assert.ok(json.summary.length > 20);
+    assert.ok(Array.isArray(json.summaryDetails) && json.summaryDetails.length > 0);
+    assert.deepEqual(detailProblems(json.summaryDetails), []);
+    for (const t of [...json.trades, ...json.smallerEdges, ...json.nearMisses]) {
+      assert.deepEqual(summaryProblems(t.summary), [], `${t.key}: ${t.summary}`);
+      assert.ok(Array.isArray(t.details) && t.details.length >= 8, `${t.key}: details`);
+      assert.deepEqual(detailProblems(t.details), [], t.key);
+      assert.equal(t.why, undefined, `${t.key}: no prose why`);
+      assert.equal(t.notes, undefined, `${t.key}: notes moved into details`);
+      if (t.reason !== undefined) assert.deepEqual(summaryProblems(t.reason), [], t.reason);
+      for (const p of [...t.me.gives, ...t.them.gives]) {
+        assert.ok(Array.isArray(p.whyItems) && p.whyItems.length >= 3, `${t.key}: ${p.name} value bullets`);
+        assert.deepEqual(detailProblems(p.whyItems), [], `${t.key}: ${p.name}`);
+      }
+    }
     assert.ok(ms < 15_000, `trades2 took ${ms}ms`);
     const perPartner = new Map<string, number>();
     for (const t of json.trades) {
@@ -388,7 +428,6 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
       assert.ok(t.pitch.length > 20, t.key);
       assert.ok(["fair", "slightly-favors-them", "favors-them", "slightly-favors-you", "favors-you"].includes(t.band), `${t.key}: band ${t.band}`);
       assert.equal(typeof t.bandLabel, "string");
-      assert.ok(Array.isArray(t.notes) && t.notes.length > 0);
       perPartner.set(t.them.teamId, (perPartner.get(t.them.teamId) ?? 0) + 1);
     }
     for (const [id, n] of perPartner) assert.ok(n <= 2, `partner ${id}: ${n} trades`);
@@ -410,7 +449,9 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
       assert.equal(t.me.gives.length, 1);
       assert.equal(t.them.gives.length, 1);
       assert.ok(t.fairness >= 0.9);
-      assert.ok(t.why.length > 0);
+      assert.equal(t.why, undefined, `${t.key}: bench upgrades carry details, not prose`);
+      assert.deepEqual(summaryProblems(t.summary), [], t.summary);
+      assert.deepEqual(detailProblems(t.details), [], t.key);
       assert.ok((t.me.seasonDelta ?? 0) >= 0.75, `${t.key}: bench upgrade season ${t.me.seasonDelta}`);
       for (const p of [...t.me.gives, ...t.them.gives]) assert.ok((p.market ?? p.value) >= 3 && p.value >= 3, `${t.key}: worthless ${p.name}`);
     }
@@ -480,7 +521,10 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     const { status, json } = await get(`${L}/breakouts?limit=30`);
     assert.equal(status, 200);
     assertClean(json, "breakouts");
-    assert.ok(Array.isArray(json.notes) && json.notes.length > 0);
+    assert.ok(Array.isArray(json.how) && json.how.length > 0);
+    assert.deepEqual(detailProblems(json.how), []);
+    const bytes = JSON.stringify(json).length;
+    assert.ok(bytes < 250_000, `breakouts payload ${bytes} bytes`);
     assert.ok(json.targets.length >= 10, `only ${json.targets.length} breakout targets`);
     const league = (await get(L)).json;
     const mine = new Set(league.teams.find((t: any) => t.id === league.myTeamId).playerIds);
@@ -489,10 +533,14 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     for (const t of json.targets) {
       // Sorted by score within each tier (rising starters first, then stashes).
       if (t.tier !== tier) (tier = t.tier), (prev = Infinity);
-      assertValuedPlayer(t.player, "breakouts");
+      assert.ok(typeof t.player.name === "string" && Number.isFinite(t.player.value) && Number.isFinite(t.player.ppg), "breakouts: slim player");
+      assert.equal(t.player.weeks, undefined, `${t.player.name}: weekly lines must not be in the breakouts payload`);
+      assert.deepEqual(summaryProblems(t.summary), [], `${t.player.name}: ${t.summary}`);
+      assert.ok(Array.isArray(t.details) && t.details.length >= 8, `${t.player.name}: details`);
+      assert.deepEqual(detailProblems(t.details), [], t.player.name);
       assert.ok(["RB", "WR", "TE"].includes(t.player.pos), `${t.player.name}: ${t.player.pos}`);
       assert.ok(!mine.has(t.player.id), `${t.player.name} is on my roster`);
-      assert.ok(typeof t.thesis === "string" && t.thesis.length > 20, `${t.player.name}: thesis`);
+      assert.equal(t.thesis, undefined, `${t.player.name}: prose thesis is server-only`);
       assert.ok(t.where.type === "fa" || (t.where.type === "roster" && typeof t.where.teamName === "string"));
       assert.ok(typeof t.ask === "string" && t.ask.length > 0);
       assert.equal(t.snaps.length, t.weeks.length);
@@ -636,7 +684,8 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     assert.ok(fa, "an unrostered WR");
     const again = structuredClone(payload);
     const dropped = again.teams[1].players.pop();
-    again.teams[1].players.push({ yahooId: fa.ids?.yahoo, name: fa.name, pos: fa.pos, team: fa.team });
+    const faIds = (await get(`${base}/analysis`)).json.players[fa.id]?.ids;
+    again.teams[1].players.push({ yahooId: faIds?.yahoo, name: fa.name, pos: fa.pos, team: fa.team });
     const r = await post("/api/import", again);
     assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.equal(r.json.id, id);

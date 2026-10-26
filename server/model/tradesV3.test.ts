@@ -6,7 +6,7 @@ import {
   acceptanceV3,
   benchUpgradeFilter,
   benchUpgradeOk,
-  qbRuleNote,
+  qbRuleItems,
   bestQbRank,
   dropCost,
   evaluateTradeV3,
@@ -22,7 +22,7 @@ import {
 import type { TradeContext } from "./trades.js";
 import { analyzeTeams } from "./analysis.js";
 import { attachMarket } from "./market.js";
-import { league, team, vp } from "./testkit.js";
+import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { League, ValuedPlayer } from "./types.js";
 
 const G = { remainingGames: 14 };
@@ -163,7 +163,7 @@ test("drop cost: the side receiving more players nets the player it must cut (�
   assert.ok(Math.abs(j.theirMarketChange - (expected - 22)) < 1e-9);
 });
 
-test("finder: no K/DEF/backup QBs/waiver-level pieces; pitch, band and value source on every trade", () => {
+test("finder: no K/DEF/backup QBs/waiver-level pieces; pitch, band, summary, details and value source on every trade", () => {
   const r = findTradesV3(ctx, "me", { valueSource: "model", limit: 50 });
   const all = [...r.trades, ...r.smallerEdges, ...r.nearMisses];
   assert.ok(all.length > 0, "finds something");
@@ -179,7 +179,18 @@ test("finder: no K/DEF/backup QBs/waiver-level pieces; pitch, band and value sou
     }
     assert.ok(t.pitch && t.pitch.length > 20, t.key);
     assert.ok(t.band && t.bandLabel, t.key);
-    assert.ok(t.notes && t.notes.length > 0, t.key);
+    assert.deepEqual(summaryProblems(t.summary), [], t.summary);
+    assert.ok(t.details && t.details.length > 0, t.key);
+    assert.deepEqual(detailProblems(t.details!), [], t.key);
+    assert.ok(t.details!.some((d) => d.label === "Playoff byes" || /^Playoff bye/.test(d.label)), `${t.key}: playoff-bye fact`);
+    assert.equal(t.why, undefined, `${t.key}: no prose why on v3 trades`);
+  }
+  assert.deepEqual(summaryProblems(r.summary), [], r.summary);
+  assert.deepEqual(detailProblems(r.summaryDetails ?? []), []);
+  for (const p of r.partners ?? []) {
+    assert.deepEqual(summaryProblems(p.summary), [], p.summary);
+    assert.ok(p.details.length > 0);
+    assert.deepEqual(detailProblems(p.details), []);
   }
   for (const t of r.trades) {
     assert.ok((t.me.scoreDelta ?? 0) >= V3.clearDelta - 0.05, t.key);
@@ -201,9 +212,11 @@ test("evaluate: v3 verdict, band and acceptance; flags pieces outside the rules"
   assert.ok(ev.acceptance > 0 && ev.acceptance <= V3.accCap);
   assert.equal(typeof ev.verdict, "string");
   const k = evaluateTradeV3(ctx, "me", "them", ["mK"], ["tWR5"]);
-  assert.match(k.why, /Outside the finder's rules: mK/);
+  assert.ok(k.details!.some((d) => d.label === "Outside the rules" && /^mK: /.test(d.value)), JSON.stringify(k.details));
+  assert.equal(k.details![0].label, "Verdict");
+  assert.deepEqual(detailProblems(k.details!), []);
   const qb = evaluateTradeV3(ctx, "me", "them", ["mQB"], ["tWR3"]);
-  assert.match(qb.why, /QB rule/);
+  assert.ok(qb.details!.some((d) => d.value === "mQB: QB rule"), JSON.stringify(qb.details));
   assert.equal(qb.verdict, "Decline — QB rule");
 });
 
@@ -243,8 +256,9 @@ test("bench-upgrade filter applies eligibility and the QB rule", () => {
   assert.equal(ok(P("mK"), P("tWR4"), 2, "them"), false);
   assert.equal(ok(P("mRB4"), P("tWR4"), 2, "them"), true);
   assert.equal(ok(P("mQB"), P("tWR4"), 2, "them"), false, "my starting QB never moves");
-  const notes = qbRuleNote(ctx, "me", "them", [P("mQB2")], [P("tWR5")]);
-  assert.match(notes!.join(" "), /QB rule: mQB2 .* allowed/);
+  const items = qbRuleItems(ctx, "me", "them", [P("mQB2")], [P("tWR5")]);
+  assert.equal(items![0].label, "QB rule");
+  assert.match(items![0].value, /^mQB2 allowed/);
 });
 
 // ---------------------------------------------------------------- v3.1
@@ -284,7 +298,7 @@ test("v3.1 D: giving a riser costs ×1.15 in my true value and he is never tagge
   try {
     const j = J()([P("mRB3")], [P("tWR3")]);
     assert.ok(Math.abs(j.trueGive - plain.trueGive * 1.15) < 1e-9);
-    assert.ok(j.why31.some((w) => /riser/.test(w)));
+    assert.ok(j.items31.some((d) => d.label === "Riser you give" && /^mRB3/.test(d.value)));
     const ev = evaluateTradeV3(ctx, "me", "them", ["mRB3"], ["tWR3"]);
     assert.ok(ev.tags.includes("riser: mRB3"), ev.tags.join());
     assert.ok(!ev.tags.some((t) => t.startsWith("sell-high")), ev.tags.join());

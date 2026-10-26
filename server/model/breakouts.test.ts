@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findBreakouts, isPathStatus, lastVsEarlier, normalizer, roleMetrics, situationOf, suggestAsk, thesisOf } from "./breakouts.js";
+import { findBreakouts, howItems, isPathStatus, lastVsEarlier, normalizer, roleMetrics, situationOf, suggestAsk, thesisOf } from "./breakouts.js";
 import { DepthReducer, buildDepthChart } from "../data/depthCharts.js";
 import { analyzeTeams } from "./analysis.js";
 import { HALF_PPR } from "./scoring.js";
-import { league, line, team, vp } from "./testkit.js";
+import { detailProblems, league, line, summaryProblems, team, vp } from "./testkit.js";
 import type { ValuedPlayer, WeekLine } from "./types.js";
 
 const wk = (week: number, exp: number, act: number, opp?: WeekLine["opp"]): WeekLine => ({
@@ -153,6 +153,14 @@ test("findBreakouts: excludes my roster, established starters, QBs and long-term
   assert.equal(t.components.situation, 1);
   assert.match(t.thesis, /^RB2 behind Star RB \(Out, ankle\); snaps 20%→35%→55%;/);
   assert.match(t.ask ?? "", /^Offer myBN \(value 6\.0\)/); // 6 ≥ 0.9 × 3
+  assert.equal(t.summary, "RB2 behind Star RB (Out): 55% snaps (+28 pts), 10.5 expected pts/g lately. Offer myBN (value 6.0).");
+  for (const x of r.targets) {
+    assert.deepEqual(summaryProblems(x.summary), [], x.summary);
+    assert.deepEqual(detailProblems(x.details), [], x.player.id);
+  }
+  assert.ok(t.details.some((d) => d.label === "Ahead of him" && d.value === "Star RB (Out, ankle)"));
+  assert.ok(t.details.some((d) => d.label === "Snaps by week" && d.value === "20% → 35% → 55%"));
+  assert.ok(t.details.some((d) => d.label === "Suggested offer" && /^Offer myBN/.test(d.value)));
   const c = t.components.parts;
   assert.equal(t.score, Math.round(1000 * (c.roleTrend + c.oppTrend + c.oppLevel + c.gap + c.situation)) / 10);
   assert.equal(t.tier, "rising"); // 55% snaps / 10.5 exp pts last 2 weeks
@@ -201,4 +209,10 @@ test("snaps overrule a depth chart that lists a clear part-timer ahead", () => {
   const s2 = situationOf(t2, [t1, t2, t3, me], { byPlayer: new Map(), byTeamPos: new Map([["KC|TE", ["T1", "T2"]]]) }, roleMetrics(t2, HALF_PPR));
   assert.equal(s2.depthLabel, "TE2");
   assert.equal(s2.chartSays, undefined);
+});
+
+test("how-it's-scored items: one rule each, cheap rule follows the price source", () => {
+  assert.deepEqual(detailProblems(howItems(120, 20, null, true)), []);
+  assert.ok(howItems(120, 20, null, false).some((d) => d.label === "Cheap" && /Our value/.test(d.value)));
+  assert.ok(howItems(120, 20, null, true).some((d) => d.label === "Depth chart" && /Unavailable/.test(d.value)));
 });

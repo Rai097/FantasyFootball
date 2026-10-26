@@ -1,5 +1,5 @@
 // Rest-of-season value model. See docs/DESIGN.md "Value model" (+ architect amendments).
-import type { League, Player, Position, Scoring, SlotKind, ValuedPlayer } from "./types.js";
+import type { DetailItem, League, Player, Position, Scoring, SlotKind, ValuedPlayer } from "./types.js";
 import { SKILL_POSITIONS } from "./types.js";
 import { recFormat, score } from "./scoring.js";
 
@@ -338,6 +338,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
     return lo + 1;
   };
 
+  const backupQb = (posRank: number, value: number) => oneQb && posRank > S.numTeams && value < 3;
   const finalize = (b: Base, posRank: number): ValuedPlayer => {
     const p = b.p;
     const vorp = Math.max(0, b.ppg - replacement[p.pos]);
@@ -359,7 +360,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>): Valuation 
       posRank,
       remainingGames: r1(b.remainingGames),
       trend: r2(b.trend),
-      why: explain(b, replacement[p.pos], vorp, value, anchor, scale) + (oneQb && p.pos === "QB" && posRank > S.numTeams && value < 3 ? " Backup QB in a 1-QB league: ~0 trade value." : ""),
+      why: explain(b, replacement[p.pos], vorp, value, anchor, scale) + (p.pos === "QB" && backupQb(posRank, value) ? " Backup QB in a 1-QB league: ~0 trade value." : ""),
+      whyItems: [...explainItems(b, replacement[p.pos], vorp, value, anchor, scale), ...(p.pos === "QB" && backupQb(posRank, value) ? [{ label: "Backup QB", value: "~0 trade value in a 1-QB league" }] : [])],
     };
   };
 
@@ -401,6 +403,42 @@ interface Anchor {
   implied?: number;
   rank?: number;
   blended: number;
+}
+
+/**
+ * The same explanation as `explain`, as one short "label: value" item per fact (the UI's bullets; never a
+ * "·" / ";" chain). Built from the same numbers, so the two never disagree.
+ */
+function explainItems(b: Base, repl: number, vorp: number, value: number, anchor: Anchor, scale: number): DetailItem[] {
+  const p = b.p;
+  const f1 = (x: number) => x.toFixed(1);
+  const out: DetailItem[] = [];
+  const add = (label: string, v: string) => out.push({ label, value: v });
+  if (p.pos === "K" || p.pos === "DEF") {
+    const rank = b.ecrRank !== undefined ? `${p.pos}${Math.round(b.ecrRank)}` : `unranked ${p.pos}`;
+    add("Projection", `${f1(b.ppg)} ppg from experts' ${rank}`);
+  } else if (b.ecrPts === undefined && b.games <= 0 && !b.hasPrior) {
+    add("Projection", "0 ppg: no expert rank, 2026 or 2025 data");
+  } else {
+    add("Projection", `${f1(b.ppg)} ppg, a weighted blend of the lines below`);
+    if (b.ecrPts !== undefined) {
+      const lbl = b.ecrUnranked ? "unranked" : `${p.pos}${Math.round(b.ecrRank! * 10) / 10}`;
+      add("Experts (ECR)", `${lbl}: ${f1(b.ecrPts)} ppg, ${Math.round(b.wEcr * 100)}% weight`);
+    }
+    if (b.games > 0) add("2026 so far", `${f1(b.ppgExp26)} expected, ${f1(b.ppg26)} actual ppg in ${b.games} g (${Math.round(b.wCur * 100)}%)`);
+    if (b.hasPrior) add("2025", `${f1(b.ppg25)} ppg, ${Math.round(b.wPrior * 100)}% weight`);
+  }
+  add("Above replacement", `+${f1(vorp)} ppg over the ${p.pos} replacement (${f1(repl)})`);
+  add("Games left", `${Math.round(b.remainingGames * 10) / 10}`);
+  for (const n of b.gameNotes) add("Games note", n);
+  if (anchor.implied !== undefined && anchor.rank !== undefined) {
+    add("Model value", f1(anchor.model * scale));
+    add("Consensus", `#${Math.round(anchor.rank * 10) / 10} implies ${f1(anchor.implied * scale)} (${Math.round(CONSENSUS_WEIGHT * 100)}% weight)`);
+  }
+  add("Value", `${f1(value)} of 100`);
+  if (b.remainingGames > 0 && b.remainingGames < b.weeksLeft) add("Lineup ppg", `${f1(effPpgOf(b))} (${f1(b.ppg)} × ${Math.round(b.remainingGames * 10) / 10}/${b.weeksLeft} games)`);
+  if (b.injKind === "long" && p.pos !== "K" && p.pos !== "DEF") add("Injury", "Long-term: expert weight halved, missed games carry the penalty");
+  return out;
 }
 
 function explain(b: Base, repl: number, vorp: number, value: number, anchor: Anchor, scale: number): string {

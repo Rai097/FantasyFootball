@@ -1,6 +1,6 @@
 // Trade Finder v2: trades scored on the whole roster (this week, rest of season, playoffs,
 // bench depth), near misses, a summary line, and bench upgrades. See docs/DESIGN.md "Trade finder v2".
-import type { Team, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
+import type { DetailItem, Team, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
 import { effPpg, eligible, type LineupResult } from "./lineup.js";
 import {
   MAX_MY_VALUE_DROP,
@@ -26,6 +26,7 @@ import {
 } from "./trades.js";
 import { MODE_WEIGHTS, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
 import { INJURY_RISK, riskAdjusted, riskStatus } from "./injuryRisk.js";
+import { detailBuilder, makeSummary, toneOf } from "./details.js";
 
 export interface TradeOptionsV2 extends TradeOptions {
   mode?: TradeMode;
@@ -532,27 +533,32 @@ function summarize(ctx: TradeContext, my: State2, a: TeamAnalysis | undefined, t
 
 // ---------------------------------------------------------------- bench upgrades
 
-function upgradeWhy(ctx: TradeContext, j: Judged, mine: ValuedPlayer, theirs: ValuedPlayer, myBase: LineupResult): string {
+/** Bench-upgrade reasons and numbers, one short item each (shown on tap). */
+function upgradeItems(ctx: TradeContext, j: Judged, mine: ValuedPlayer, theirs: ValuedPlayer, myBase: LineupResult): DetailItem[] {
   const S = ctx.league.settings;
   const d = j.sim.myParts;
-  const bits: string[] = [];
-  if (theirs.ppg > mine.ppg + 0.2) bits.push(`${theirs.name} projects ${theirs.ppg.toFixed(1)} ppg rest of season vs ${mine.ppg.toFixed(1)} for ${mine.name}`);
-  if (theirs.trend >= 1) bits.push(`${theirs.name}'s usage is trending up (${fmtSigned(theirs.trend)} expected pts/game over the last 2 weeks)`);
-  if (theirs.games >= 2 && theirs.ppgExp26 - theirs.ppg26 >= 2) bits.push(`expected ${theirs.ppgExp26.toFixed(1)} > actual ${theirs.ppg26.toFixed(1)} ppg, due to bounce back`);
-  if (mine.trend <= -1) bits.push(`${mine.name}'s usage is fading (${fmtSigned(mine.trend)})`);
+  const { items, add } = detailBuilder();
+  if (theirs.ppg > mine.ppg + 0.2) add("Projection", `${theirs.ppg.toFixed(1)} vs ${mine.ppg.toFixed(1)} ppg rest of season`, "pos");
+  if (theirs.trend >= 1) add("Usage", `${theirs.name} trending up (${fmtSigned(theirs.trend)} expected pts/g)`, "pos");
+  if (theirs.games >= 2 && theirs.ppgExp26 - theirs.ppg26 >= 2) add("Bounce-back", `${theirs.name}: ${theirs.ppgExp26.toFixed(1)} expected > ${theirs.ppg26.toFixed(1)} actual ppg`, "pos");
+  if (mine.trend <= -1) add("Usage", `${mine.name} fading (${fmtSigned(mine.trend)} expected pts/g)`, "neg");
   const inPO = (p: ValuedPlayer) => p.bye !== undefined && p.bye > S.regularSeasonEnd && p.bye <= S.finalWeek;
-  if (inPO(mine) && !inPO(theirs)) bits.push(`${mine.name} has a playoff bye (week ${mine.bye})`);
+  if (inPO(mine) && !inPO(theirs)) add("Playoff bye", `${mine.name}: week ${mine.bye}`);
   if (d.season > 0.05) {
     const covered = [...starterByes(ctx, myBase)]
       .filter(([w, ps]) => theirs.bye !== w && ps.some((p) => (eligible("FLEX", p.pos) ? eligible("FLEX", theirs.pos) : p.pos === theirs.pos)))
       .map(([w]) => w)
       .sort((x, y) => x - y);
-    if (covered.length) bits.push(`can start in week${covered.length > 1 ? "s" : ""} ${covered.join(", ")} when your starters are on bye`);
+    if (covered.length) add("Bye cover", `Starts in week${covered.length > 1 ? "s" : ""} ${covered.join(", ")} when your starters are off`);
   }
-  if (mine.injury && !theirs.injury) bits.push(`${mine.name} is ${mine.injury.status}`);
-  const nums = `Season ${fmtSigned(d.season)}, Playoffs ${fmtSigned(d.playoffs)}, Depth ${fmtSigned(d.depth)}; fairness to them ${j.sim.fairness.toFixed(2)}`;
-  const text = bits.length ? bits.join("; ") : "a small depth gain";
-  return `${text[0].toUpperCase()}${text.slice(1)} (${nums}).`;
+  if (mine.injury && !theirs.injury) add("Injury", `${mine.name} is ${mine.injury.status}`, "warn");
+  add("Season", `${fmtSigned(d.season)} pts/wk rest of season`, toneOf(d.season));
+  add("Playoffs", `${fmtSigned(d.playoffs)} pts/wk`, toneOf(d.playoffs));
+  add("Depth", fmtSigned(d.depth), toneOf(d.depth));
+  add("Your team score", fmtSigned(j.myDelta), toneOf(j.myDelta));
+  add("Fairness to them", j.sim.fairness.toFixed(2));
+  add("Acceptance", `${Math.round(j.acceptance * 100)}%`);
+  return items;
 }
 
 /**
@@ -603,8 +609,9 @@ export function findBenchUpgrades(
     if (gotSeen.has(g.id) || (gaveSeen.get(m.id) ?? 0) >= 2) continue;
     gotSeen.add(g.id);
     gaveSeen.set(m.id, (gaveSeen.get(m.id) ?? 0) + 1);
-    const t = buildTrade2(ctx, j, my, their, myAnalysis, mode);
-    t.why = `${upgradeWhy(ctx, j, m, g, my.base)} ${t.why}`;
+    const { why: _prose, ...t } = buildTrade2(ctx, j, my, their, myAnalysis, mode);
+    t.summary = makeSummary(`${m.name} for ${g.name}: your season lineup ${fmtSigned(j.sim.myParts.season)} pts/wk.`, `Fairness ${j.sim.fairness.toFixed(2)} to them, ~${Math.round(j.acceptance * 100)}% accept.`);
+    t.details = upgradeItems(ctx, j, m, g, my.base);
     if (!t.tags.includes("depth upgrade") && j.sim.myParts.depth > 0.05) t.tags.unshift("depth upgrade");
     picked.push(t);
     if (picked.length >= (opts.limit ?? V2.benchUpgradeLimit)) break;

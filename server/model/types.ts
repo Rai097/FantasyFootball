@@ -97,6 +97,8 @@ export interface ValuedPlayer extends Player {
   remainingGames: number;
   /** One-sentence explanation of how ppg and value were derived. */
   why: string;
+  /** The same explanation as short "label: value" items (UI bullets). Set by the valuation; optional for fixtures. */
+  whyItems?: DetailItem[];
   /** Expected pts/game over the last 2 weeks minus season expected pts/game. */
   trend: number;
   /**
@@ -257,10 +259,13 @@ export interface Trade {
   fairness: number; // value they receive / value they give
   acceptance: number; // 0..1 rough likelihood partner accepts
   score: number;
+  /** Row text: "A for B: your team +x, their lineup +y pts/wk. Fair, ~62% accept." (≤ 255 chars, 1–2 sentences). */
   summary: string;
+  /** v3 / bench upgrades / evaluate: the full analysis, one short "label: value" item per fact (shown on tap). */
+  details?: DetailItem[];
   tags: string[];
-  /** Explanation of deltas, fairness and acceptance. */
-  why: string;
+  /** Legacy v1 / v2 prose explanation (the /trades endpoint and v2 evaluate); v3 responses use `details`. */
+  why?: string;
   /** Trade Finder v2 mode the trade was scored under. */
   mode?: "now" | "balanced" | "playoffs";
   /** Near misses only: why the trade did not make the main list. */
@@ -274,8 +279,6 @@ export interface Trade {
   fairnessPct?: number;
   /** One line I could paste to the other manager. */
   pitch?: string;
-  /** Bye overlap and playoff-week (byes in the fantasy playoffs) notes. */
-  notes?: string[];
   /** Package values (best + 0.85·second + 0.70·third), market and true, net of drop cost on the receiving side. */
   packages?: { marketGive: number; marketGet: number; trueGive: number; trueGet: number; myTrueChange: number; theirMarketChange: number };
 }
@@ -291,12 +294,14 @@ export interface TradeFinderResult {
   /** Up to 10 trades that just missed (partner would likely refuse, or marginal for me), each with `reason`. */
   nearMisses: Trade[];
   mode: "now" | "balanced" | "playoffs";
-  /** One or two sentences on what the finder found and why the list is short when it is. */
+  /** One short line on what the finder found (≤ 255 chars); the reasons are in `summaryDetails`. */
   summary: string;
+  /** v3: mode, weakest spot, best fits, why the list is empty, value source — one item each (shown on tap). */
+  summaryDetails?: DetailItem[];
   /** v3: where perceived (market) values came from; "model" = FantasyCalc unavailable, our values used. */
   valueSource?: "fantasycalc" | "model";
   /** v3: partners ranked by roster complementarity (best first). */
-  partners?: { teamId: string; complementarity: number; pitch: string }[];
+  partners?: { teamId: string; complementarity: number; summary: string; details: DetailItem[] }[];
 }
 
 /** One line of a details panel: a short label and a short value (≤ ~90 chars, one idea, never a paragraph). */
@@ -429,11 +434,37 @@ export interface BreakoutTarget {
   chartSays?: string;
   ahead: BreakoutAhead[];
   tags: string[];
+  /** Prose thesis; server-only (the waivers module splits it into items). Not in the /breakouts response. */
   thesis: string;
+  /** Row text: role + usage, then the move (≤ 255 chars, 2 sentences). */
+  summary: string;
+  /** One fact per item: depth chart, who is ahead, weekly snaps / touches, price, score parts, the offer. */
+  details: DetailItem[];
+  /** Short move: "Offer X (value 6.0)" / "Free agent: waivers call claim". */
   ask?: string;
 }
 
 export interface BreakoutResult {
   targets: BreakoutTarget[];
-  notes: string[];
+  /** "How it's scored": one rule per item. */
+  how: DetailItem[];
+}
+
+/** The slim player a card row needs (no weekly stat lines): what PlayerChip and the bullets render. */
+export type CardPlayer = Pick<ValuedPlayer, "id" | "name" | "pos" | "team" | "value" | "ppg" | "injury" | "whyItems">;
+
+/**
+ * GET /values row: only what the Values tab renders (no weekly stat lines, prose why or ids; ~1 MB → < 250 KB).
+ * `edge` is unset when the market value is missing or estimated (the UI shows "—", never 0).
+ */
+export type ValueRow = Pick<
+  ValuedPlayer,
+  "id" | "name" | "pos" | "team" | "injury" | "value" | "market" | "marketRank" | "marketEstimated" | "edge" | "ppg" | "ppg26" | "ppgExp26" | "games" | "posRank" | "ecrOverall" | "whyItems"
+> & { ownerTeamId?: string; rostered: boolean };
+
+/** GET /breakouts row: no prose thesis, slim player. */
+export type BreakoutTargetRow = Omit<BreakoutTarget, "thesis" | "player"> & { player: CardPlayer };
+export interface BreakoutResponse {
+  targets: BreakoutTargetRow[];
+  how: DetailItem[];
 }

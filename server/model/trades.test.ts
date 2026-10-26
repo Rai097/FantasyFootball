@@ -57,7 +57,7 @@ test("finds a 2-for-1 consolidation that helps both teams", () => {
   assert.ok(t.tags.includes("2-for-1 consolidation"));
   assert.ok(t.me.lineupChanges.some((c) => c.includes("tWR1")));
   assert.equal(t.them.drops?.length, 1, "partner drops its lowest-value bench player");
-  assert.match(t.why, /fairness/);
+  assert.match(t.why!, /fairness/);
   for (let i = 1; i < trades.length; i++) assert.ok(trades[i - 1].score >= trades[i].score);
 });
 
@@ -73,7 +73,7 @@ test("a lopsided trade is rejected by the finder and declined by the evaluator",
   assert.ok(!all.some((t) => t.me.gives[0].id === "mWR2" && t.them.gives[0].id === "tWR1"));
   const ev = evaluateTrade(ctx, "me", "them", ["mWR2"], ["tWR1"]);
   assert.ok(ev.fairness < 0.85);
-  assert.match(ev.why, /unlikely to accept/);
+  assert.match(ev.why!, /unlikely to accept/);
   // Great for me, but never "Accept" when they would refuse.
   assert.match(ev.verdict, /^They won't accept \(value to them 0\.\d+ < 0\.85\)$/);
   // My stud RB for their scrub RB: bad for me.
