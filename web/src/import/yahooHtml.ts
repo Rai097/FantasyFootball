@@ -16,6 +16,10 @@ export interface ScrapedPlayer {
   team?: string;
   status?: string;
   slot?: string;
+  /** Player-list "Owner" column: "FA" = free agent, "W" = on waivers ("W (Wed)"). Absent when the column was not found. */
+  availability?: "FA" | "W";
+  /** The "(Wed)" / "(10/29)" part of a waivers cell: when he clears. */
+  waiverUntil?: string;
 }
 
 export interface RosterParse {
@@ -23,7 +27,17 @@ export interface RosterParse {
   players: ScrapedPlayer[];
   /** Links found whose row had no recognisable "Team - Pos" text. */
   noPos: string[];
-  diag: { strategy: string; links: number; rows: number; nameCandidates: string[]; sampleRows: string[] };
+  diag: {
+    strategy: string;
+    links: number;
+    rows: number;
+    nameCandidates: string[];
+    sampleRows: string[];
+    /** Owner-column counts on player-list pages ("FA:12,W:3,none:0"). */
+    availability: string;
+    /** Set when players were found but no row had an FA / W owner cell. */
+    availabilityNote?: string;
+  };
 }
 
 export interface SettingsParse {
@@ -142,6 +156,62 @@ function statusFrom(rowHtmlStr: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Yahoo's player list (players?status=A) has an "Owner" column: "FA" for a free agent, "W (Wed)" (or a date)
+ * for a player on waivers. Any cell of the row whose whole text is one of those counts. Defensive: absent → undefined.
+ */
+export function availabilityFrom(rowText: string): { availability: "FA" | "W"; waiverUntil?: string } | undefined {
+  for (const raw of rowText.split(/[\t\n]/)) {
+    const cell = raw.trim();
+    if (/^FA$/.test(cell)) return { availability: "FA" };
+    const w = /^(?:W|Waivers?)(?:\s*\(\s*([^()]{1,16}?)\s*\))?$/.exec(cell);
+    if (w) return w[1] ? { availability: "W", waiverUntil: w[1] } : { availability: "W" };
+  }
+  return undefined;
+}
+
+/** Key a scraped player the same way everywhere (defenses have no Yahoo player id). */
+export const playerKey = (p: { yahooId?: string; name: string; pos: string }) => p.yahooId ?? `${p.name}|${p.pos}`;
+
+export interface WaiverList {
+  /** Keys of players listed by players?status=W (all positions fetched). */
+  keys: Set<string>;
+  /** false when the list hit the page cap (players not in it are then unknown, not free agents). */
+  complete: boolean;
+  /** true when Yahoo seemed to ignore status=W (the list matched the status=A list): the list is not used. */
+  ignored: boolean;
+}
+
+/**
+ * Free agent vs on waivers for each free agent: the owner column wins; else membership of the status=W list
+ * (when that list is usable); else unknown (undefined). Disagreements are counted for diagnostics.
+ */
+export function waiverStatusOf(
+  players: ScrapedPlayer[],
+  w: WaiverList | undefined,
+): { onWaivers: Map<string, boolean | undefined>; diag: { fromColumn: number; fromList: number; unknown: number; disagree: number; listUsed: boolean } } {
+  const listUsed = !!w && !w.ignored;
+  const out = new Map<string, boolean | undefined>();
+  const diag = { fromColumn: 0, fromList: 0, unknown: 0, disagree: 0, listUsed };
+  for (const p of players) {
+    const k = playerKey(p);
+    const inList = listUsed ? w!.keys.has(k) : undefined;
+    if (p.availability) {
+      const onW = p.availability === "W";
+      out.set(k, onW);
+      diag.fromColumn++;
+      if (inList !== undefined && w!.complete && inList !== onW) diag.disagree++;
+    } else if (inList === true || (inList === false && w!.complete)) {
+      out.set(k, inList);
+      diag.fromList++;
+    } else {
+      out.set(k, undefined);
+      diag.unknown++;
+    }
+  }
+  return { onWaivers: out, diag };
+}
+
 function slotFrom(rowText: string, rowHtmlStr: string): string | undefined {
   // Yahoo marks the slot cell with data-pos / class "pos-label"; else take the row's leading token.
   const attr = /(?:data-pos|data-position)\s*=\s*["']([^"']+)["']/i.exec(rowHtmlStr) ?? /class\s*=\s*["'][^"']*pos-label[^"']*["'][^>]*>\s*([^<\s]+)\s*</i.exec(rowHtmlStr);
@@ -210,6 +280,8 @@ export function parsePlayersHtml(html: string): RosterParse {
     if (st) entry.status = st;
     const slot = slotFrom(text2, row.html);
     if (slot) entry.slot = slot;
+    const av = availabilityFrom(text2);
+    if (av) Object.assign(entry, av);
     byId.set(id, entry);
   };
 
@@ -226,11 +298,22 @@ export function parsePlayersHtml(html: string): RosterParse {
     players.push(p);
   }
   const cands = teamNameCandidates(html);
+  const fa = players.filter((p) => p.availability === "FA").length;
+  const w = players.filter((p) => p.availability === "W").length;
+  const none = players.length - fa - w;
   return {
     teamName: pickTeamName(cands),
     players,
     noPos,
-    diag: { strategy: [...hows].map(([k, v]) => `${k}:${v}`).join(",") || "none", links, rows: byId.size, nameCandidates: cands.slice(0, 5), sampleRows },
+    diag: {
+      strategy: [...hows].map(([k, v]) => `${k}:${v}`).join(",") || "none",
+      links,
+      rows: byId.size,
+      nameCandidates: cands.slice(0, 5),
+      sampleRows,
+      availability: `FA:${fa},W:${w},none:${none}`,
+      ...(players.length && !fa && !w ? { availabilityNote: "owner column (FA / W) not found" } : {}),
+    },
   };
 }
 

@@ -4,12 +4,16 @@
 // pages while the user is logged in, reads the league's own pages with
 // same-origin fetches, and shows the result for the user to copy/download.
 // It never sends data anywhere else.
-import { parseMyTeamId, parsePlayersHtml, parseSettingsHtml, type ScrapedPlayer } from "./yahooHtml";
+import { parseMyTeamId, parsePlayersHtml, parseSettingsHtml, playerKey, waiverStatusOf, type ScrapedPlayer, type WaiverList } from "./yahooHtml";
 
 const DEFAULT_SLOTS = ["QB", "WR", "WR", "RB", "RB", "TE", "FLEX", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN", "IR"];
 const HALF_PPR = { passYd: 0.04, passTd: 4, passInt: -1, rushYd: 0.1, rushTd: 6, rec: 0.5, recYd: 0.1, recTd: 6, twoPt: 2, fumLost: -2, teRec: 0 };
 const MAX_TEAMS = 20;
 const MAX_FA = 150;
+/** Kickers and defenses: streamed, so a short list each is enough. */
+const MAX_KDEF = 25;
+/** Pages of players?status=W read per position group to tell waivers from free agents. */
+const MAX_W_PAGES = 6;
 const OVERLAY_ID = "ftd-import-overlay";
 
 interface Diag {
@@ -102,31 +106,79 @@ async function run(): Promise<void> {
   if (settings?.slots && haveScoring) settingsSource = "page";
   else if (settings?.slots || haveScoring || settings?.numTeams) settingsSource = "partial";
 
+  // Free agents: players?status=A lists everyone available (free agents AND players on waivers). The "Owner" column
+  // says which ("FA" / "W (Wed)"); a separate status=W list is read too, as a fallback and a cross-check.
   const freeAgents: ScrapedPlayer[] = [];
+  /** What goes into the payload: one entry per free agent, `onWaivers` only when known. */
+  const faOut: (Pick<ScrapedPlayer, "yahooId" | "name" | "pos" | "team" | "status"> & { onWaivers?: boolean })[] = [];
   const seen = new Set<string>();
-  for (const sort of ["AR", "PTS"]) {
-    // Yahoo's web player list shows 25 rows per page; `count` is the row offset.
-    for (let start = 0; start < 2 * MAX_FA && freeAgents.length < MAX_FA; start += 25) {
-      say(`reading free agents (${freeAgents.length})…`);
-      const url = `${base}/players?status=A&pos=O&sort=${sort}&count=${start}`;
+  const firstPage = new Map<string, string[]>(); // "A|O" → keys on the first page, to spot an ignored status filter
+  /** Read up to `max` players of one list into `into` (de-duplicated by `seenSet`). Returns the number added. */
+  const readList = async (status: "A" | "W", pos: string, sort: string, max: number, into: ScrapedPlayer[], seenSet: Set<string>, step: string) => {
+    let total = 0;
+    let full = false;
+    for (let start = 0; start < 2 * max + 25; start += 25) {
+      const url = `${base}/players?status=${status}&pos=${pos}&sort=${sort}&count=${start}`;
       let added = 0;
       try {
         const page = await getPage(url);
         const r = page.ok ? parsePlayersHtml(page.html) : undefined;
+        if (start === 0 && r) firstPage.set(`${status}|${pos}`, r.players.map(playerKey));
         for (const p of r?.players ?? []) {
-          const k = p.yahooId ?? `${p.name}|${p.pos}`;
-          if (seen.has(k) || freeAgents.length >= MAX_FA) continue;
-          seen.add(k);
-          freeAgents.push({ yahooId: p.yahooId, name: p.name, pos: p.pos, team: p.team, status: p.status });
+          const k = playerKey(p);
+          if (seenSet.has(k)) continue;
+          if (total >= max) {
+            full = true;
+            break;
+          }
+          seenSet.add(k);
+          into.push(p);
           added++;
+          total++;
         }
-        diagnostics.push({ step: "freeAgents", url, status: page.status, players: r?.players.length ?? 0, added, ...(r?.diag ?? {}) });
+        diagnostics.push({ step, url, status: page.status, players: r?.players.length ?? 0, added, ...(r?.diag ?? {}) });
       } catch (e) {
-        diagnostics.push({ step: "freeAgents", url, note: `fetch failed: ${(e as Error).message}` });
+        diagnostics.push({ step, url, note: `fetch failed: ${(e as Error).message}` });
       }
-      if (!added) break;
+      if (!added || full || total >= max) break;
     }
-    if (freeAgents.length) break;
+    return { total, full: full || total >= max };
+  };
+
+  let sortUsed = "AR";
+  for (const sort of ["AR", "PTS"]) {
+    say(`reading free agents…`);
+    await readList("A", "O", sort, MAX_FA, freeAgents, seen, "freeAgents");
+    if (freeAgents.length) {
+      sortUsed = sort;
+      break;
+    }
+  }
+  if (freeAgents.length) {
+    for (const pos of ["K", "DEF"]) {
+      say(`reading free agents (${pos})…`);
+      await readList("A", pos, sortUsed, MAX_KDEF, freeAgents, seen, `freeAgents ${pos}`);
+    }
+    // Waivers list (fallback + cross-check for the owner column).
+    const wPlayers: ScrapedPlayer[] = [];
+    const wSeen = new Set<string>();
+    let complete = true;
+    for (const [pos, max] of [["O", MAX_W_PAGES * 25], ["K", 25], ["DEF", 25]] as const) {
+      say(`reading players on waivers (${pos})…`);
+      const r = await readList("W", pos, sortUsed, max, wPlayers, wSeen, `waivers ${pos}`);
+      if (r.full) complete = false;
+    }
+    // If status=W returned the same first page as status=A, Yahoo ignored the filter: do not trust the list.
+    const a0 = firstPage.get("A|O") ?? [];
+    const w0 = firstPage.get("W|O") ?? [];
+    const ignored = !firstPage.has("W|O") || (w0.length >= 5 && w0.length === a0.length && w0.every((k, i) => k === a0[i])) || wPlayers.some((p) => p.availability === "FA");
+    const wList: WaiverList = { keys: wSeen, complete, ignored };
+    const ws = waiverStatusOf(freeAgents, wList);
+    diagnostics.push({ step: "waiverStatus", ...ws.diag, listSize: wSeen.size, listComplete: complete, listIgnored: ignored });
+    for (const p of freeAgents) {
+      const onWaivers = ws.onWaivers.get(playerKey(p));
+      faOut.push({ yahooId: p.yahooId, name: p.name, pos: p.pos, team: p.team, status: p.status, ...(onWaivers !== undefined ? { onWaivers } : {}) });
+    }
   }
 
   const payload = {
@@ -142,7 +194,7 @@ async function run(): Promise<void> {
     ...(myTeamId && teams.some((t) => t.id === myTeamId) ? { myTeamId } : {}),
     settingsSource,
     teams,
-    ...(freeAgents.length ? { freeAgents } : {}),
+    ...(faOut.length ? { freeAgents: faOut } : {}),
     importedAt: new Date().toISOString(),
     diagnostics,
   };
@@ -155,7 +207,7 @@ async function run(): Promise<void> {
   const noPos = diagnostics.reduce((a, d) => a + (Array.isArray(d.noPos) ? d.noPos.length : 0), 0);
   summary.textContent =
     `${teams.length} team${teams.length === 1 ? "" : "s"} found · ${teams.reduce((a, t) => a + t.players.length, 0)} rostered players · ` +
-    `${freeAgents.length} free agents · settings: ${settingsSource === "page" ? "read from Yahoo" : settingsSource === "partial" ? "partly read (check them after import)" : "NOT found, Yahoo defaults used (check them after import)"}` +
+    `${faOut.length} available players (${faOut.filter((f) => f.onWaivers === true).length} on waivers, ${faOut.filter((f) => f.onWaivers === undefined).length} unknown) · settings: ${settingsSource === "page" ? "read from Yahoo" : settingsSource === "partial" ? "partly read (check them after import)" : "NOT found, Yahoo defaults used (check them after import)"}` +
     (noPos ? ` · ${noPos} player link(s) without a position were skipped` : "");
   box.appendChild(summary);
   const list = el("ol", undefined, "margin:8px 0;padding-left:20px;max-height:180px;overflow:auto");

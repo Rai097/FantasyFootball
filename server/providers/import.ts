@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import type { PlayerDb } from "../data/players.js";
 import { normPos, normTeam } from "../data/names.js";
 import { HALF_PPR } from "../model/scoring.js";
-import type { League, Player, Scoring, SlotKind, Team } from "../model/types.js";
+import type { Availability, League, Player, Scoring, SlotKind, Team } from "../model/types.js";
 import { draftBoard } from "./demo.js";
 import { DATA_DIR, readJson, removeJson, writeJson } from "./store.js";
 import { findPlayer, withYahooStatus, type YahooPlayerEntry } from "./yahoo-parse.js";
@@ -28,6 +28,8 @@ export interface ImportPlayerRaw {
   status?: string;
   slot?: string;
 }
+/** A free agent as imported. `onWaivers` absent = not captured (imports before 2026-10-26): unknown. */
+export type ImportFreeAgentRaw = Omit<ImportPlayerRaw, "slot"> & { onWaivers?: boolean };
 export interface ImportTeamRaw {
   id: string;
   name: string;
@@ -49,7 +51,7 @@ export interface StoredImport {
   myTeamId?: string;
   waiverPriority?: number;
   teams: ImportTeamRaw[];
-  freeAgents?: Omit<ImportPlayerRaw, "slot">[];
+  freeAgents?: ImportFreeAgentRaw[];
   importedAt: string;
   settingsSource: SettingsSource;
   /** Yahoo league number when imported by the bookmarklet. */
@@ -221,7 +223,12 @@ export function validateImport(body: unknown, now = new Date()): StoredImport {
   if (myTeamId && teams.some((t) => t.id === myTeamId)) out.myTeamId = myTeamId;
   const wp = int(o.waiverPriority, 1, MAX_TEAMS);
   if (wp) out.waiverPriority = wp;
-  if (fa) out.freeAgents = fa.map((p, j) => cleanPlayer(p, `free agent ${j + 1}`)).map(({ slot: _s, ...p }) => p);
+  if (fa)
+    out.freeAgents = fa.map((v, j) => {
+      const { slot: _s, ...p } = cleanPlayer(v, `free agent ${j + 1}`);
+      const onWaivers = (v as Record<string, unknown> | null)?.onWaivers;
+      return typeof onWaivers === "boolean" ? { ...p, onWaivers } : p;
+    });
   if (leagueId && /^\d+$/.test(leagueId)) out.leagueId = leagueId;
   if (Array.isArray(o.diagnostics)) {
     const d = JSON.stringify(o.diagnostics);
@@ -373,20 +380,28 @@ export function buildImportLeague(db: Finder, s: StoredImport, ctx: { season: nu
 /**
  * Free agents: the imported list when present (resolved, minus anyone rostered),
  * else every ECR-ranked player not on a roster (like demo). Waiver priority is whatever the user entered.
+ * Free agent vs on waivers comes from the import; when it was not captured (older imports, or the fallback list)
+ * the player counts as on waivers (the safe assumption) with availability "unknown".
  */
-export function importFreeAgents(league: League, db: PlayerDb, s: StoredImport, week: number): { freeAgents: { player: Player; onWaivers: boolean }[]; myPriority?: number } {
+export function importFreeAgents(
+  league: League,
+  db: PlayerDb,
+  s: StoredImport,
+  week: number,
+): { freeAgents: { player: Player; onWaivers: boolean; availability: Availability }[]; myPriority?: number } {
   const rostered = new Set(league.teams.flatMap((t) => t.playerIds));
-  const out: { player: Player; onWaivers: boolean }[] = [];
+  const out: { player: Player; onWaivers: boolean; availability: Availability }[] = [];
   if (s.freeAgents && s.freeAgents.length) {
     const seen = new Set<string>();
     for (const raw of s.freeAgents) {
       const p = resolvePlayer(db, raw);
       if (!p || rostered.has(p.id) || seen.has(p.id)) continue;
       seen.add(p.id);
-      out.push({ player: withYahooStatus(p, entryOf(raw), week) ?? p, onWaivers: true });
+      const availability: Availability = raw.onWaivers === undefined ? "unknown" : raw.onWaivers ? "waivers" : "fa";
+      out.push({ player: withYahooStatus(p, entryOf(raw), week) ?? p, onWaivers: raw.onWaivers ?? true, availability });
     }
   } else {
-    for (const p of draftBoard(db.players.values())) if (!rostered.has(p.id)) out.push({ player: p, onWaivers: true });
+    for (const p of draftBoard(db.players.values())) if (!rostered.has(p.id)) out.push({ player: p, onWaivers: true, availability: "unknown" });
   }
   return { freeAgents: out, myPriority: s.waiverPriority };
 }

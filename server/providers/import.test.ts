@@ -10,6 +10,7 @@ import {
   diffSnapshots,
   HISTORY_CAP,
   ImportError,
+  importFreeAgents,
   latestChanges,
   mergeTeams,
   parseSlotList,
@@ -20,6 +21,7 @@ import {
 } from "./import.js";
 import { parseRosterText } from "./import-text.js";
 import type { PlayerFinder } from "./yahoo-parse.js";
+import type { PlayerDb } from "../data/players.js";
 
 function mk(id: string, name: string, pos: Player["pos"], team: string, yahoo?: string, injury?: Player["injury"]): Player {
   return { id, name, pos, team, ids: { yahoo }, snapShare: {}, weeks: [], prior: null, ...(injury ? { injury } : {}) };
@@ -227,4 +229,28 @@ test("roster history: diff of the two latest snapshots, capped at 8", () => {
   const gone = diffSnapshots(snapshotOf(s0), { ...snapshotOf(s0), teams: snapshotOf(s0).teams.slice(0, 1) });
   assert.equal(gone.byTeam[0].name, "B");
   assert.equal(gone.byTeam[0].dropped.length, 3);
+});
+
+test("free agents keep onWaivers per player (booleans only); missing = unknown, treated as on waivers", () => {
+  const s = validateImport({
+    ...body(),
+    teams: [{ id: "1", name: "A", players: [{ yahooId: "30123", name: "Patrick Mahomes", pos: "QB", team: "KC" }] }],
+    myTeamId: "1",
+    freeAgents: [
+      { yahooId: "34496", name: "Ja'Marr Chase", pos: "WR", team: "Cin", onWaivers: false },
+      { name: "Christian McCaffrey", pos: "RB", team: "SF", onWaivers: true },
+      { name: "Buffalo", pos: "DEF", team: "Buf", onWaivers: "yes" },
+    ],
+  });
+  assert.equal(s.freeAgents![0].onWaivers, false);
+  assert.equal(s.freeAgents![1].onWaivers, true);
+  assert.equal("onWaivers" in s.freeAgents![2], false, "non-boolean is dropped, not coerced");
+  const l = buildImportLeague(db, s, { season: 2026, currentWeek: 4 });
+  const fdb = { ...db, players: new Map(PLAYERS.map((p) => [p.id, p])) } as unknown as PlayerDb;
+  const fa = importFreeAgents(l, fdb, s, 4).freeAgents.map((f) => [f.player.id, f.onWaivers, f.availability]);
+  assert.deepEqual(fa, [
+    ["P2", false, "fa"],
+    ["P3", true, "waivers"],
+    ["DEF:BUF", true, "unknown"],
+  ]);
 });

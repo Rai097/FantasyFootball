@@ -586,6 +586,9 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     assert.equal(w.status, 200);
     assertClean(w.json, "import waivers");
     assert.ok(w.json.freeAgents.length >= 10);
+    // No free-agent list in this import: availability is unknown (the UI asks for a re-import), counted as on waivers.
+    assert.equal(w.json.faStatusKnown, false);
+    assert.ok(w.json.freeAgents.every((f: any) => f.availability === "unknown" && f.onWaivers === true));
   });
 
   test("re-importing the same league updates rosters in place and keeps settings", async () => {

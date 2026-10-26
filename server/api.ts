@@ -43,7 +43,7 @@ import { findBreakouts, type MarketValue } from "./model/breakouts.js";
 import { getDepthChart } from "./data/depthCharts.js";
 import { getMarketData, pprBucket } from "./data/fantasycalc.js";
 import { errors as authErrors, pinnedTeam, scopeOf } from "./auth/guard.js";
-import type { BreakoutResult, League, Player, Trade, TradeFinderResult, ValuedPlayer, WaiverBreakout, WaiverTarget } from "./model/types.js";
+import type { Availability, BreakoutResult, League, Player, Trade, TradeFinderResult, ValuedPlayer, WaiverBreakout, WaiverTarget } from "./model/types.js";
 
 const CACHE_TTL_MS = 60_000;
 
@@ -248,7 +248,7 @@ async function freeAgentInputs(
   /** The team whose waiver priority / FAAB the stored data describes (myTeamOf). */
   mine: string | undefined,
 ): Promise<{ input: FreeAgentInput[]; myPriority?: number; league: League }> {
-  let fas: { player: Player; onWaivers: boolean; percentOwned?: number }[];
+  let fas: { player: Player; onWaivers: boolean; availability?: Availability; percentOwned?: number }[];
   let myPriority: number | undefined;
   let league = l.league;
   if (provider === "demo") {
@@ -274,7 +274,7 @@ async function freeAgentInputs(
   for (const f of fas) {
     if (rostered.has(f.player.id) || seen.has(f.player.id)) continue;
     seen.add(f.player.id);
-    input.push({ player: l.ctx.valuation.valueOf(f.player), onWaivers: f.onWaivers, percentOwned: f.percentOwned });
+    input.push({ player: l.ctx.valuation.valueOf(f.player), onWaivers: f.onWaivers, availability: f.availability, percentOwned: f.percentOwned });
   }
   return { input, myPriority, league };
 }

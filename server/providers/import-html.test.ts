@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { htmlToText, mapSlotToken, parseMyTeamId, parsePlayersHtml, parsePosTeam, parseSettingsHtml } from "../../web/src/import/yahooHtml.js";
+import { availabilityFrom, htmlToText, mapSlotToken, parseMyTeamId, parsePlayersHtml, parsePosTeam, parseSettingsHtml, playerKey, waiverStatusOf } from "../../web/src/import/yahooHtml.js";
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const html = (n: string) => readFileSync(path.join(dir, n), "utf8");
@@ -87,4 +87,63 @@ test("helpers", () => {
   assert.equal(mapSlotToken("Q/W/R/T"), "SFLEX");
   assert.equal(mapSlotToken("IL"), "IR");
   assert.equal(htmlToText("<p>a&amp;b</p><script>x()</script><td>c</td>"), "a&b\nc");
+});
+
+test("player list: owner column tells free agents (FA) from players on waivers (W (Wed)); K and DEF rows parse", () => {
+  const r = parsePlayersHtml(html("yahoo-web-players.html"));
+  const by = Object.fromEntries(r.players.map((p) => [p.name, p]));
+  assert.equal(by["Free Runner"].availability, "FA");
+  assert.equal(by["Waiver Wideout"].availability, "W");
+  assert.equal(by["Waiver Wideout"].waiverUntil, "Wed");
+  assert.equal(by["Dated Tightend"].availability, "W");
+  assert.equal(by["Dated Tightend"].waiverUntil, "10/29");
+  assert.equal(by["Dated Tightend"].status, "Q");
+  assert.equal(by["Plain Passer"].availability, "FA");
+  assert.deepEqual(by["Carolina"], { name: "Carolina", pos: "DEF", team: "CAR", availability: "FA" });
+  assert.equal(by["Long Kicker"].pos, "K");
+  assert.equal(by["Long Kicker"].availability, "W");
+  assert.equal(r.diag.availability, "FA:3,W:3,none:0");
+  assert.equal(r.diag.availabilityNote, undefined);
+});
+
+test("player list without an owner column: no availability, and a diagnostics note", () => {
+  const page = html("yahoo-web-players.html").replace(/<td class="Ta-c">[\s\S]*?<\/td>/g, "<td>-</td>");
+  const r = parsePlayersHtml(page);
+  assert.equal(r.players.length, 6);
+  assert.ok(r.players.every((p) => p.availability === undefined));
+  assert.equal(r.diag.availability, "FA:0,W:0,none:6");
+  assert.equal(r.diag.availabilityNote, "owner column (FA / W) not found");
+});
+
+test("availabilityFrom: whole cells only", () => {
+  assert.deepEqual(availabilityFrom("Name\tFA\t7"), { availability: "FA" });
+  assert.deepEqual(availabilityFrom("Name\tW (Wed)\t7"), { availability: "W", waiverUntil: "Wed" });
+  assert.deepEqual(availabilityFrom("Name\tWaivers\t7"), { availability: "W" });
+  assert.equal(availabilityFrom("FA Cup Winner KC - WR\tW/R/T\t7"), undefined);
+  assert.equal(availabilityFrom("Name\tWAS - WR\t7"), undefined);
+});
+
+test("waiverStatusOf: owner column wins, else the status=W list, else unknown", () => {
+  const ps = [
+    { yahooId: "1", name: "A", pos: "RB", availability: "FA" as const },
+    { yahooId: "2", name: "B", pos: "WR" },
+    { yahooId: "3", name: "C", pos: "WR" },
+    { name: "Carolina", pos: "DEF" },
+  ];
+  const list = { keys: new Set(["2", "1"]), complete: true, ignored: false };
+  const r = waiverStatusOf(ps, list);
+  assert.equal(r.onWaivers.get("1"), false); // column says FA (the list disagrees: counted)
+  assert.equal(r.onWaivers.get("2"), true);
+  assert.equal(r.onWaivers.get("3"), false);
+  assert.equal(r.onWaivers.get(playerKey(ps[3])), false);
+  assert.deepEqual(r.diag, { fromColumn: 1, fromList: 3, unknown: 0, disagree: 1, listUsed: true });
+  // Truncated list: members are on waivers, the rest unknown (not guessed as free agents).
+  const t = waiverStatusOf(ps, { ...list, complete: false });
+  assert.equal(t.onWaivers.get("2"), true);
+  assert.equal(t.onWaivers.get("3"), undefined);
+  // Yahoo ignored status=W: the list is not used; no column → unknown, never "everyone on waivers".
+  const ig = waiverStatusOf(ps, { ...list, ignored: true });
+  assert.equal(ig.onWaivers.get("2"), undefined);
+  assert.equal(ig.onWaivers.get("1"), false);
+  assert.equal(waiverStatusOf(ps, undefined).diag.unknown, 3);
 });
