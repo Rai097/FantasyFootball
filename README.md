@@ -81,6 +81,16 @@ All free and keyless, refreshed automatically by their maintainers:
 | `npm test` | Unit and integration tests (engine, Yahoo parsers, API) |
 | `npm run typecheck` | Strict TypeScript for server and web |
 
+## Sign-in (hosted)
+
+A hosted server signs people in with Discord (scope `identify`). Production refuses to start without
+`DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `SESSION_SECRET` (≥ 32 random characters, e.g. `openssl rand -hex 32`) and
+`PUBLIC_URL` (the site's address; the Discord redirect URI is `PUBLIC_URL/auth/callback`). Who may sign in is
+`.data/access.json` (never committed): `{ "admins": ["<discord id>"], "users": [{ "discordId": "…", "leagueId": "y1405188",
+"teamId": "4", "note": "…" }] }`. Admins see everything and can "View as" a user; a user sees only their team in their
+league and may re-import it. Missing file = nobody can sign in. Without Discord config, `npm run dev` runs in dev mode
+(you are the admin). Details: docs/DESIGN.md "Discord sign-in, multi-tenant".
+
 ## Troubleshooting
 
 * **Yahoo returns 403 "not authorized" on everything**: since July 2026 Yahoo requires app approval for the Fantasy API. See the top of [docs/YAHOO_SETUP.md](docs/YAHOO_SETUP.md).
@@ -98,6 +108,7 @@ server/data        loaders for the public data files, player database
 server/model       scoring, projection, lineup, analysis, trades, waivers
 server/providers   yahoo (OAuth + import), demo
 server/api.ts      HTTP API (contract in docs/DESIGN.md)
+server/auth        Discord sign-in, sessions, access list, the route guard
 web/               React UI
 docs/DESIGN.md     design spec and API contract
 ```

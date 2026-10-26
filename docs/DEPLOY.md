@@ -1,5 +1,8 @@
 # Hosting Trade Desk without a terminal (Render, free tier)
 
+> **Retired (2026-10-26):** Render is no longer used and `APP_PASSWORD` no longer exists; the app runs at
+> https://ff.raibot.us with Discord sign-in (see README "Sign-in (hosted)"). This page is kept as history only.
+
 Use this if you can't run the app on your own computer. Everything below is
 done in a web browser. Total time: about 15 minutes. The app will live at an
 address like `https://fantasy-trade-desk.onrender.com`.

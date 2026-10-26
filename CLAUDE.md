@@ -48,7 +48,9 @@ Open work and "Resume here" live in TASKS.md.
   (~/.cloudflared/config.yml, shared with dashboard/perp.raibot.us) → launchd `com.fantasy.tradedesk` on 127.0.0.1:5070,
   running the release worktree ~/FantasyFootball-run (detached at the release commit; template
   scripts/com.fantasy.tradedesk.plist). Data persists in ~/FantasyFootball-run/.data; log ~/FantasyFootball-run/server.log.
-  No password: APP_PUBLIC=1 (owner's choice until Discord login).
+  Sign-in: Discord (server/auth); its .env needs DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, SESSION_SECRET, PUBLIC_URL,
+  and who may sign in is ~/FantasyFootball-run/.data/access.json (missing = nobody). Smoke checks go through
+  https://ff.raibot.us (writes from localhost fail the Origin check by design).
 - Mac deploy: `git -C ~/FantasyFootball-run checkout --detach <commit>` (+ `npm ci && npm run build` there when
   dependencies or web/ changed), then `launchctl kickstart -k gui/$(id -u)/com.fantasy.tradedesk`; smoke-check the log
   and one real request on https://ff.raibot.us. Restarting the shared tunnel needs the owner's OK (it blips perp.raibot.us).
