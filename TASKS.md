@@ -19,6 +19,12 @@ NEXT (backlog, highest value first):
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
   they get +16% (why they'd accept)"; pitch text must not say "you win on value" ambiguously; name the projection
   source in the lineup tooltip (ours blends ECR + usage; Yahoo's projections differ, e.g. Hockenson).
+- Then (owner, top trade item): the partner judges a trade by YAHOO's evaluator ("Proj. pts remaining", weekly optimal
+  lineups), not FantasyCalc. Example: our near miss Concepcion+Hockenson → Downs+Robinson showed 88% accept, Yahoo shows
+  him −13.35 (you +6.85). (1) Bookmarklet captures Yahoo rest-of-season projected points per rostered player (verify
+  the page/stat view on real pages; defensive, diagnostics); (2) trade cards show "What Yahoo shows him: you +x, him −y";
+  (3) acceptance uses the Yahoo-visible lineup delta for the partner (a Yahoo-visible loss → low acceptance, out of the
+  main list); (4) pitch = reasons that matter to him (need fill, bye cover, rising role), never "market value says".
 - K/DEF streaming uses ECR only, so every K/DEF free agent is "pass"; add the week's matchup (opponent, implied
   points / sacks / turnovers) so Waivers can name a streaming DEF/K for next week (owner wants a Week 8 DEF).
 - Page-cap unknowns: raise the waivers list cap or stop at the last available player so fewer statuses stay unknown.
