@@ -89,7 +89,7 @@ a { color: var(--accent); }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
-.tab { background: none; border: none; color: var(--muted); font: inherit; font-weight: 600; padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+.tab { background: none; border: none; color: var(--muted); font: inherit; font-weight: 600; padding: 10px 14px; min-height: 44px; min-width: 44px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 .footer { margin-top: 28px; color: var(--muted); font-size: 12px; text-align: center; }
@@ -113,7 +113,7 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .filters .field { flex: 1 1 150px; }
 .grow { flex: 1 1 200px; }
 .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
-.seg-btn { background: var(--bg-2); color: var(--muted); border: none; border-right: 1px solid var(--border); font: inherit; font-size: 12px; font-weight: 600; padding: 6px 10px; cursor: pointer; }
+.seg-btn { background: var(--bg-2); color: var(--muted); border: none; border-right: 1px solid var(--border); font: inherit; font-size: 12px; font-weight: 600; padding: 6px 10px; min-height: 44px; min-width: 44px; cursor: pointer; }
 .seg-btn:last-child { border-right: none; }
 .seg-btn.active { background: var(--accent); color: #fff; }
 
