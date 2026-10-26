@@ -75,7 +75,9 @@ function BookmarkletCard() {
         ) : bm.loading ? (
           <span className="muted">loading…</span>
         ) : null}
-        <span className="muted small">Drag it to your bookmarks bar (desktop browser).</span>
+        <span className="muted small">
+          Drag it to your bookmarks bar (desktop browser).{bm.data?.version ? ` Build ${bm.data.version}.` : ""}
+        </span>
       </div>
       {bm.error && <ErrorBox error={bm.error} onRetry={bm.reload} />}
       <Disclosure title="How to use it (4 steps)">

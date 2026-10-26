@@ -29,6 +29,7 @@ import {
   type StoredImport,
 } from "./providers/import.js";
 import { parseRosterText } from "./providers/import-text.js";
+import { createHash } from "node:crypto";
 import { bookmarkletCode, bookmarkletUrl } from "./providers/import-bookmarklet.js";
 import { analyzeLeague, analyzeTeams, type LeagueContext } from "./model/analysis.js";
 import { buildLeagueView } from "./model/league.js";
@@ -576,9 +577,20 @@ apiRouter.get(
 // ---------------------------------------------------------------- import (Yahoo web pages, no API)
 apiRouter.get(
   "/api/import/bookmarklet.js",
-  h(async (req, res) => {
-    if (req.query.format === "url") return res.json({ url: await bookmarkletUrl() });
-    res.type("application/javascript").set("Cache-Control", "no-cache").send(await bookmarkletCode());
+  h(async (_req, res) => {
+    // no-store: Cloudflare caches ".js" paths at the edge and gave browsers a 4-hour copy of an old bookmarklet.
+    res.type("application/javascript").set("Cache-Control", "no-store").send(await bookmarkletCode());
+  }),
+);
+
+// The bookmark link for the Connect page. Not a ".js" path (Cloudflare edge-caches those) and never cached, so a
+// deploy changes the next drag at once; `version` lets the UI and the import box show which code a bookmark holds.
+apiRouter.get(
+  "/api/import/bookmarklet-url",
+  h(async (_req, res) => {
+    const code = await bookmarkletCode();
+    const version = createHash("sha256").update(code).digest("hex").slice(0, 8);
+    res.set("Cache-Control", "no-store").json({ url: await bookmarkletUrl(), version });
   }),
 );
 

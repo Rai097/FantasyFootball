@@ -286,5 +286,5 @@ export const api = {
   importChanges: (id: string) => request<ImportChanges>("GET", `/api/import/${encodeURIComponent(id)}/changes`),
   importDelete: (id: string) => request<{ ok: true }>("DELETE", `/api/import/${encodeURIComponent(id)}`),
   importSettings: (id: string, patch: ImportSettingsPatch) => request<StoredImport>("PUT", `/api/import/${encodeURIComponent(id)}/settings`, patch),
-  bookmarkletUrl: () => request<{ url: string }>("GET", "/api/import/bookmarklet.js?format=url"),
+  bookmarkletUrl: () => request<{ url: string; version: string }>("GET", "/api/import/bookmarklet-url"),
 };

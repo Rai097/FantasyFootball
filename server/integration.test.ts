@@ -801,8 +801,10 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     const code = await res.text();
     assert.ok(code.length > 2000 && code.length < 60_000, `size ${code.length}`);
     assert.ok(!/\bimport\s*[{(*]|\brequire\(/.test(code), "must be self-contained");
-    const url = (await get("/api/import/bookmarklet.js?format=url")).json.url as string;
-    assert.ok(url.startsWith("javascript:"));
+    assert.equal(res.headers.get("cache-control"), "no-store", "edge/browser caches served an old bookmarklet");
+    const r = await get("/api/import/bookmarklet-url");
+    assert.ok((r.json.url as string).startsWith("javascript:"));
+    assert.match(r.json.version, /^[0-9a-f]{8}$/);
   });
 });
 
