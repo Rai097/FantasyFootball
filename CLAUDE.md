@@ -9,8 +9,11 @@ Open work and "Resume here" live in TASKS.md.
 ## Repo
 - GitHub: `Rai097/FantasyFootball` (owner account Rai097; collaborator gwu0097 pushes).
 - Working branch and default: `claude/sleepy-tesla-633nk6`. No `main` yet.
-- Owner's league: Yahoo league id 1405188, 12 teams, H2H redraft, weeks 1–14,
-  playoffs 15–17, rolling-list waivers (Tuesdays), trade deadline 2026-11-28.
+- Owner's league: Yahoo league id 1405188, 12 teams, H2H redraft, full PPR, weeks 1–14,
+  playoffs 15–17 (6 teams), rolling-list waivers processed ~Wednesday early morning PT
+  (2-day clock on drops), trade deadline 2026-11-28.
+- Custom kicker scoring: 50–59 yd FG = 4, 60+ = 5. Lineup QB, 2 WR, RB, TE, 2 W/R/T, K, DEF, 6 BN, 2 IR.
+- The repo is PUBLIC: never commit other managers' names, the owner's roster plans or trade notes.
 
 ## Commands
 - `npm ci` — install (Node 22+).
