@@ -383,3 +383,12 @@ test("bookmarklet: an empty status=W page with a readable owner column trusts th
   assert.equal(faOf(payload, "Off Player100").onWaivers, false);
   assert.equal(faOf(payload, "Off Player300").onWaivers, true);
 });
+
+test("bookmarklet (developer): Yahoo ignores status=W (same players, another order), no owner column → offense unknown, list marked ignored", async () => {
+  const avail = offenseRows(100, 8);
+  const { payload, diagnostics } = await runBookmarklet(
+    leagueRoute({ "A|O": [avail], "A|K": [[]], "A|DEF": [[]], "W|O": [[...avail].reverse()], "W|K": [[]], "W|DEF": [[]] }),
+  );
+  for (const f of payload.freeAgents) assert.equal(f.onWaivers, undefined, `${f.name}: ${f.onWaivers}`);
+  assert.equal(diagnostics.find((d) => d.step === "waiverStatus").lists.O.ignored, true);
+});
