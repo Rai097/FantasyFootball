@@ -1,5 +1,5 @@
 import type { Analysis, VP } from "../api";
-import { Empty, PosBadge } from "../components/common";
+import { Empty, PosBadge, Stat } from "../components/common";
 import { BenchList, LineupTable } from "../components/LineupTable";
 import { InjuryDot } from "../components/PlayerChip";
 import { PositionStrength } from "../components/PositionStrength";
@@ -127,25 +127,6 @@ export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOp
       </div>
 
       {analysis.notes && analysis.notes.length > 0 && <p className="muted small footnote">{analysis.notes.join(" · ")}</p>}
-    </div>
-  );
-}
-
-function Stat({ label, value, sub, why, onClick }: { label: string; value: string; sub?: string; why?: string; onClick?: () => void }) {
-  const body = (
-    <>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      {sub && <div className="stat-sub">{sub}</div>}
-    </>
-  );
-  return onClick ? (
-    <button type="button" className="stat stat-link" title={why} onClick={onClick}>
-      {body}
-    </button>
-  ) : (
-    <div className="stat" title={why}>
-      {body}
     </div>
   );
 }

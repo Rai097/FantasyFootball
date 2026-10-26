@@ -77,3 +77,26 @@ export function RankBadge({ rank, of }: { rank: number; of: number }) {
     </span>
   );
 }
+
+/** Headline number card (stat row). `why` = one-sentence tooltip with a tappable "?"; `onClick` makes it a link. */
+export function Stat({ label, value, sub, why, onClick }: { label: string; value: string; sub?: string; why?: string; onClick?: () => void }) {
+  const body = (
+    <>
+      <div className="stat-label row between">
+        <span>{label}</span>
+        {!onClick && <Why text={why} />}
+      </div>
+      <div className="stat-value">{value}</div>
+      {sub && <div className="stat-sub">{sub}</div>}
+    </>
+  );
+  return onClick ? (
+    <button type="button" className="stat stat-link" title={why} onClick={onClick}>
+      {body}
+    </button>
+  ) : (
+    <div className="stat" title={why}>
+      {body}
+    </div>
+  );
+}

@@ -2,7 +2,7 @@
 // collapsed rows (summary line → mini chart + bullets on tap).
 import { api, type Active, type Analysis } from "../api";
 import type { LeagueTeamRow, TeamComparison } from "../../../server/model/league";
-import { ErrorBox, Loading, Why } from "../components/common";
+import { ErrorBox, Loading, Stat, Why } from "../components/common";
 import { DetailList, ExpandableList, ExpandableRow, type DetailLine } from "../components/ExpandableRow";
 import { deltaClass, f1, ordinal, signed } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
@@ -67,19 +67,6 @@ export function LeagueTab({ active }: { analysis: Analysis; active: Active & { t
           <CompareList rows={v.below} label="Teams below you" />
         </section>
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value, sub, why }: { label: string; value: string; sub?: string; why: string }) {
-  return (
-    <div className="stat" title={why}>
-      <div className="stat-label row between">
-        <span>{label}</span>
-        <Why text={why} />
-      </div>
-      <div className="stat-value">{value}</div>
-      {sub && <div className="stat-sub">{sub}</div>}
     </div>
   );
 }
