@@ -26,6 +26,12 @@ export const TRADE_TIPS = {
   ours: "Our 0–100 rest-of-season value from projected points above replacement and games left.",
 };
 
+/** The row's key line: who goes where ("Colston Loveland → Jameson Williams"); the full sentence opens with the details. */
+function swapLine(trade: Trade): string {
+  const names = (ps: { name: string }[]) => ps.map((p) => p.name).join(" + ");
+  return `${names(trade.me.gives)} → ${names(trade.them.gives)}`;
+}
+
 export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: { trade: Trade; partnerName: string; verdict?: string; defaultOpen?: boolean }) {
   const { me, them } = trade;
   const accCls = trade.acceptance >= 0.6 ? "good" : trade.acceptance >= 0.4 ? "warn" : "bad";
@@ -36,7 +42,7 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
           with {partnerName}
           {verdict && <span className={`verdict ${verdictClass(verdict)}`}>{verdict}</span>}
         </div>
-        <div className="tr-summary">{trade.summary}</div>
+        <div className="tr-summary">{swapLine(trade)}</div>
       </div>
       <span className={`num tr-team delta ${deltaClass(me.scoreDelta)}`}>{signed(me.scoreDelta ?? me.lineupDelta)}</span>
       <span className={`num tr-accept accept-chip ${accCls}`}>{Math.round(trade.acceptance * 100)}%</span>
@@ -44,6 +50,7 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
   );
   return (
     <ExpandableRow className="trade-row" head={head} defaultOpen={defaultOpen} label={`Trade with ${partnerName}`}>
+      <div className="one-line">{trade.summary}</div>
       {trade.reason && <div className="notice warn small one-line">{trade.reason}</div>}
       <div className="trade-cols">
         <Side title="You give" players={me.gives} total={me.valueGiven} drops={me.drops} market={!!trade.band} />

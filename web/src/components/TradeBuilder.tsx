@@ -58,7 +58,8 @@ export function TradeBuilder({ analysis, active }: { analysis: Analysis; active:
         >
           {others.map((t) => (
             <option key={t.team.id} value={t.team.id}>
-              {t.team.name} ({t.team.owner})
+              {t.team.name}
+              {t.team.owner ? ` (${t.team.owner})` : ""}
             </option>
           ))}
         </select>
