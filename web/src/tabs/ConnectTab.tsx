@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type Active, type Analysis, type AppState, type ImportResult, type YahooLeague } from "../api";
+import { api, type Active, type Analysis, type AppState, type ImportResult, type Me, type YahooLeague } from "../api";
 import { ErrorBox, Loading } from "../components/common";
 import type { ApiError } from "../lib/errors";
 import { ago, record } from "../lib/format";
@@ -7,6 +7,7 @@ import { toApiError, useAsync, type AsyncState } from "../lib/useAsync";
 import { ImportSection } from "./ImportSection";
 
 interface Props {
+  me: Me;
   state: AsyncState<AppState>;
   active: Active | null;
   analysis: AsyncState<Analysis>;
@@ -17,44 +18,55 @@ interface Props {
   onImported: (r: ImportResult) => void;
 }
 
-export function ConnectTab({ state, active, analysis, justConnected, onChoose, onGo, onImported }: Props) {
+export function ConnectTab({ me, state, active, analysis, justConnected, onChoose, onGo, onImported }: Props) {
+  // A user (or an admin viewing as one) sees only their own league: re-import yes; demo, Yahoo, delete, settings no.
+  const isUser = !!me.scope;
   return (
     <div className="stack">
       {justConnected && <div className="notice good">Yahoo connected. Pick your league below.</div>}
       {state.error && <ErrorBox error={state.error} onRetry={state.reload} />}
 
-      {active && <CurrentLeague active={active} analysis={analysis} onChoose={onChoose} onGo={onGo} />}
+      {active && <CurrentLeague active={active} analysis={analysis} onChoose={onChoose} onGo={onGo} pinned={isUser} />}
 
-      <div className="grid-2">
-        <section className="card">
-          <h2>Demo league</h2>
-          <p className="muted">
-            A 12-team half-PPR league drafted from real expert rankings. Everything works offline from Yahoo — the fastest way to see how the
-            model thinks.
-          </p>
-          <button
-            className="btn primary"
-            onClick={() => {
-              onChoose({ provider: "demo", id: "42" });
-              onGo();
-            }}
-          >
-            Use demo league
-          </button>
-        </section>
+      {!isUser && (
+        <div className="grid-2">
+          <section className="card">
+            <h2>Demo league</h2>
+            <p className="muted">
+              A 12-team half-PPR league drafted from real expert rankings. Everything works offline from Yahoo — the fastest way to see how the
+              model thinks.
+            </p>
+            <button
+              className="btn primary"
+              onClick={() => {
+                onChoose({ provider: "demo", id: "42" });
+                onGo();
+              }}
+            >
+              Use demo league
+            </button>
+          </section>
 
-        <section className="card">
-          <h2>Yahoo Fantasy (API)</h2>
-          <p className="muted small">
-            Yahoo now approves API apps one by one (1–2 weeks). Until then, use <a href="#import">Import from Yahoo (browser)</a> below.
-          </p>
-          {state.loading && !state.data && <Loading label="Checking server…" />}
-          {state.data && <YahooSection state={state.data} reloadState={state.reload} active={active} onChoose={onChoose} />}
-          {state.error && !state.data && <p className="muted">Yahoo status is unavailable until the server responds.</p>}
-        </section>
-      </div>
+          <section className="card">
+            <h2>Yahoo Fantasy (API)</h2>
+            <p className="muted small">
+              Yahoo now approves API apps one by one (1–2 weeks). Until then, use <a href="#import">Import from Yahoo (browser)</a> below.
+            </p>
+            {state.loading && !state.data && <Loading label="Checking server…" />}
+            {state.data && <YahooSection state={state.data} reloadState={state.reload} active={active} onChoose={onChoose} />}
+            {state.error && !state.data && <p className="muted">Yahoo status is unavailable until the server responds.</p>}
+          </section>
+        </div>
+      )}
 
-      <ImportSection key={analysis.data?.league.fetchedAt ?? ""} active={active} onChoose={onChoose} onImported={onImported} onSettingsSaved={analysis.reload} />
+      <ImportSection
+        key={analysis.data?.league.fetchedAt ?? ""}
+        active={active}
+        canManage={!isUser}
+        onChoose={onChoose}
+        onImported={onImported}
+        onSettingsSaved={analysis.reload}
+      />
 
       {state.data && (
         <p className="muted small">
@@ -66,7 +78,20 @@ export function ConnectTab({ state, active, analysis, justConnected, onChoose, o
   );
 }
 
-function CurrentLeague({ active, analysis, onChoose, onGo }: { active: Active; analysis: AsyncState<Analysis>; onChoose: Props["onChoose"]; onGo: () => void }) {
+function CurrentLeague({
+  active,
+  analysis,
+  onChoose,
+  onGo,
+  pinned,
+}: {
+  active: Active;
+  analysis: AsyncState<Analysis>;
+  onChoose: Props["onChoose"];
+  onGo: () => void;
+  /** User scope: the team is fixed by the access list, so no team picker and no Clear. */
+  pinned: boolean;
+}) {
   // The team list comes from the League itself so the picker works even when analysis fails.
   // fetchedAt dep: reload after an imported league is restored from the browser backup (App.tsx).
   const league = useAsync(() => api.league(active), [active.provider, active.id, analysis.data?.league.fetchedAt]);
@@ -110,9 +135,11 @@ function CurrentLeague({ active, analysis, onChoose, onGo }: { active: Active; a
               {refreshing ? "Refreshing…" : "Refresh from Yahoo"}
             </button>
           )}
-          <button className="btn" onClick={() => onChoose(null)}>
-            Clear
-          </button>
+          {!pinned && (
+            <button className="btn" onClick={() => onChoose(null)}>
+              Clear
+            </button>
+          )}
           <button className="btn primary" onClick={onGo}>
             Open My Team
           </button>
@@ -121,7 +148,12 @@ function CurrentLeague({ active, analysis, onChoose, onGo }: { active: Active; a
       {league.loading && !league.data && <Loading label="Loading teams…" />}
       {league.error && <ErrorBox error={league.error} onRetry={league.reload} />}
       {refreshErr && <ErrorBox error={refreshErr} />}
-      {teams.length > 0 && (
+      {pinned && teams.length > 0 && (
+        <div className="muted small">
+          Your team: <b>{teams.find((t) => t.id === team)?.name ?? team}</b>
+        </div>
+      )}
+      {!pinned && teams.length > 0 && (
         <label className="field">
           <span>Your team</span>
           <select value={team} onChange={(e) => onChoose({ ...active, team: e.target.value })}>

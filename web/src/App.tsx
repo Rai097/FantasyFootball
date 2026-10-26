@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, MOCK, type Active, type Analysis, type ImportResult } from "./api";
+import { api, MOCK, setAuthProblemHandler, setCsrf, type Active, type Analysis, type AuthProblem, type ImportResult, type Me } from "./api";
+import { AccountMenu } from "./components/AccountMenu";
 import { ErrorBox, Loading } from "./components/common";
+import { SignIn } from "./components/SignIn";
+import type { ApiError } from "./lib/errors";
 import { ago } from "./lib/format";
 import { loadActive, loadImportBackup, saveActive } from "./lib/storage";
 import { useAsync, type AsyncState } from "./lib/useAsync";
@@ -32,10 +35,83 @@ function tabFromHash(): TabId | null {
   return (TABS.find((t) => t.id === h)?.id as TabId | undefined) ?? null;
 }
 
+/** A user (or an admin viewing as one) always works on their own league and team. */
+function scopedActive(me: Me, a: Active | null): Active | null {
+  if (!me.scope) return a;
+  return { provider: "import", id: me.scope.leagueId, team: me.scope.teamId };
+}
+
+/** Auth gate: sign-in screen on 401 / not on the list; the desk once GET /api/auth/me answers. */
 export function App() {
-  const [active, setActiveRaw] = useState<Active | null>(() => loadActive());
+  const [problem, setProblem] = useState<AuthProblem | null>(() =>
+    new URLSearchParams(window.location.search).get("error") === "not_allowed" ? "not_allowed" : null,
+  );
+  const [me, setMeRaw] = useState<Me>();
+  const [meErr, setMeErr] = useState<ApiError>();
+
+  const setMe = useCallback((m: Me | undefined) => {
+    setCsrf(m?.csrf ?? "");
+    setMeRaw(m);
+  }, []);
+
+  const loadMe = useCallback(() => {
+    setMeErr(undefined);
+    api.me().then(
+      (m) => {
+        setMe(m);
+        setProblem(null);
+      },
+      (e: ApiError) => {
+        if (e.status === 401) setProblem((p) => (p === "not_allowed" ? p : "signin"));
+        else if (e.status === 403) setProblem("not_allowed");
+        else setMeErr(e);
+      },
+    );
+  }, [setMe]);
+
+  useEffect(() => {
+    // The callback lands on /?error=not_allowed: show the message once, keep the URL clean.
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("error")) {
+      params.delete("error");
+      const q = params.toString();
+      history.replaceState(null, "", `${window.location.pathname}${q ? `?${q}` : ""}${window.location.hash}`);
+    }
+    setAuthProblemHandler((p) => {
+      setProblem(p);
+      setMe(undefined);
+    });
+    loadMe();
+    return () => setAuthProblemHandler(undefined);
+  }, [loadMe, setMe]);
+
+  if (problem) return <SignIn problem={problem} />;
+  if (meErr)
+    return (
+      <div className="app">
+        <main className="main">
+          <ErrorBox error={meErr} onRetry={loadMe} />
+        </main>
+      </div>
+    );
+  if (!me) return <Loading label="Checking sign-in…" />;
+  return (
+    <Desk
+      key={me.actingAs?.discordId ?? "self"}
+      me={me}
+      onMe={setMe}
+      onSignedOut={() => {
+        setMe(undefined);
+        setProblem("signin");
+      }}
+    />
+  );
+}
+
+function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSignedOut: () => void }) {
+  const [active, setActiveRaw] = useState<Active | null>(() => scopedActive(me, loadActive()));
   const [justConnected, setJustConnected] = useState(false);
-  const [tab, setTabRaw] = useState<TabId>(() => tabFromHash() ?? (loadActive() ? "team" : "connect"));
+  const [tab, setTabRaw] = useState<TabId>(() => tabFromHash() ?? (scopedActive(me, loadActive()) ? "team" : "connect"));
 
   const setTab = useCallback((t: TabId) => {
     setTabRaw(t);
@@ -63,10 +139,14 @@ export function App() {
     }
   }, []);
 
-  const setActive = useCallback((a: Active | null) => {
-    saveActive(a);
-    setActiveRaw(a);
-  }, []);
+  const setActive = useCallback(
+    (a: Active | null) => {
+      const next = scopedActive(me, a);
+      saveActive(next);
+      setActiveRaw(next);
+    },
+    [me],
+  );
 
   const state = useAsync(() => api.state(), []);
   const activeKey = active ? `${active.provider}/${active.id}/${active.team ?? ""}` : "";
@@ -74,6 +154,7 @@ export function App() {
 
   // Imported leagues live in the server's .data/, which hosted servers lose on restart:
   // re-upload this browser's backup once when the server no longer knows the league.
+  // Sends X-CSRF-Token like every write; a 403 means "not your league": stop, no retry (restored is set first).
   const [restored, setRestored] = useState<string>();
   useEffect(() => {
     if (active?.provider !== "import" || analysis.error?.status !== 404 || restored === active.id) return;
@@ -153,8 +234,20 @@ export function App() {
             {status.text}
           </span>
           {MOCK && <span className="pill mock" title="All data is served by web/src/mock.ts">Mock data</span>}
+          <AccountMenu me={me} onMe={onMe} onSignedOut={onSignedOut} />
         </div>
       </header>
+
+      {me.actingAs && (
+        <div className="notice warn banner row between wrap">
+          <span>
+            Viewing as <b>{me.actingAs.note ?? `user …${me.actingAs.discordId.slice(-4)}`}</b>: their league and team only.
+          </span>
+          <button className="btn small" onClick={() => api.actAs(null).then(onMe, () => undefined)}>
+            Back to admin
+          </button>
+        </div>
+      )}
 
       <nav className="tabs" role="tablist">
         {TABS.map((t) => (
@@ -167,6 +260,7 @@ export function App() {
       <main className="main">
         {tab === "connect" && (
           <ConnectTab
+            me={me}
             state={state}
             active={active}
             analysis={analysis}

@@ -137,18 +137,56 @@ export interface TradeQuery {
   maxGet?: number;
 }
 
+/** GET /api/auth/me: who is signed in and what they may see (docs/DESIGN.md "Discord sign-in"). */
+export interface Me {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  /** The account's own role (stays "admin" while viewing as a user). */
+  role: "admin" | "user";
+  csrf: string;
+  /** The league and team this session is limited to; null = admin view (everything). */
+  scope: { leagueId: string; teamId: string } | null;
+  actingAs: { discordId: string; note: string | null; leagueId: string; teamId: string } | null;
+  /** Dev mode: no Discord config on a development server; every request is the built-in admin. */
+  dev?: boolean;
+}
+
+export interface AccessOverview {
+  users: { discordId: string; leagueId: string; teamId: string; note?: string }[];
+  leagues: { id: string; name: string; teams: { id: string; name: string }[] }[];
+}
+
+/** Why the API refused this browser: no/expired session, or the Discord account is no longer on the list. */
+export type AuthProblem = "signin" | "not_allowed";
+
+let csrfToken = "";
+let onAuthProblem: ((p: AuthProblem) => void) | undefined;
+/** Set by the app after GET /api/auth/me; sent as X-CSRF-Token on every write. */
+export function setCsrf(token: string): void {
+  csrfToken = token;
+}
+/** The app shows the sign-in screen when any request answers 401 (or 403 not_allowed). */
+export function setAuthProblemHandler(fn: ((p: AuthProblem) => void) | undefined): void {
+  onAuthProblem = fn;
+}
+
 export const MOCK = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mock") === "1";
 
-async function request<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
+async function request<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown, opts: { quietAuth?: boolean } = {}): Promise<T> {
   if (MOCK) {
     const { mockRequest } = await import("./mock");
     return mockRequest(method, path, body) as Promise<T>;
   }
   let res: Response;
   try {
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
     res = await fetch(path, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      credentials: "same-origin",
+      headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
@@ -170,8 +208,9 @@ async function request<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: strin
       // The Vite dev/preview proxy answers 500 with an empty body when the API server is down.
       throw new ApiError("The Trade Desk server did not respond.", res.status, "Is `npm run dev` still running? Check its terminal for errors, then retry.");
     }
-    const e = (data ?? {}) as { error?: string; hint?: string };
-    throw new ApiError(e.error ?? `Request failed (${res.status})`, res.status, e.hint ?? (text && !data ? text.slice(0, 200) : undefined));
+    const e = (data ?? {}) as { error?: string; hint?: string; code?: string };
+    if (!opts.quietAuth && (res.status === 401 || (res.status === 403 && e.code === "not_allowed"))) onAuthProblem?.(res.status === 401 ? "signin" : "not_allowed");
+    throw new ApiError(e.error ?? `Request failed (${res.status})`, res.status, e.hint ?? (text && !data ? text.slice(0, 200) : undefined), e.code);
   }
   if (data === undefined) throw new ApiError("Server returned an empty or non-JSON response.", res.status, text.slice(0, 200));
   return data as T;
@@ -187,6 +226,11 @@ function qs(params: Record<string, string | number | undefined | null>): string 
 const base = (a: Active) => `/api/league/${encodeURIComponent(a.provider)}/${encodeURIComponent(a.id)}`;
 
 export const api = {
+  me: () => request<Me>("GET", "/api/auth/me", undefined, { quietAuth: true }),
+  actAs: (discordId: string | null) => request<Me>("POST", "/api/auth/act-as", { discordId }),
+  access: () => request<AccessOverview>("GET", "/api/access"),
+  logout: () => request<{ ok: true }>("POST", "/auth/logout"),
+
   state: () => request<AppState>("GET", "/api/state"),
   searchPlayers: (q: string) => request<PlayerLite[]>("GET", `/api/players/search${qs({ q })}`),
 

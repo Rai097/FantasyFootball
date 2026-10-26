@@ -428,3 +428,17 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50; max-width: calc(100vw - 32px); background: var(--card-2); color: var(--text); border: 1px solid rgba(62, 207, 122, 0.5); border-radius: var(--radius); padding: 10px 16px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); cursor: pointer; }
 .roster-changes { margin: 4px 0 0; padding-left: 18px; }
 .roster-changes li { margin: 2px 0; }
+
+/* ---------- account (Discord sign-in) ---------- */
+.account { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.user-chip { gap: 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.avatar { width: 20px; height: 20px; border-radius: 50%; flex: none; }
+.avatar.placeholder { display: inline-block; background: var(--border); }
+.view-as { display: inline-flex; align-items: center; gap: 6px; }
+.view-as select { font: inherit; font-size: 12px; color: var(--text); background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 6px; }
+.signin { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.signin-card { width: 100%; max-width: 380px; }
+.signin-btn { display: flex; align-items: center; justify-content: center; min-height: 44px; text-decoration: none; }
+@media (max-width: 700px) {
+  .account .btn, .view-as select { min-height: 44px; }
+}

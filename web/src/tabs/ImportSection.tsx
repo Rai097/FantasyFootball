@@ -11,13 +11,15 @@ import { toApiError, useAsync } from "../lib/useAsync";
 
 interface Props {
   active: Active | null;
+  /** Admin view: league settings and Delete are shown (users may only re-import their own league). */
+  canManage: boolean;
   onChoose: (a: Active | null) => void;
   /** Called after a successful import / re-import; the app refetches and opens My Team. */
   onImported: (r: ImportResult) => void;
   onSettingsSaved: () => void;
 }
 
-export function ImportSection({ active, onChoose, onImported, onSettingsSaved }: Props) {
+export function ImportSection({ active, canManage, onChoose, onImported, onSettingsSaved }: Props) {
   const list = useAsync(() => api.imports(), []);
   const activeImport = active?.provider === "import" ? active.id : undefined;
 
@@ -47,8 +49,8 @@ export function ImportSection({ active, onChoose, onImported, onSettingsSaved }:
           }}
         />
       </div>
-      {activeImport && <ImportSettings key={activeImport} id={activeImport} active={active!} onChoose={onChoose} onSaved={() => (list.reload(), onSettingsSaved())} />}
-      <ImportList list={list.data} loading={list.loading} error={list.error} reload={list.reload} active={active} onChoose={onChoose} />
+      {activeImport && canManage && <ImportSettings key={activeImport} id={activeImport} active={active!} onChoose={onChoose} onSaved={() => (list.reload(), onSettingsSaved())} />}
+      <ImportList list={list.data} loading={list.loading} error={list.error} reload={list.reload} active={active} onChoose={onChoose} canManage={canManage} />
     </section>
   );
 }
@@ -197,7 +199,9 @@ function ImportList({
   reload,
   active,
   onChoose,
+  canManage,
 }: {
+  canManage: boolean;
   list?: ImportSummary[];
   loading: boolean;
   error?: ApiError;
@@ -229,22 +233,24 @@ function ImportList({
                 <button className={`btn small${isActive ? "" : " primary"}`} disabled={isActive} onClick={() => onChoose({ provider: "import", id: l.id })}>
                   {isActive ? "Active" : "Use"}
                 </button>
-                <button
-                  className="btn small"
-                  onClick={async () => {
-                    if (!confirm(`Delete "${l.name}" from Trade Desk? (Nothing changes on Yahoo.)`)) return;
-                    try {
-                      await api.importDelete(l.id);
-                      removeImportBackup(l.id);
-                      if (isActive) onChoose(null);
-                      reload();
-                    } catch (e) {
-                      setErr(toApiError(e));
-                    }
-                  }}
-                >
-                  Delete
-                </button>
+                {canManage && (
+                  <button
+                    className="btn small"
+                    onClick={async () => {
+                      if (!confirm(`Delete "${l.name}" from Trade Desk? (Nothing changes on Yahoo.)`)) return;
+                      try {
+                        await api.importDelete(l.id);
+                        removeImportBackup(l.id);
+                        if (isActive) onChoose(null);
+                        reload();
+                      } catch (e) {
+                        setErr(toApiError(e));
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </li>
           );

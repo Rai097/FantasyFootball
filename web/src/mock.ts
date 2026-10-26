@@ -429,6 +429,7 @@ function route(method: string, url: URL, body: unknown): unknown {
   const p = url.pathname;
   const team = url.searchParams.get("team") || "1";
   if (method === "GET" && p === "/api/state") return state();
+  if (method === "GET" && p === "/api/auth/me") return { id: "mock", name: "Mock admin", avatarUrl: null, role: "admin", csrf: "mock", scope: null, actingAs: null, dev: true };
   if (method === "GET" && p === "/api/players/search") {
     const q = (url.searchParams.get("q") ?? "").toLowerCase();
     return PLAYERS.filter((x) => x.name.toLowerCase().includes(q))
