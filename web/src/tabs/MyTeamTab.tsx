@@ -5,7 +5,7 @@ import { InjuryDot } from "../components/PlayerChip";
 import { PositionStrength } from "../components/PositionStrength";
 import { f1, ordinal, record } from "../lib/format";
 
-export function MyTeamTab({ analysis }: { analysis: Analysis }) {
+export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOpenLeague?: () => void }) {
   const { league, teams, myTeamId } = analysis;
   const me = teams.find((t) => t.team.id === myTeamId);
   if (!me) return <Empty>Team {myTeamId} was not found in this league. Pick your team on the Connect tab.</Empty>;
@@ -22,12 +22,17 @@ export function MyTeamTab({ analysis }: { analysis: Analysis }) {
   }
   const injured = everyone.filter((p) => p.injury && p.injury.status);
   const extraFlags = (me.injuryFlags ?? []).filter((f) => !injured.some((p) => f.includes(p.name)));
-  const ranked = [...teams].sort((a, b) => a.powerRank - b.powerRank);
 
   return (
     <div className="stack">
       <section className="stat-row">
-        <Stat label="Power rank" value={`${ordinal(me.powerRank)}`} sub={`of ${teams.length}`} />
+        <Stat
+          label="Power rank"
+          value={`${ordinal(me.powerRank)}`}
+          sub={`of ${teams.length} · see League ›`}
+          why="Place by power score (0.7 × starter ppg + 0.3 × bench strength). Tap to see who is above you and why."
+          onClick={onOpenLeague}
+        />
         <Stat
           label="Record"
           value={record(me.team.record)}
@@ -121,59 +126,26 @@ export function MyTeamTab({ analysis }: { analysis: Analysis }) {
         </div>
       </div>
 
-      <section className="card">
-        <h2>League power rankings</h2>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th className="num">#</th>
-                <th>Team</th>
-                <th>Record</th>
-                <th className="num">Starter ppg</th>
-                <th className="num">Bench value</th>
-                <th className="num hide-sm">Power score</th>
-                <th className="hide-sm">Needs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ranked.map((t) => (
-                <tr key={t.team.id} className={t.team.id === myTeamId ? "mine" : ""}>
-                  <td className="num">{t.powerRank}</td>
-                  <td>
-                    <div className="strong">{t.team.name}</div>
-                    <div className="muted small">{t.team.owner}</div>
-                  </td>
-                  <td>{record(t.team.record)}</td>
-                  <td className="num">{f1(t.starterPpg)}</td>
-                  <td className="num">{f1(t.benchValue)}</td>
-                  <td className="num hide-sm">{f1(t.powerScore)}</td>
-                  <td className="hide-sm">
-                    {t.needs.map((n) => (
-                      <span key={n} className="tag need">
-                        {n}
-                      </span>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="muted small">Power score = 0.7 × starter ppg + 0.3 × bench strength; ties broken by record.</p>
-      </section>
-
       {analysis.notes && analysis.notes.length > 0 && <p className="muted small footnote">{analysis.notes.join(" · ")}</p>}
     </div>
   );
 }
 
-function Stat({ label, value, sub, why }: { label: string; value: string; sub?: string; why?: string }) {
-  return (
-    <div className="stat" title={why}>
+function Stat({ label, value, sub, why, onClick }: { label: string; value: string; sub?: string; why?: string; onClick?: () => void }) {
+  const body = (
+    <>
       <div className="stat-label">{label}</div>
       <div className="stat-value">{value}</div>
       {sub && <div className="stat-sub">{sub}</div>}
+    </>
+  );
+  return onClick ? (
+    <button type="button" className="stat stat-link" title={why} onClick={onClick}>
+      {body}
+    </button>
+  ) : (
+    <div className="stat" title={why}>
+      {body}
     </div>
   );
 }

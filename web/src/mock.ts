@@ -464,7 +464,7 @@ function route(method: string, url: URL, body: unknown): unknown {
   if (method === "GET" && p === "/api/import") return [];
   if (method === "GET" && p === "/api/import/bookmarklet.js") return { url: "javascript:alert('Mock mode: run the real server to get the bookmarklet.')" };
   if (p.startsWith("/api/import")) throw new ApiError("Importing is not available in mock mode", 400, "Run the real server (npm run dev) to import a league.");
-  const m = p.match(/^\/api\/league\/(demo|yahoo|import)\/([^/]+)(?:\/(analysis|trades|trades2|bench-upgrades|trade\/evaluate|waivers|breakouts|values))?$/);
+  const m = p.match(/^\/api\/league\/(demo|yahoo|import)\/([^/]+)(?:\/(analysis|trades|trades2|bench-upgrades|trade\/evaluate|waivers|breakouts|values|league))?$/);
   if (!m) throw new ApiError(`Mock has no route for ${method} ${p}`, 404);
   const [, provider, id, sub] = m;
   if (provider === "yahoo" && !yahooConnected) throw new ApiError("Not connected to Yahoo", 401, "Reconnect on the Connect tab.");
@@ -502,6 +502,7 @@ function route(method: string, url: URL, body: unknown): unknown {
     return { ...tr, verdict };
   }
   if (sub === "waivers") return waivers(team);
+  if (sub === "league") throw new ApiError("The League tab needs the real server", 400, "Run npm run dev and open the app without ?mock=1.");
   if (sub === "breakouts") return { targets: [], notes: ["Mock mode: breakout targets need the real server (depth charts + snap trends)."] };
   if (sub === "values") {
     const owner = new Map<string, string>();
