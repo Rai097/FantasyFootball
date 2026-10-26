@@ -113,7 +113,7 @@ function TargetRow({ t, rank }: { t: BreakoutTargetRow; rank: number }) {
       </span>
       <span className="num strong t-score">{f1(t.score)}</span>
       <span className={`t-owner small${t.where.type === "fa" ? " fa" : ""}`}>{owner}</span>
-      <span className="t-role small">{t.depthLabel ?? "–"}</span>
+      <span className="t-role small">{t.depthLabel ?? "—"}</span>
     </>
   );
   return (

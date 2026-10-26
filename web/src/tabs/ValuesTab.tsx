@@ -143,13 +143,13 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
                     </>
                   )}
                   <td className="num">{f1(r.ppg)}</td>
-                  <td className="num hide-sm">{r.games ? f1(r.ppg26) : "–"}</td>
-                  <td className="num hide-sm">{r.games ? f1(r.ppgExp26) : "–"}</td>
+                  <td className="num hide-sm">{r.games ? f1(r.ppg26) : "—"}</td>
+                  <td className="num hide-sm">{r.games ? f1(r.ppgExp26) : "—"}</td>
                   <td className="num">
                     {r.pos}
                     {r.posRank}
                   </td>
-                  <td className="num hide-sm">{r.ecrOverall != null ? String(Math.round(r.ecrOverall * 10) / 10) : "–"}</td>
+                  <td className="num hide-sm">{r.ecrOverall != null ? String(Math.round(r.ecrOverall * 10) / 10) : "—"}</td>
                   <td className={r.ownerTeamId ? "owner" : "owner fa"}>{owner(r)}</td>
                 </tr>
               ))}

@@ -4,7 +4,8 @@ import { AccountMenu } from "./components/AccountMenu";
 import { ErrorBox, Loading } from "./components/common";
 import { SignIn } from "./components/SignIn";
 import type { ApiError } from "./lib/errors";
-import { ago } from "./lib/format";
+import { HelpTip } from "./components/HelpTip";
+import { ago, stamp } from "./lib/format";
 import { loadActive, loadImportBackup, saveActive } from "./lib/storage";
 import { useAsync, type AsyncState } from "./lib/useAsync";
 import { ConnectTab } from "./tabs/ConnectTab";
@@ -230,11 +231,23 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
             {league?.settings.name ?? (active ? (analysis.loading ? "Loading league…" : "League unavailable") : "No league selected")}
           </span>
           {week != null && <span className="pill">Week {week}</span>}
-          {state.data && <span className="pill muted" title={`Player database built ${state.data.dbBuiltAt}`}>Data {ago(state.data.dbBuiltAt)}</span>}
-          <span className={`pill status ${status.cls}`}>
-            <span className="status-dot" aria-hidden />
-            {status.text}
-          </span>
+          {league?.import && (
+            <span className="pill updated" title="When this league's rosters were last imported from Yahoo, and who ran the import.">
+              League updated {stamp(league.import.importedAt)} · by {league.import.importedBy ?? "—"}
+            </span>
+          )}
+          {state.data && (
+            <span className="pill muted">
+              Stats {ago(state.data.dbBuiltAt)}
+              <HelpTip text={`When the NFL player stats and expert ranks were last downloaded (${stamp(state.data.dbBuiltAt)}). They refresh every few hours.`} label="What is Stats?" />
+            </span>
+          )}
+          {!league?.import && (
+            <span className={`pill status ${status.cls}`}>
+              <span className="status-dot" aria-hidden />
+              {status.text}
+            </span>
+          )}
           {MOCK && <span className="pill mock" title="All data is served by web/src/mock.ts">Mock data</span>}
           <AccountMenu me={me} onMe={onMe} onSignedOut={onSignedOut} />
         </div>

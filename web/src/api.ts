@@ -81,6 +81,10 @@ export interface ImportSummary {
   numTeams: number;
   teams: number;
   settingsSource: SettingsSource;
+  /** Who ran the latest import (absent on imports saved before release 5). */
+  importedBy?: string;
+  hasStandings: boolean;
+  hasFreeAgents: boolean;
 }
 
 export interface ImportResult {
@@ -91,6 +95,7 @@ export interface ImportResult {
   settingsSource: SettingsSource;
   skippedLines?: number;
   importedAt?: string;
+  importedBy?: string;
   /** true when the same league was imported before and was updated in place (settings kept). */
   updated?: boolean;
   changes?: { teams: number; playersChanged: number };

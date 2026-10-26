@@ -1,12 +1,12 @@
 /** Every number shown to the user goes through one of these: always 1 decimal. */
 export function f1(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return "–";
+  if (n == null || !Number.isFinite(n)) return "—"; // unknown, never 0
   const r = Math.round(n * 10) / 10;
   return (Object.is(r, -0) ? 0 : r).toFixed(1);
 }
 
 export function signed(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return "–";
+  if (n == null || !Number.isFinite(n)) return "—"; // unknown, never 0
   const s = f1(n);
   return n > 0.049 ? `+${s}` : s;
 }
@@ -38,6 +38,13 @@ export function ago(iso: string | undefined): string {
   const h = Math.round(mins / 60);
   if (h < 48) return `${h}h ago`;
   return `${Math.round(h / 24)}d ago`;
+}
+
+/** "Oct 26, 3:04 PM" in the viewer's time zone; "—" when unknown. */
+export function stamp(iso: string | undefined): string {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(t)) return "—";
+  return new Date(t).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 export function record(r?: { wins: number; losses: number; ties: number }): string {

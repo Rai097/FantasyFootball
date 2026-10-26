@@ -1,6 +1,7 @@
 import type { Analysis, VP } from "../api";
 import { Empty, PosBadge, Stat } from "../components/common";
-import { BenchList, LineupTable } from "../components/LineupTable";
+import { ColumnHelp } from "../components/HelpTip";
+import { LineupTable } from "../components/LineupTable";
 import { InjuryDot } from "../components/PlayerChip";
 import { PositionStrength } from "../components/PositionStrength";
 import { f1, ordinal, record } from "../lib/format";
@@ -43,29 +44,26 @@ export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOp
               : "Unknown: the standings were not captured. Re-import the league with the latest bookmarklet to read them."
           }
         />
-        <Stat label="Starter ppg" value={f1(me.starterPpg)} />
-        <Stat label="Bench value" value={f1(me.benchValue)} />
-        <Stat label="Total value" value={f1(me.totalValue)} />
+        <Stat label="Starter ppg" value={f1(me.starterPpg)} why="Projected points per week from your best legal lineup (injured players discounted)." />
+        <Stat label="Bench value" value={f1(me.benchValue)} why="Sum of your bench players' 0–100 trade values: what you could deal without touching the lineup." />
+        <Stat label="Total value" value={f1(me.totalValue)} why="Sum of every rostered player's 0–100 trade value (starters plus bench)." />
       </section>
 
       {me.team.unmatched.length > 0 && (
         <div className="notice warn">
-          Could not match {me.team.unmatched.length} rostered player{me.team.unmatched.length > 1 ? "s" : ""} to the player database: {me.team.unmatched.join(", ")}.
-          They are ignored in all calculations.
+          <b>Not matched, left out of every number:</b> {me.team.unmatched.join(", ")}
         </div>
       )}
 
-      <div className="grid-main">
+      <div className="grid-main team-grid">
         <section className="card">
           <h2>
-            Starting lineup <span className="muted small">{me.team.name}</span>
+            Lineup &amp; bench <span className="muted small">{me.team.name}</span>
           </h2>
-          <LineupTable lineup={me.lineup} />
-          <h3>Bench</h3>
-          <BenchList bench={me.bench} />
+          <LineupTable lineup={me.lineup} bench={me.bench} irIds={me.team.irPlayerIds} />
         </section>
 
-        <div className="stack">
+        <div className="stack side-stack">
           <section className="card">
             <h2>Position strength</h2>
             <PositionStrength me={me} all={teams} />
@@ -82,7 +80,11 @@ export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOp
           </section>
 
           <section className="card">
-            <h2>Byes &amp; injuries</h2>
+            <h2>
+              <ColumnHelp tip={`Starters on bye in each remaining week (red = 2 or more). Dashed weeks, after week ${league.settings.regularSeasonEnd}, are playoffs.`}>
+                Byes &amp; injuries
+              </ColumnHelp>
+            </h2>
             <div className="bye-grid" aria-label="Starters on bye by week">
               {weeks.map((w) => (
                 <div
@@ -91,11 +93,20 @@ export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOp
                   title={w.count ? `Week ${w.week}: ${w.players.map((p) => p.name).join(", ") || `${w.count} starter(s)`} on bye` : `Week ${w.week}: no starters on bye`}
                 >
                   <span className="bye-week">W{w.week}</span>
-                  <span className="bye-count">{w.count || "·"}</span>
+                  <span className="bye-count">{w.count || "0"}</span>
                 </div>
               ))}
             </div>
-            <p className="muted small">Starters on bye per week. Weeks after {league.settings.regularSeasonEnd} are playoffs.</p>
+            <ul className="inj-list bye-list" aria-label="Starters on bye">
+              {weeks
+                .filter((w) => w.players.length > 0)
+                .map((w) => (
+                  <li key={w.week}>
+                    <span className={`bye-wk${w.players.length >= 2 ? " neg" : ""}`}>W{w.week}</span>
+                    <span className="bye-names">{w.players.map((p) => p.name).join(", ")}</span>
+                  </li>
+                ))}
+            </ul>
             {extraFlags.length > 0 && (
               <ul className="inj-list">
                 {extraFlags.map((f) => (
@@ -120,13 +131,19 @@ export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOp
                 ))}
               </ul>
             ) : (
-              extraFlags.length === 0 && <p className="muted">No injury designations on your roster.</p>
+              extraFlags.length === 0 && <div className="muted small">No injury designations on your roster.</div>
             )}
           </section>
         </div>
       </div>
 
-      {analysis.notes && analysis.notes.length > 0 && <p className="muted small footnote">{analysis.notes.join(" · ")}</p>}
+      {analysis.notes && analysis.notes.length > 0 && (
+        <ul className="muted small footnote plain-list">
+          {analysis.notes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
