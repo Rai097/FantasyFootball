@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { claimThreshold, makeSummary, rankWaivers, snapTrendOf, thesisItems } from "./waivers.js";
+import { capRows, claimThreshold, makeSummary, rankWaivers, snapTrendOf, thesisItems } from "./waivers.js";
 import { analyzeTeams } from "./analysis.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { TradeContext } from "./trades.js";
@@ -226,4 +226,33 @@ test("makeSummary: no double period after a name ending in Jr.; drops the action
   assert.equal(makeSummary("Worth more than Harold Fannin Jr..", "Claim him."), "Worth more than Harold Fannin Jr. Claim him.");
   const lead = `${"x".repeat(200)}.`;
   assert.equal(makeSummary(lead, "y".repeat(80)), lead);
+});
+
+test("capRows: the best rows overall plus the best few of every position, in order", () => {
+  const rows = [
+    ...Array.from({ length: 10 }, (_, i) => ({ id: `wr${i}`, pos: "WR" as const })),
+    { id: "k0", pos: "K" as const },
+    { id: "k1", pos: "K" as const },
+    { id: "def0", pos: "DEF" as const },
+  ];
+  assert.deepEqual(capRows(rows, 4, 1).map((r) => r.id), ["wr0", "wr1", "wr2", "wr3", "k0", "def0"]);
+  assert.equal(capRows(rows, 20, 1).length, rows.length);
+});
+
+test("long-term injured (IR, Out (ACL)): never a claim; out for the season → pass; FAAB free agents never say priority", () => {
+  const ctx = ctxFor([...mine, ...other], ["IRGUY"]);
+  const fas = [
+    vp("IR_BACK", "WR", 10, 12, { injury: { status: "IR", week: 4 } }),
+    vp("ACL_DONE", "WR", 10, 12, { injury: { status: "Out", detail: "ACL", week: 4 }, remainingGames: 0 }),
+  ];
+  const r = rankWaivers(ctx, "me", fas.map((p) => ({ player: p, onWaivers: true })), { myPriority: 3 });
+  const by = Object.fromEntries(r.freeAgents.map((t) => [t.id, t]));
+  assert.equal(by.IR_BACK.recommendation, "stash");
+  assert.match(by.IR_BACK.summary, /confirm/i);
+  assert.equal(by.ACL_DONE.recommendation, "pass");
+  assert.match(by.ACL_DONE.summary, /out for the season/i);
+  const faab = league([team("me", mine, { irPlayerIds: ["IRGUY"], faabRemaining: 50 }), team("o", other)], undefined, { numTeams: 12, usesFaab: true, faabBudget: 100 });
+  const players = new Map([...mine, ...other].map((p) => [p.id, p]));
+  const f = rankWaivers({ league: faab, players, teams: analyzeTeams(faab, players, REPL) }, "me", [{ player: vp("FREE", "WR", 10, 12), onWaivers: false }]);
+  assert.doesNotMatch(txt(f.freeAgents[0]), /priority/i);
 });
