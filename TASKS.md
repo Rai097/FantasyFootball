@@ -7,9 +7,10 @@ Release plan (in order; each = build → adversarial test → review → deploy 
    standings + waiver order (needs the owner's re-import; Yahoo markup unverified — check the import diagnostics);
    League tab (standings, power chart, who is above me); Trade Finder + Targets collapsed rows, column help, Values
    payload 1 MB → 97 KB.
-5. Values, My Team, Connect cleanup + header "League updated <date> · by <name>" (rename the "Data Xm ago" pill).
-   My Team (owner screenshot): power rankings removed (they live in the League tab, release 3); bench = same table as
-   the starting lineup; dense layout, cards in a row equal height (no dead space under Byes & injuries).
+5. SHIPPED 2026-10-26 (live 28b0671): My Team one lineup+bench table, equal-height cards, bullet "why"; header
+   "League updated <date> · by <name>"; Values/Connect tidy; bookmark renamed "Trade Desk import v2".
+NEXT: owner re-imports with the v2 bookmark → verify standings / waiver order / FA-vs-waivers / K-DEF against Yahoo's
+real pages from the import diagnostics, fix the readers if needed.
 Open bug (not reproduced): tab clicks sometimes "don't register" until the mouse moves. Local repro: every click
 registered, 0 long tasks, API < 50 ms. Suspects: main-thread stalls from big payloads (values 1 MB, waivers 423 KB —
 trim in releases 1/4/5) or a Chrome/Windows repaint glitch. Asked the owner: does the underline move, which browser/OS.
