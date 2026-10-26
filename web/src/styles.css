@@ -89,7 +89,7 @@ a { color: var(--accent); }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
-.tab { background: none; border: none; color: var(--muted); font: inherit; font-weight: 600; padding: 10px 14px; min-height: 44px; min-width: 44px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+.tab { background: none; border: none; color: var(--muted); font: inherit; font-weight: 600; padding: 10px 14px; min-height: 44px; min-width: 44px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; flex: none; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 .footer { margin-top: 28px; color: var(--muted); font-size: 12px; text-align: center; }
@@ -589,6 +589,8 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .bye-wk { flex: none; width: 34px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
 .bye-names { min-width: 0; }
 .side-stack h2 { margin-bottom: 10px; }
+/* An odd last stat card spans the row (5 cards on a 2-column phone grid leave no hole). */
+@media (max-width: 700px) { .stat-row > .stat:last-child:nth-child(odd) { grid-column: 1 / -1; } }
 .plain-list { list-style: none; padding: 0; }
 .pill.updated { color: var(--text); }
 .pill .why-btn { width: 15px; height: 15px; font-size: 9.5px; }
