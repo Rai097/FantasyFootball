@@ -14,6 +14,11 @@ VERIFIED 2026-10-26 on the owner's v2 import (real Yahoo pages): standings 12/12
    page cap, so a few stay unknown), 25 K + 16 DEF free agents. Bookmark link now served no-store (Cloudflare had
    edge-cached the old ".js" bookmarklet for 4 h).
 NEXT (backlog, highest value first):
+- IN PROGRESS: power score v2 (0.7 projected starters + 0.3 actual pts/game; IR-slot players never start).
+- Right after it (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
+  MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
+  they get +16% (why they'd accept)"; pitch text must not say "you win on value" ambiguously; name the projection
+  source in the lineup tooltip (ours blends ECR + usage; Yahoo's projections differ, e.g. Hockenson).
 - K/DEF streaming uses ECR only, so every K/DEF free agent is "pass"; add the week's matchup (opponent, implied
   points / sacks / turnovers) so Waivers can name a streaming DEF/K for next week (owner wants a Week 8 DEF).
 - Page-cap unknowns: raise the waivers list cap or stop at the last available player so fewer statuses stay unknown.
