@@ -22,6 +22,7 @@ import {
 import type { TradeContext } from "./trades.js";
 import { analyzeTeams } from "./analysis.js";
 import { attachMarket } from "./market.js";
+import { rosterParts } from "./rosterScore.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { League, ValuedPlayer } from "./types.js";
 
@@ -306,4 +307,16 @@ test("v3.1 D: giving a riser costs ×1.15 in my true value and he is never tagge
     delete P("mRB3").riser;
     delete P("mRB3").edge;
   }
+});
+
+test("IR slot: teamV3 never starts a healthy IR-slotted player and scores the roster without him", () => {
+  const c = ctxFor(league([team("me", mine, { irPlayerIds: ["mWR1"] }), team("them", theirs)]), [...mine, ...theirs]);
+  const me = teamV3(c, "me");
+  assert.ok(!me.base.lineup.some((l) => l.player?.id === "mWR1"));
+  assert.ok(!me.starters.has("mWR1") && !me.starterList.some((p) => p.id === "mWR1"));
+  assert.ok(!me.pieces.some((p) => p.id === "mWR1"), "IR players are not offered");
+  const without = rosterParts(c.league.settings, mine.filter((p) => p.id !== "mWR1"), REPL).parts;
+  assert.equal(me.parts.now, without.now);
+  assert.equal(me.parts.depth, without.depth);
+  assert.ok(me.parts.now < teamV3(ctx, "me").parts.now);
 });
