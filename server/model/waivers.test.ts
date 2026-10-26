@@ -151,6 +151,8 @@ test("an injured would-be claim on waivers becomes a stash (no priority spent si
   const onW = rankWaivers(ctx, "me", [{ player: q, onWaivers: true }], { myPriority: 3 }).freeAgents[0];
   assert.equal(onW.recommendation, "stash", onW.why);
   assert.match(onW.why, /confirm his status before spending priority/);
+  const dnp = vp("FA_DNP", "WR", 10, 12, { injury: { status: "DNP", week: 4 } });
+  assert.equal(rankWaivers(ctx, "me", [{ player: dnp, onWaivers: true }], { myPriority: 3 }).freeAgents[0].recommendation, "stash");
   const free = rankWaivers(ctx, "me", [{ player: q, onWaivers: false }], { myPriority: 3 }).freeAgents[0];
   assert.equal(free.recommendation, "claim");
   assert.match(free.why, /no priority cost/);

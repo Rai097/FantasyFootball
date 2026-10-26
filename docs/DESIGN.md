@@ -440,7 +440,7 @@ Why: the owner uses waivers to find players who can *become* starters, not only 
 * **Calls** (order claim > optional > stash > wait > pass; K/DEF rules unchanged):
   * claim: lineup gain ≥ threshold, **or future starter** = breakout score ≥ 55, situation ≥ 0.5 and expected pts/g
     over the last 2 weeks ≥ RB 10 / WR 9 / TE 8 (`FUTURE_STARTER`), or the existing top-3-at-a-need rule.
-  * An injured (Q/D/O) would-be claim **on waivers** in a rolling-list league becomes **stash** ("confirm his status
+  * An injured (Q/D/O, or practice "DNP") would-be claim **on waivers** in a rolling-list league becomes **stash** ("confirm his status
     before spending priority, or add him after waivers clear"). As a free agent it stays a claim (no priority cost).
   * stash: not an upgrade today, breakout score ≥ 50 and ≥ 4.5 expected pts/g (`STASH`); otherwise pass.
   * Rows tie-break on breakout score after rankScore. The breakout thesis is appended to `why`.

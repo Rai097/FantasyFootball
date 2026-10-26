@@ -163,7 +163,8 @@ export function rankWaivers(
       reasons.push(`modest upgrade (gain ${fmtSigned(gain)} < ${threshold.toFixed(1)})`);
     }
     // An injured player is never worth rolling-list priority sight unseen: hold him as a stash until his status is known.
-    const hurt = riskStatus(fa);
+    // "DNP" = did not practice, no game status yet: treated like Questionable here.
+    const hurt = riskStatus(fa) ?? (fa.injury?.status.trim().toUpperCase() === "DNP" ? "dnp" : null);
     if (recommendation === "claim" && hurt && onWaivers && !S.usesFaab) {
       recommendation = "stash";
       reasons.push(`but he is ${fa.injury!.status}: confirm his status before spending priority, or add him after waivers clear`);
