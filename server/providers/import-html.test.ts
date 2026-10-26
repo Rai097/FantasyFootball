@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { availabilityFrom, htmlToText, mapSlotToken, parseMyTeamId, parsePlayersHtml, parsePosTeam, parseSettingsHtml, playerKey, waiverStatusOf } from "../../web/src/import/yahooHtml.js";
+import { availabilityFrom, htmlToText, mapSlotToken, parseMyTeamId, parsePlayersHtml, parsePosTeam, parseSettingsHtml, parseStandingsHtml, playerKey, waiverStatusOf } from "../../web/src/import/yahooHtml.js";
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const html = (n: string) => readFileSync(path.join(dir, n), "utf8");
@@ -153,4 +153,47 @@ test("waiverStatusOf: owner column wins, else the status=W list, else unknown", 
   assert.equal(empty.diag.listUsed, false);
   // Empty W list with a readable owner column elsewhere: the list is believed (nobody is on waivers).
   assert.equal(waiverStatusOf(ps, { keys: new Set(), complete: true, ignored: false }).onWaivers.get("2"), false);
+});
+
+test("standings page: rank, W-L-T, points, streak and waiver rank per team, across division tables", () => {
+  const r = parseStandingsHtml(html("yahoo-web-standings.html"), "1405188");
+  assert.deepEqual(r.rows.map((x) => x.teamId), ["3", "1", "5", "2", "4"], "nav links are not rows");
+  assert.deepEqual(r.rows[0], {
+    teamId: "3",
+    name: "Gridiron Gurus",
+    record: { wins: 6, losses: 1, ties: 0, pointsFor: 1043.24, pointsAgainst: 870.5, rank: 1, streak: "W3" },
+    waiverRank: 11,
+  });
+  assert.deepEqual(r.rows[1].record, { wins: 4, losses: 2, ties: 1, pointsFor: 988.1, pointsAgainst: 950.02, rank: 4, streak: "L1" });
+  assert.equal(r.rows[3].name, "Hail Mary & Co");
+  assert.equal(r.rows[4].record?.pointsAgainst, 1010.8);
+  assert.equal(r.rows[4].waiverRank, 1);
+  assert.equal(r.diag.tables, 2);
+  assert.equal(r.diag.rankFrom, "header");
+  assert.deepEqual(r.diag.missing, ["seed"]);
+  assert.deepEqual(r.diag.noRecord, []);
+});
+
+test("standings without points / waiver columns: those stay unknown and are listed as missing", () => {
+  const r = parseStandingsHtml(html("yahoo-web-standings-no-points.html"), "1405188");
+  assert.deepEqual(r.rows[0], { teamId: "7", name: "Blitz Kings", record: { wins: 6, losses: 1, ties: 0, rank: 1, streak: "W3" } });
+  assert.ok(r.rows.every((x) => x.record?.pointsFor === undefined && x.record?.pointsAgainst === undefined && x.waiverRank === undefined));
+  assert.deepEqual(r.rows[2], { teamId: "8", name: "Sack Masters" }, "an unreadable record is left out, not 0-0");
+  assert.deepEqual(r.diag.noRecord, ["Sack Masters"]);
+  assert.equal(r.diag.rankFrom, "first unlabeled column");
+  assert.deepEqual(r.diag.missing, ["points for", "points against", "waiver", "seed"]);
+});
+
+test("standings: another league's links, separate W / L / T columns, and a page without a table", () => {
+  const sep = `<table><tr><th>Rank</th><th>Team</th><th>W</th><th>L</th><th>T</th><th>Points For</th><th>Waiver Priority</th></tr>
+    <tr><td>3</td><td><a href="/f1/999/2">Other League</a></td><td>1</td><td>1</td><td>0</td><td>10</td><td>1</td></tr>
+    <tr><td>2</td><td><a href="/f1/1405188/6">Mine</a></td><td>4</td><td>3</td><td>0</td><td>812.5</td><td>7</td></tr></table>`;
+  const r = parseStandingsHtml(sep, "1405188");
+  assert.deepEqual(r.rows, [{ teamId: "6", name: "Mine", record: { wins: 4, losses: 3, ties: 0, pointsFor: 812.5, rank: 2 }, waiverRank: 7 }]);
+  const noT = parseStandingsHtml(sep.replace("<th>T</th>", "<th>Ties?</th>"), "1405188");
+  assert.equal(noT.rows[0].record, undefined, "no ties column: no record rather than a guessed 0");
+  const none = parseStandingsHtml("<html><body><a href='/f1/1405188/3'>My Team</a></body></html>", "1405188");
+  assert.deepEqual(none.rows, []);
+  assert.match(none.diag.note ?? "", /no standings table/);
+  assert.equal(none.diag.missing.length, 7);
 });

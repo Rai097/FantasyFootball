@@ -4,7 +4,7 @@
 // pages while the user is logged in, reads the league's own pages with
 // same-origin fetches, and shows the result for the user to copy/download.
 // It never sends data anywhere else.
-import { parseMyTeamId, parsePlayersHtml, parseSettingsHtml, playerKey, waiverStatusOf, type ScrapedPlayer, type WaiverList } from "./yahooHtml";
+import { parseMyTeamId, parsePlayersHtml, parseSettingsHtml, parseStandingsHtml, playerKey, waiverStatusOf, type ScrapedPlayer, type StandingsRecord, type WaiverList } from "./yahooHtml";
 
 const DEFAULT_SLOTS = ["QB", "WR", "WR", "RB", "RB", "TE", "FLEX", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN", "IR"];
 const HALF_PPR = { passYd: 0.04, passTd: 4, passInt: -1, rushYd: 0.1, rushTd: 6, rec: 0.5, recYd: 0.1, recTd: 6, twoPt: 2, fumLost: -2, teRec: 0 };
@@ -66,7 +66,7 @@ async function run(): Promise<void> {
   const leagueId = m[1];
   const base = `${location.origin}/f1/${leagueId}`;
   const diagnostics: Diag[] = [];
-  const teams: { id: string; name: string; players: ScrapedPlayer[] }[] = [];
+  const teams: { id: string; name: string; players: ScrapedPlayer[]; record?: StandingsRecord; waiverRank?: number }[] = [];
   let myTeamId: string | undefined = parseMyTeamId(document.documentElement.outerHTML, leagueId);
 
   for (let n = 1; n <= MAX_TEAMS; n++) {
@@ -105,6 +105,37 @@ async function run(): Promise<void> {
   const haveScoring = sc.rec !== undefined && sc.passTd !== undefined;
   if (settings?.slots && haveScoring) settingsSource = "page";
   else if (settings?.slots || haveScoring || settings?.numTeams) settingsSource = "partial";
+
+  // Standings (record, points, rank, streak) and the waiver order: the standings page, else the league home page,
+  // which also shows a standings table. Matched to the team pages by team number; nothing is guessed.
+  let standingsTeams = 0;
+  let waiverRanks = 0;
+  for (const url of [`${base}/standings`, base]) {
+    say("reading standings…");
+    try {
+      const page = await getPage(url);
+      const landedElsewhere = page.redirected && !page.finalUrl.startsWith(url);
+      if (!page.ok || landedElsewhere) {
+        diagnostics.push({ step: "standings", url, status: page.status, note: landedElsewhere ? `redirected to ${page.finalUrl}` : "not ok" });
+        continue;
+      }
+      const r = parseStandingsHtml(page.html, leagueId);
+      let matched = 0;
+      for (const row of r.rows) {
+        const t = teams.find((x) => x.id === row.teamId);
+        if (!t) continue;
+        matched++;
+        if (row.record) t.record = row.record;
+        if (row.waiverRank) t.waiverRank = row.waiverRank;
+      }
+      diagnostics.push({ step: "standings", url, status: page.status, matched, ...r.diag });
+      if (teams.some((t) => t.record)) break;
+    } catch (e) {
+      diagnostics.push({ step: "standings", url, note: `fetch failed: ${(e as Error).message}` });
+    }
+  }
+  standingsTeams = teams.filter((t) => t.record).length;
+  waiverRanks = teams.filter((t) => t.waiverRank).length;
 
   // Free agents: players?status=A lists everyone available (free agents AND players on waivers). The "Owner" column
   // says which ("FA" / "W (Wed)"); a separate status=W list is read too, as a fallback and a cross-check.
@@ -207,6 +238,7 @@ async function run(): Promise<void> {
   const noPos = diagnostics.reduce((a, d) => a + (Array.isArray(d.noPos) ? d.noPos.length : 0), 0);
   summary.textContent =
     `${teams.length} team${teams.length === 1 ? "" : "s"} found · ${teams.reduce((a, t) => a + t.players.length, 0)} rostered players · ` +
+    `standings: ${standingsTeams ? `${standingsTeams} of ${teams.length} teams` : "NOT found"} · waiver order: ${waiverRanks ? `${waiverRanks} of ${teams.length} teams` : "NOT found"} · ` +
     `${faOut.length} available players (${faOut.filter((f) => f.onWaivers === true).length} on waivers, ${faOut.filter((f) => f.onWaivers === undefined).length} unknown) · settings: ${settingsSource === "page" ? "read from Yahoo" : settingsSource === "partial" ? "partly read (check them after import)" : "NOT found, Yahoo defaults used (check them after import)"}` +
     (noPos ? ` · ${noPos} player link(s) without a position were skipped` : "");
   box.appendChild(summary);

@@ -401,3 +401,176 @@ export function parseSettingsHtml(html: string): SettingsParse {
   out.diag.sample = text.slice(0, 300);
   return out;
 }
+
+// ------------------------------------------------------------------ standings
+/** One team's standings line as read from the page. Fields the page did not show are absent (unknown). */
+export interface StandingsRecord {
+  wins: number;
+  losses: number;
+  ties: number;
+  pointsFor?: number;
+  pointsAgainst?: number;
+  rank?: number;
+  streak?: string;
+  seed?: number;
+}
+export interface StandingsRow {
+  /** Team number from the row's /f1/<league>/<n> link (the same number as the team pages). */
+  teamId: string;
+  name: string;
+  record?: StandingsRecord;
+  /** Place in the rolling waiver order (1 = first claim), from a "Waiver" column. */
+  waiverRank?: number;
+}
+export type StandingsColumn = "rank" | "wlt" | "w" | "l" | "t" | "pf" | "pa" | "streak" | "waiver" | "seed";
+export interface StandingsParse {
+  rows: StandingsRow[];
+  diag: {
+    /** Tables whose header row named at least two standings columns (divisions = several). */
+    tables: number;
+    headers: string[];
+    columns: StandingsColumn[];
+    /** Columns this page did not have (their values stay unknown). */
+    missing: string[];
+    rows: number;
+    /** Team rows whose wins / losses / ties could not be read. */
+    noRecord: string[];
+    rankFrom?: "header" | "first unlabeled column";
+    sampleRows: string[];
+    note?: string;
+  };
+}
+
+const STANDINGS_HEADERS: [StandingsColumn, RegExp][] = [
+  ["rank", /^(rank|rk|#|pos)\.?$/i],
+  ["wlt", /^(w-l-t|w-l|record|overall)$/i],
+  ["w", /^(w|wins?)$/i],
+  ["l", /^(l|loss(es)?)$/i],
+  ["t", /^(t|ties?)$/i],
+  ["pf", /^(pts|points)( for)?$|^pf$|^fan pts$/i],
+  ["pa", /^(pts|points) (agst|against|vs)\.?$|^pa$|^opp pts$/i],
+  ["streak", /^(streak|strk)$/i],
+  ["waiver", /^waivers?( priority| order| rank)?$|^waiver pri\.?$/i],
+  ["seed", /^(playoff )?seed$/i],
+];
+
+/** Whole number from a cell ("1", "1*", "#2"); undefined when the cell has none. */
+const leadInt = (cell: string): number | undefined => {
+  const m = /^\s*#?(\d{1,3})\b/.exec(cell);
+  return m ? Number(m[1]) : undefined;
+};
+/** Points cell: "1,043.24" → 1043.24; anything else → undefined. */
+const pointsOf = (cell: string): number | undefined => {
+  const t = cell.replace(/,/g, "").trim();
+  return /^\d+(?:\.\d+)?$/.test(t) ? Number(t) : undefined;
+};
+
+function cellsOf(rowHtml: string): string[] {
+  return [...rowHtml.matchAll(/<t([dh])\b[^>]*>([\s\S]*?)<\/t\1>/gi)].map((m) => oneLine(m[2]));
+}
+
+/**
+ * Standings table(s) of a Yahoo league page (…/f1/<league>/standings, or the league home page): per team the rank,
+ * W-L-T (one "5-1-0" cell or separate W / L / T columns), points for / against, streak, waiver priority and playoff
+ * seed. Columns are found by their header text, never by position (the rank may sit in an unlabeled first column);
+ * a column the page lacks is listed in diag.missing and its value stays unknown.
+ */
+export function parseStandingsHtml(html: string, leagueId: string): StandingsParse {
+  const rows: StandingsRow[] = [];
+  const seen = new Set<string>();
+  const noRecord: string[] = [];
+  const sampleRows: string[] = [];
+  const found = new Set<StandingsColumn>();
+  let headers: string[] = [];
+  let tables = 0;
+  let rankFrom: StandingsParse["diag"]["rankFrom"];
+  const teamLink = new RegExp(`<a\\b[^>]*href\\s*=\\s*["'][^"']*/f1/${leagueId}/(\\d{1,2})/?(?:[?#][^"']*)?["'][^>]*>([\\s\\S]*?)</a>`, "gi");
+  /** The row's team: number from its first team link, name from the first such link with text (logos come first). */
+  const teamOf = (rowHtml: string): { id: string; name: string } | undefined => {
+    const links = [...rowHtml.matchAll(teamLink)];
+    if (!links.length) return undefined;
+    const named = links.find((l) => l[1] === links[0][1] && oneLine(l[2]));
+    return { id: links[0][1], name: named ? oneLine(named[2]) : "" };
+  };
+
+  for (const t of html.matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
+    let cols: Partial<Record<StandingsColumn, number>> | undefined;
+    for (const r of t[0].matchAll(/<tr\b[\s\S]*?<\/tr>/gi)) {
+      const link = teamOf(r[0]);
+      const cells = cellsOf(r[0]);
+      if (!link) {
+        // A header row: at least two cells name a standings column.
+        const map: Partial<Record<StandingsColumn, number>> = {};
+        cells.forEach((c, i) => {
+          const hit = STANDINGS_HEADERS.find(([, re]) => re.test(c.trim()));
+          if (hit && map[hit[0]] === undefined) map[hit[0]] = i;
+        });
+        if (Object.keys(map).length >= 2) {
+          if (map.rank === undefined && cells[0]?.trim() === "") map.rank = -1; // maybe an unlabeled rank column
+          cols = map;
+          tables++;
+          if (!headers.length) headers = cells.slice(0, 14);
+        }
+        continue;
+      }
+      if (!cols) continue;
+      const teamId = link.id;
+      if (seen.has(teamId)) continue;
+      seen.add(teamId);
+      const name = link.name || `Team ${teamId}`;
+      if (sampleRows.length < 2) sampleRows.push(cells.join(" | ").slice(0, 200));
+      const cell = (k: StandingsColumn) => (cols![k] !== undefined && cols![k]! >= 0 ? cells[cols![k]!] : undefined);
+      for (const k of Object.keys(cols) as StandingsColumn[]) if (cols[k]! >= 0) found.add(k);
+
+      let wlt: [number, number, number] | undefined;
+      const wltCell = cell("wlt");
+      const m = wltCell !== undefined ? /^\s*(\d{1,2})\s*-\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*$/.exec(wltCell) : null;
+      // "5-1" is how Yahoo writes a record without ties: ties = 0 is what the cell says, not a guess.
+      if (m) wlt = [Number(m[1]), Number(m[2]), m[3] !== undefined ? Number(m[3]) : 0];
+      else {
+        const [w, l, tt] = (["w", "l", "t"] as const).map((k) => (cell(k) !== undefined && /^\s*\d{1,2}\s*$/.test(cell(k)!) ? Number(cell(k)) : undefined));
+        if (w !== undefined && l !== undefined && tt !== undefined) wlt = [w, l, tt];
+      }
+      const row: StandingsRow = { teamId, name };
+      if (wlt) {
+        const rec: StandingsRecord = { wins: wlt[0], losses: wlt[1], ties: wlt[2] };
+        const pf = cell("pf") !== undefined ? pointsOf(cell("pf")!) : undefined;
+        if (pf !== undefined) rec.pointsFor = pf;
+        const pa = cell("pa") !== undefined ? pointsOf(cell("pa")!) : undefined;
+        if (pa !== undefined) rec.pointsAgainst = pa;
+        let rank = cell("rank") !== undefined ? leadInt(cell("rank")!) : undefined;
+        if (rank !== undefined) rankFrom = "header";
+        else if (cols.rank === -1 && /^\s*\d{1,2}\s*\*?\s*$/.test(cells[0] ?? "")) {
+          rank = leadInt(cells[0]);
+          rankFrom ??= "first unlabeled column";
+        }
+        if (rank) rec.rank = rank;
+        const st = /^\s*([WLT])\s*-?\s*(\d{1,2})\s*$/i.exec(cell("streak") ?? "");
+        if (st) rec.streak = `${st[1].toUpperCase()}${Number(st[2])}`;
+        const seed = cell("seed") !== undefined ? leadInt(cell("seed")!) : undefined;
+        if (seed) rec.seed = seed;
+        row.record = rec;
+      } else noRecord.push(name);
+      const wr = cell("waiver") !== undefined ? leadInt(cell("waiver")!) : undefined;
+      if (wr) row.waiverRank = wr;
+      rows.push(row);
+    }
+  }
+  if (rankFrom === "first unlabeled column") found.add("rank");
+  const want: [string, StandingsColumn[]][] = [["rank", ["rank"]], ["W-L-T", ["wlt", "w"]], ["points for", ["pf"]], ["points against", ["pa"]], ["streak", ["streak"]], ["waiver", ["waiver"]], ["seed", ["seed"]]];
+  const missing = want.filter(([, ks]) => !ks.some((k) => found.has(k))).map(([label]) => label);
+  return {
+    rows,
+    diag: {
+      tables,
+      headers,
+      columns: [...found],
+      missing: rows.length ? missing : want.map(([label]) => label),
+      rows: rows.length,
+      noRecord: noRecord.slice(0, 20),
+      ...(rankFrom ? { rankFrom } : {}),
+      sampleRows,
+      ...(!tables ? { note: "no standings table (no header row naming W-L-T / Pts For / Waiver …)" } : !rows.length ? { note: "standings header found but no team rows" } : {}),
+    },
+  };
+}
