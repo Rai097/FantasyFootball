@@ -65,13 +65,11 @@ function assertClean(v: unknown, what: string) {
 }
 
 const NUMERIC_VP = ["ppg", "ppg26", "ppgExp26", "ppg25", "games", "vorp", "value", "posRank", "remainingGames", "trend"] as const;
-/** `withWhy: false` for rows that replace the value "why" with their own summary/details (waivers). */
-function assertValuedPlayer(p: any, what: string, withWhy = true) {
+function assertValuedPlayer(p: any, what: string) {
   assert.equal(typeof p.id, "string", `${what}: id`);
   assert.equal(typeof p.name, "string", `${what}: name`);
   assert.ok(["QB", "RB", "WR", "TE", "K", "DEF"].includes(p.pos), `${what}: pos ${p.pos}`);
   for (const k of NUMERIC_VP) assert.ok(Number.isFinite(p[k]), `${what} (${p.name}): ${k}=${p[k]}`);
-  if (!withWhy) return;
   assert.equal(typeof p.why, "string", `${what}: why`);
   assert.ok(p.why.length > 0, `${what}: empty why`);
 }
@@ -421,6 +419,8 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
   test("GET waivers", async () => {
     const { status, json } = await get(`${L}/waivers`);
     assert.equal(status, 200);
+    const bytes = JSON.stringify(json).length;
+    assert.ok(bytes < 150_000, `waivers payload ${bytes} bytes (keep it small: rows carry only what the tab renders)`);
     assertClean(json, "waivers");
     assert.equal(json.numTeams, 12);
     assert.deepEqual(summaryProblems(json.advice), [], json.advice);
@@ -431,7 +431,9 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     const league = (await get(L)).json;
     const rostered = new Set(league.teams.flatMap((t: any) => t.playerIds));
     for (const w of json.freeAgents) {
-      assertValuedPlayer(w, "waivers", false);
+      for (const k of ["ppg", "value", "gain", "benchGain", "rankScore"]) assert.ok(Number.isFinite(w[k]), `${w.name}: ${k}=${w[k]}`);
+      assert.ok(["QB", "RB", "WR", "TE", "K", "DEF"].includes(w.pos) && typeof w.name === "string" && typeof w.team === "string");
+      assert.equal(w.weeks, undefined, `${w.name}: weekly stat lines must not be in the waivers payload`);
       assert.ok(["claim", "optional", "stash", "wait", "pass"].includes(w.recommendation), `${w.name}: ${w.recommendation}`);
       if (w.recommendation === "stash" && !w.injury) assert.ok(w.breakout && w.breakout.score >= 50, `${w.name}: stash without a breakout signal`);
       assert.deepEqual(summaryProblems(w.summary), [], `${w.name}: ${w.summary}`);

@@ -1,5 +1,5 @@
 // Free-agent ranking + waiver-priority advice. See docs/DESIGN.md "Waivers" (+ amendments).
-import type { Availability, DetailItem, Position, ValuedPlayer, WaiverBreakout, WaiverTarget } from "./types.js";
+import type { Availability, DetailItem, Position, ValuedPlayer, WaiverBreakout, WaiverRow, WaiverTarget } from "./types.js";
 import { eligible, optimalLineup, slotLabels } from "./lineup.js";
 import { rosterOf } from "./analysis.js";
 import type { TradeContext } from "./trades.js";
@@ -217,7 +217,6 @@ export function rankWaivers(
     const details: DetailItem[] = [];
     const item = (label: string, value: string, tone?: DetailItem["tone"]) => details.push(tone ? { label, value: clampItem(value), tone } : { label, value: clampItem(value) });
     const toneOf = (x: number) => (x > 0.05 ? "pos" : x < -0.05 ? "neg" : undefined);
-    item("Call", `${recommendation[0].toUpperCase()}${recommendation.slice(1)}`);
     item("Rule", rule);
     for (const d of ruleItems) item(d.label, d.value);
     item("Lineup", startsText);
@@ -233,8 +232,10 @@ export function rankWaivers(
       item("Expected pts/g, last 2 weeks", bo.oppLevel.toFixed(1));
       for (const d of thesisItems(bo.thesis)) item(d.label, d.value);
     }
-    item("Availability", avail === "fa" ? "Free agent: no waiver claim needed" : avail === "waivers" ? "On waivers: needs a claim" : "Unknown: re-import to see free agents");
+    // The call pill and the FA / W badge are on the row already; details add the cost, or the status when it costs nothing to know.
     if (ACTIONABLE.has(recommendation)) item("Cost", cost);
+    if (avail === "unknown") item("Availability", "Unknown: re-import to see free agents");
+    else if (!ACTIONABLE.has(recommendation)) item("Availability", avail === "fa" ? "Free agent" : "On waivers");
 
     const { why: _valueWhy, ...base0 } = fa;
     return {
@@ -292,6 +293,38 @@ export function rankWaivers(
   const faStatusKnown = !freeAgents.length || freeAgents.some((f) => f.availability !== "unknown");
   return { freeAgents: limited, myPriority: w, numTeams: n, advice: adviceLine(limited, w, n, S.usesFaab), rules, faStatusKnown };
 }
+
+/** GET /waivers response: the result with slim rows (only what the Waivers tab renders). */
+export type WaiversResponse = Omit<WaiverResult, "freeAgents"> & { freeAgents: WaiverRow[] };
+
+export function toWaiverRow(t: WaiverTarget): WaiverRow {
+  const row: WaiverRow = {
+    id: t.id,
+    name: t.name,
+    pos: t.pos,
+    team: t.team,
+    ppg: t.ppg,
+    value: t.value,
+    gain: t.gain,
+    benchGain: t.benchGain,
+    recommendation: t.recommendation,
+    summary: t.summary,
+    details: t.details,
+    onWaivers: t.onWaivers,
+    availability: t.availability,
+    rankScore: t.rankScore,
+    drop: t.drop ? { id: t.drop.id, name: t.drop.name, pos: t.drop.pos, value: t.drop.value } : null,
+  };
+  if (t.injury) row.injury = t.injury;
+  if (t.percentOwned != null) row.percentOwned = t.percentOwned;
+  if (t.breakout) {
+    const { thesis: _t, ...b } = t.breakout;
+    row.breakout = b;
+  }
+  return row;
+}
+
+export const toWaiversResponse = (r: WaiverResult): WaiversResponse => ({ ...r, freeAgents: r.freeAgents.map(toWaiverRow) });
 
 const ACTIONABLE = new Set<WaiverTarget["recommendation"]>(["claim", "optional", "stash"]);
 

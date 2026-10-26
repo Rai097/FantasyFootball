@@ -1,13 +1,13 @@
 // Typed fetch wrappers for every endpoint in docs/DESIGN.md "HTTP API contract".
 // With `?mock=1` in the page URL all calls are answered by ./mock.ts instead.
-import type { BreakoutResult, BreakoutTarget, DetailItem, League, Position, Scoring, SlotKind, TeamAnalysis, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "../../server/model/types";
+import type { BreakoutResult, BreakoutTarget, DetailItem, WaiverRow, League, Position, Scoring, SlotKind, TeamAnalysis, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "../../server/model/types";
 
 export type TradeMode = "now" | "balanced" | "playoffs";
 export type { TradeFinderResult };
 import { ApiError } from "./lib/errors";
 
 export { ApiError };
-export type { WaiverTarget, BreakoutTarget, BreakoutResult, DetailItem };
+export type { WaiverTarget, WaiverRow, BreakoutTarget, BreakoutResult, DetailItem };
 
 /** ValuedPlayer as served by the API. */
 export type VP = ValuedPlayer;
@@ -54,7 +54,8 @@ export interface Analysis {
 export type TradeResult = Trade & { verdict?: string };
 
 export interface WaiversResponse {
-  freeAgents: WaiverTarget[];
+  /** Slim rows: only what the Waivers tab renders. */
+  freeAgents: WaiverRow[];
   myPriority?: number;
   numTeams: number;
   /** One short line: counts and top names. */

@@ -314,6 +314,18 @@ export interface WaiverTarget extends Omit<ValuedPlayer, "why"> {
   breakout?: WaiverBreakout;
 }
 
+/**
+ * One row of GET /waivers: only what the Waivers tab renders (the full WaiverTarget carries weekly stat lines
+ * and a whole ValuedPlayer as `drop`, ~7 KB a row; this is well under 1 KB).
+ */
+export type WaiverRow = Pick<
+  WaiverTarget,
+  "id" | "name" | "pos" | "team" | "injury" | "ppg" | "value" | "gain" | "benchGain" | "recommendation" | "summary" | "details" | "onWaivers" | "availability" | "percentOwned" | "rankScore"
+> & {
+  drop: { id: string; name: string; pos: Position; value: number } | null;
+  breakout?: Omit<WaiverBreakout, "thesis">;
+};
+
 /** The part of a BreakoutTarget the waivers module uses. */
 export interface WaiverBreakout {
   tier: "rising" | "stash";

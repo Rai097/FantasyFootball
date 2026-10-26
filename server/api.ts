@@ -38,7 +38,7 @@ import { findBenchUpgrades } from "./model/tradesV2.js";
 import { benchUpgradeFilter, evaluateTradeV3, findTradesV3, qbRuleNote } from "./model/tradesV3.js";
 import { attachMarket, marketQuery, type ValueSource } from "./model/market.js";
 import { parseMode } from "./model/rosterScore.js";
-import { rankWaivers, type FreeAgentInput } from "./model/waivers.js";
+import { rankWaivers, toWaiversResponse, type FreeAgentInput } from "./model/waivers.js";
 import { findBreakouts, type MarketValue } from "./model/breakouts.js";
 import { getDepthChart } from "./data/depthCharts.js";
 import { getMarketData, pprBucket } from "./data/fantasycalc.js";
@@ -460,7 +460,7 @@ apiRouter.get(
         freeAgentInputs(l, provider, req.params.id, team, refresh, myTeamOf(req, provider, l.league)),
         faBreakoutSignals(l, team),
       ]);
-      return rankWaivers({ ...l.ctx, league }, team, input, { myPriority, breakouts });
+      return toWaiversResponse(rankWaivers({ ...l.ctx, league }, team, input, { myPriority, breakouts }));
     });
     res.json(result);
   }),
