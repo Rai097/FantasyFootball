@@ -247,7 +247,8 @@ async function freeAgentInputs(
   refresh: boolean,
   /** The team whose waiver priority / FAAB the stored data describes (myTeamOf). */
   mine: string | undefined,
-): Promise<{ input: FreeAgentInput[]; myPriority?: number; league: League }> {
+): Promise<{ input: FreeAgentInput[]; myPriority?: number; league: League; notes?: string[] }> {
+  let notes: string[] | undefined;
   let fas: { player: Player; onWaivers: boolean; availability?: Availability; percentOwned?: number }[];
   let myPriority: number | undefined;
   let league = l.league;
@@ -261,6 +262,7 @@ async function freeAgentInputs(
     const d = importFreeAgents(l.league, l.db, stored, l.league.settings.currentWeek, team);
     fas = d.freeAgents;
     myPriority = d.myPriority;
+    notes = d.notes;
   } else {
     const y = await yahoo.getFreeAgents(l.db, id, { refresh });
     fas = y.freeAgents;
@@ -277,7 +279,7 @@ async function freeAgentInputs(
     seen.add(f.player.id);
     input.push({ player: l.ctx.valuation.valueOf(f.player), onWaivers: f.onWaivers, availability: f.availability, percentOwned: f.percentOwned });
   }
-  return { input, myPriority, league };
+  return { input, myPriority, league, ...(notes ? { notes } : {}) };
 }
 
 /** Breakout Targets signal for every unrostered player in the breakout pool (feeds the waiver calls). */
@@ -457,11 +459,12 @@ apiRouter.get(
     const team = teamParam(req, l.league, provider);
     const key = `${provider}:${req.params.id}:waivers:${team}`;
     const result = await cached(key, refresh, async () => {
-      const [{ input, myPriority, league }, breakouts] = await Promise.all([
+      const [{ input, myPriority, league, notes }, breakouts] = await Promise.all([
         freeAgentInputs(l, provider, req.params.id, team, refresh, myTeamOf(req, provider, l.league)),
         faBreakoutSignals(l, team),
       ]);
-      return toWaiversResponse(rankWaivers({ ...l.ctx, league }, team, input, { myPriority, breakouts }));
+      const r = toWaiversResponse(rankWaivers({ ...l.ctx, league }, team, input, { myPriority, breakouts }));
+      return notes ? { ...r, notes } : r;
     });
     res.json(result);
   }),

@@ -24,6 +24,8 @@ export interface WaiverResult {
   rules: DetailItem[];
   /** false when the source did not say who is a free agent vs on waivers (old import: re-import to see). */
   faStatusKnown: boolean;
+  /** Data problems worth a line (e.g. imported free agents we could not match), when any. */
+  notes?: string[];
 }
 
 const r1 = (x: number) => Math.round(x * 10) / 10;

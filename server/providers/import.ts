@@ -217,15 +217,34 @@ function keepTimestamp(v: unknown, now: Date): string {
 /**
  * Yahoo's pages name teams "<League name> - <Team>". With one league on screen the prefix is noise, so when every
  * team (at least 2) starts with the same "<x> - " part it is removed. Names that would become empty are kept.
+ *
+ * Idempotent (it runs on save, and on read for imports saved before the rule): without `leagueName`, the prefix is
+ * only removed when what is left does not share a prefix again ("L - Team - One" / "L - Team - Two" is ambiguous and
+ * stays as is), so a second pass never strips more. With `leagueName` (the read path), only exactly
+ * "<leagueName> - " is removed: an already-stripped name never starts with it again.
  */
-export function stripLeaguePrefix<T extends { name: string }>(teams: T[]): T[] {
+export function stripLeaguePrefix<T extends { name: string }>(teams: T[], leagueName?: string): T[] {
   if (teams.length < 2) return teams;
-  const first = teams[0].name;
-  const sep = first.indexOf(" - ");
-  if (sep <= 0) return teams;
-  const prefix = first.slice(0, sep + 3);
-  if (!teams.every((t) => t.name.startsWith(prefix) && t.name.length > prefix.length)) return teams;
-  return teams.map((t) => ({ ...t, name: t.name.slice(prefix.length).trim() }));
+  const prefixOf = (name: string) => {
+    const sep = name.indexOf(" - ");
+    return sep > 0 ? name.slice(0, sep + 3) : undefined;
+  };
+  const shared = (ns: string[]) => {
+    const p = prefixOf(ns[0]);
+    return p && ns.every((n) => n.startsWith(p) && n.length > p.length) ? p : undefined;
+  };
+  const names = teams.map((t) => t.name);
+  let prefix: string | undefined;
+  if (leagueName !== undefined) {
+    const p = `${leagueName.trim()} - `;
+    prefix = leagueName.trim() && names.every((n) => n.startsWith(p) && n.trim().length > p.length) ? p : undefined;
+  } else {
+    prefix = shared(names);
+    if (prefix && shared(names.map((n) => n.slice(prefix!.length).trim()))) prefix = undefined;
+  }
+  if (!prefix) return teams;
+  const cut = prefix;
+  return teams.map((t) => ({ ...t, name: t.name.slice(cut.length).trim() }));
 }
 
 export function validateImport(body: unknown, now = new Date()): StoredImport {
@@ -307,8 +326,9 @@ export async function readImport(id: string): Promise<StoredImport | null> {
   if (!isValidId(id)) return null;
   const s = await readJson<StoredImport>(fileName(id));
   // import-<id>-history.json also matches import-*.json: it holds an array, not an import.
-  // Leagues saved before the prefix rule are cleaned on read (no re-import needed).
-  return s && !Array.isArray(s) && Array.isArray(s.teams) ? { ...s, teams: stripLeaguePrefix(s.teams) } : null;
+  // Leagues saved before the prefix rule are cleaned on read (no re-import needed), but only of the league's own
+  // name: names already stripped on save are never stripped again.
+  return s && !Array.isArray(s) && Array.isArray(s.teams) ? { ...s, teams: stripLeaguePrefix(s.teams, s.name) } : null;
 }
 
 export async function saveImport(s: StoredImport): Promise<void> {
@@ -480,14 +500,19 @@ export function importFreeAgents(
   week: number,
   /** The team the priority is for (the request's own team); none → no priority. */
   teamId?: string,
-): { freeAgents: { player: Player; onWaivers: boolean; availability: Availability }[]; myPriority?: number } {
+): { freeAgents: { player: Player; onWaivers: boolean; availability: Availability }[]; myPriority?: number; unmatched?: string[]; notes?: string[] } {
   const rostered = new Set(league.teams.flatMap((t) => t.playerIds));
   const out: { player: Player; onWaivers: boolean; availability: Availability }[] = [];
+  const unmatched: string[] = [];
   if (s.freeAgents && s.freeAgents.length) {
     const seen = new Set<string>();
     for (const raw of s.freeAgents) {
       const p = resolvePlayer(db, raw);
-      if (!p || rostered.has(p.id) || seen.has(p.id)) continue;
+      if (!p) {
+        unmatched.push(`${raw.name} (${raw.pos || "?"})`);
+        continue;
+      }
+      if (rostered.has(p.id) || seen.has(p.id)) continue;
       seen.add(p.id);
       const availability: Availability = raw.onWaivers === undefined ? "unknown" : raw.onWaivers ? "waivers" : "fa";
       out.push({ player: withYahooStatus(p, entryOf(raw), week) ?? p, onWaivers: raw.onWaivers ?? true, availability });
@@ -495,7 +520,12 @@ export function importFreeAgents(
   } else {
     for (const p of draftBoard(db.players.values())) if (!rostered.has(p.id)) out.push({ player: p, onWaivers: true, availability: "unknown" });
   }
-  return { freeAgents: out, myPriority: waiverPriorityOf(s, teamId) };
+  const myPriority = waiverPriorityOf(s, teamId);
+  if (!unmatched.length) return { freeAgents: out, myPriority };
+  // Never silently dropped: the count and the first names go to the response notes.
+  const shown = unmatched.slice(0, 5).join(", ");
+  const note = `${unmatched.length} imported free agent${unmatched.length === 1 ? "" : "s"} not matched to our player list: ${shown}${unmatched.length > 5 ? ", …" : ""}`;
+  return { freeAgents: out, myPriority, unmatched, notes: [note] };
 }
 
 /** Paste mode: add or replace teams (matched by name, case-insensitive) in an existing import. */

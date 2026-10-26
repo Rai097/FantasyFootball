@@ -23,7 +23,7 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
 
   if (res.error) return <ErrorBox error={res.error} onRetry={res.reload} />;
   if (!res.data) return <Loading label="Ranking free agents…" />;
-  const { freeAgents, myPriority, numTeams, advice, rules, faStatusKnown } = res.data;
+  const { freeAgents, myPriority, numTeams, advice, rules, faStatusKnown, notes } = res.data;
   const byPos = freeAgents.filter((p) => !pos || p.pos === pos);
   const counts = { all: byPos.length, fa: byPos.filter((p) => !p.onWaivers).length, waivers: byPos.filter((p) => p.onWaivers).length };
   const rows = byPos.filter((p) => avail === "all" || !faStatusKnown || (avail === "fa" ? !p.onWaivers : p.onWaivers));
@@ -34,7 +34,7 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
     <div className="stack">
       <section className="card waiver-head">
         <div className="row gap wrap">
-          {myPriority != null ? (
+          {usesFaab ? null : myPriority != null ? (
             <span className="pill big" title="Your place in the rolling waiver order; a successful claim moves you to last.">
               Waiver priority <b>#{myPriority}</b> of {numTeams}
             </span>
@@ -51,6 +51,11 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
           )}
         </div>
         <p className="advice">{advice}</p>
+        {notes?.map((n) => (
+          <p key={n} className="notice warn small" title="Players in your import that we could not match by Yahoo id or name, so they are not ranked here.">
+            {n}
+          </p>
+        ))}
         {!faStatusKnown && (
           <p className="notice warn small">Free agent or on waivers: status unknown. Re-import your league to see free agents.</p>
         )}
@@ -69,7 +74,7 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
                   className={`seg-btn${avail === k ? " active" : ""}`}
                   onClick={() => setAvail(k)}
                   aria-pressed={avail === k}
-                  title={k === "fa" ? "Free agents: add any time, no waiver priority used." : k === "waivers" ? "On waivers: needs a claim, which uses your priority." : undefined}
+                  title={k === "fa" ? usesFaab ? "Free agents: add any time, no bid needed." : "Free agents: add any time, no waiver priority used." : k === "waivers" ? usesFaab ? "On waivers: needs a winning bid when waivers process." : "On waivers: needs a claim, which uses your priority." : undefined}
                 >
                   {label} <span className="seg-count">{counts[k]}</span>
                 </button>
@@ -117,13 +122,13 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
 function AvailBadge({ p }: { p: WaiverRow }) {
   if (p.availability === "fa")
     return (
-      <span className="tag small-tag avail-fa" title="Free agent: add any time, no waiver priority used.">
+      <span className="tag small-tag avail-fa" title="Free agent: add any time, no waiver claim needed.">
         FA
       </span>
     );
   if (p.availability === "waivers")
     return (
-      <span className="tag small-tag avail-w" title="On waivers: needs a claim, which uses your priority.">
+      <span className="tag small-tag avail-w" title="On waivers: needs a claim (your priority, or a bid in a FAAB league) when waivers process.">
         W
       </span>
     );

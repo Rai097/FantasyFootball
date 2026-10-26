@@ -272,6 +272,16 @@ test("league-name prefix is stripped from team names when every team shares it",
   assert.deepEqual(v.teams.map((x) => x.name), ["No Cap Rai", "Caw"]);
 });
 
+test("league-name prefix: strip once — ambiguous nested prefixes stay; the read path strips only the league's own name", () => {
+  const t = (n: string) => ({ name: n });
+  const nested = [t("L - Team - One"), t("L - Team - Two")];
+  assert.deepEqual(stripLeaguePrefix(nested).map((x) => x.name), ["L - Team - One", "L - Team - Two"]);
+  // Read path (readImport passes the stored league name): legacy names are cleaned, stripped names left alone.
+  assert.deepEqual(stripLeaguePrefix(nested, "L").map((x) => x.name), ["Team - One", "Team - Two"]);
+  assert.deepEqual(stripLeaguePrefix([t("Team - One"), t("Team - Two")], "L").map((x) => x.name), ["Team - One", "Team - Two"]);
+  assert.deepEqual(stripLeaguePrefix([t("No Cap Rai"), t("Caw")], "Kingshot").map((x) => x.name), ["No Cap Rai", "Caw"]);
+});
+
 // ------------------------------------------------------------------ standings and waiver order (2026-10-26)
 const withStandings = () => {
   const b = body();

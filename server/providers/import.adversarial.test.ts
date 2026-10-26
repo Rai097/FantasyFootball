@@ -184,7 +184,10 @@ test("importFreeAgents: availability fa / waivers / unknown; unknown counts as o
   assert.deepEqual([by.cle.onWaivers, by.cle.availability], [false, "fa"]);
   assert.equal(by.r, undefined, "rostered player never a free agent");
   assert.equal(freeAgents.length, 4);
-  assert.equal(myPriority, 5);
+  // Corrected by the developer (DESIGN "Import: standings and waiver order"): the stored waiverPriority belongs to the
+  // importer's team only, so with no team asked for it is unknown; the importer's own team sees it.
+  assert.equal(myPriority, undefined);
+  assert.equal(importFreeAgents(leagueOf(["r"]), db, { ...stored([]), myTeamId: "1" }, 8, "1").myPriority, 5);
 });
 
 test("importFreeAgents: unresolved imported free agents are reported somewhere (not silently dropped)", () => {
