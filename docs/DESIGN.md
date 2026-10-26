@@ -517,3 +517,11 @@ shows the sign-in screen on any 401.
   and the installed copy, README / DEPLOY / CLAUDE wording. New tests: production without the four auth vars exits 1;
   production WITH dummy values → `/api/state` without a cookie is 401 (dev mode cannot leak into production); auth unit
   tests with an injected fake Discord client.
+
+**Adversarial test round (2026-10-26) — fixes**
+* A user's re-import refreshes rosters and free agents only; league settings (name, slots, scoring, weeks, waiver
+  priority, settings source) are kept from the stored league (`leagueSettingsOf` in api.ts).
+* Dev mode needs an explicit `NODE_ENV=development` or `test` (`npm run dev` sets it); unset or misspelled NODE_ENV
+  requires full Discord config. Auth vars are trimmed; whitespace-only = missing.
+* Logout always clears the cookie; if the session file cannot be written it answers 503 and the store retries the
+  write (every 5 s, at most 60 times) so a restart cannot revive the session once storage works.

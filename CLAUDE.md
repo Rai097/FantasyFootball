@@ -33,6 +33,8 @@ Open work and "Resume here" live in TASKS.md.
 ## Rules
 - Read-only toward Yahoo: never add a write call.
 - Every number shown in the UI has a one-sentence "why" tooltip.
+- Table/list rows never show walls of text: a 1–2 sentence summary under 255 characters per row; the full analysis
+  opens only when the row is tapped (owner, 2026-10-26; applies to every table).
 - Never commit `.env`, `.cache/`, `.data/` (already in .gitignore).
 - Yahoo API access is pending Yahoo's approval (since July 2026 apps need it); until then
   the `import` provider is the real-league path. Yahoo code must stay defensive and

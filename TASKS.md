@@ -11,6 +11,11 @@
 - Right after sign-in (owner, 2026-10-26): header shows "League updated <date, time> · by <Discord name>" at all
   times (store importedBy on each import/re-import; any user in the league can re-import, it upserts the shared
   league). Rename the existing "Data Xm ago" pill (player-stats download time) so the two are not confused.
+- Then (owner, 2026-10-26): clean up tables, starting with Waivers. Every row shows a 1–2 sentence summary under
+  255 characters; the full analysis opens when the row is tapped (rule for ALL tables: Waivers, Trades, Targets,
+  Values, My Team). Waivers also only shows players "on waivers": the import has no on-waivers vs free-agent flag, so
+  every player is marked W and true free agents (no priority cost) cannot be told apart. Capture that in the import
+  and show free agents worth adding.
 - Open bugs: none known beyond the backlog.
 
 ## Waiting on
