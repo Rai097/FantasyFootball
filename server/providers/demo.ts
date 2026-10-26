@@ -186,14 +186,22 @@ export function buildDemoLeague(input: DemoInput, seed = 42): League {
 }
 
 /**
- * Demo waiver wire: every ECR-ranked player not on a roster. All are "on waivers"
- * (rolling list processed Tuesdays). Waiver priority = worst record first.
+ * Demo waiver wire: every ECR-ranked player not on a roster. About a third are "on waivers"
+ * (recently dropped, rolling list), the rest are free agents — a stable pick by player id so the
+ * demo shows both kinds like a real Yahoo league. Waiver priority = worst record first.
  */
+/** Small stable string hash (FNV-1a) for deterministic demo choices. */
+function idHash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+  return h;
+}
+
 export function demoFreeAgents(league: League, players: Iterable<Player>): { freeAgents: { player: Player; onWaivers: boolean }[]; myPriority?: number } {
   const rostered = new Set(league.teams.flatMap((t) => t.playerIds));
   const freeAgents = draftBoard(players)
     .filter((p) => !rostered.has(p.id))
-    .map((player) => ({ player, onWaivers: true }));
+    .map((player) => ({ player, onWaivers: idHash(player.id) % 3 === 0 }));
   const order = [...league.teams].sort(
     (a, b) => (a.record?.wins ?? 0) - (b.record?.wins ?? 0) || (a.record?.pointsFor ?? 0) - (b.record?.pointsFor ?? 0) || a.id.localeCompare(b.id),
   );

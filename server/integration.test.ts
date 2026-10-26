@@ -9,6 +9,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { detailProblems, summaryProblems } from "./model/testkit.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BOOT_TIMEOUT_MS = 180_000;
@@ -64,11 +65,13 @@ function assertClean(v: unknown, what: string) {
 }
 
 const NUMERIC_VP = ["ppg", "ppg26", "ppgExp26", "ppg25", "games", "vorp", "value", "posRank", "remainingGames", "trend"] as const;
-function assertValuedPlayer(p: any, what: string) {
+/** `withWhy: false` for rows that replace the value "why" with their own summary/details (waivers). */
+function assertValuedPlayer(p: any, what: string, withWhy = true) {
   assert.equal(typeof p.id, "string", `${what}: id`);
   assert.equal(typeof p.name, "string", `${what}: name`);
   assert.ok(["QB", "RB", "WR", "TE", "K", "DEF"].includes(p.pos), `${what}: pos ${p.pos}`);
   for (const k of NUMERIC_VP) assert.ok(Number.isFinite(p[k]), `${what} (${p.name}): ${k}=${p[k]}`);
+  if (!withWhy) return;
   assert.equal(typeof p.why, "string", `${what}: why`);
   assert.ok(p.why.length > 0, `${what}: empty why`);
 }
@@ -420,15 +423,23 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.equal(status, 200);
     assertClean(json, "waivers");
     assert.equal(json.numTeams, 12);
-    assert.equal(typeof json.advice, "string");
+    assert.deepEqual(summaryProblems(json.advice), [], json.advice);
+    assert.ok(Array.isArray(json.rules) && json.rules.length > 0);
+    assert.equal(json.faStatusKnown, true);
     assert.ok(json.freeAgents.length >= 10);
+    assert.ok(json.freeAgents.some((w: any) => !w.onWaivers) && json.freeAgents.some((w: any) => w.onWaivers), "demo shows free agents and waiver players");
     const league = (await get(L)).json;
     const rostered = new Set(league.teams.flatMap((t: any) => t.playerIds));
     for (const w of json.freeAgents) {
-      assertValuedPlayer(w, "waivers");
+      assertValuedPlayer(w, "waivers", false);
       assert.ok(["claim", "optional", "stash", "wait", "pass"].includes(w.recommendation), `${w.name}: ${w.recommendation}`);
       if (w.recommendation === "stash" && !w.injury) assert.ok(w.breakout && w.breakout.score >= 50, `${w.name}: stash without a breakout signal`);
-      assert.ok(typeof w.why === "string" && w.why.length > 0, `${w.name}: why`);
+      assert.deepEqual(summaryProblems(w.summary), [], `${w.name}: ${w.summary}`);
+      assert.ok(Array.isArray(w.details) && w.details.length > 0, `${w.name}: details`);
+      assert.deepEqual(detailProblems(w.details), [], w.name);
+      assert.equal(w.why, undefined, `${w.name}: the value "why" must not leak into a waiver row`);
+      assert.equal(typeof w.onWaivers, "boolean");
+      assert.ok(["fa", "waivers"].includes(w.availability), `${w.name}: ${w.availability}`);
       assert.ok(Number.isFinite(w.gain) && Number.isFinite(w.benchGain));
       assert.ok(!rostered.has(w.id), `${w.name} is rostered`);
     }

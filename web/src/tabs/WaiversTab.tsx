@@ -101,10 +101,10 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
                   <td className="call-td">
                     <span className={`rec rec-${p.recommendation}`}>{p.recommendation}</span>
                     <span className="show-sm">
-                      <Why text={p.why} />
+                      <Why text={p.summary} />
                     </span>
                   </td>
-                  <td className="hide-sm why-col small muted">{p.why}</td>
+                  <td className="hide-sm why-col small muted">{p.summary}</td>
                 </tr>
               ))}
             </tbody>

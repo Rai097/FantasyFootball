@@ -87,6 +87,9 @@ test("free agents are ranked players not on a roster; priority from record", () 
   assert.equal(freeAgents.length, draftBoard(players).length - rostered.size);
   assert.ok(freeAgents.every((f) => !rostered.has(f.player.id) && f.player.id !== "unranked"));
   assert.ok(myPriority! >= 1 && myPriority! <= 12);
+  // Both kinds exist, and the pick is stable across calls.
+  assert.ok(freeAgents.some((f) => f.onWaivers) && freeAgents.some((f) => !f.onWaivers));
+  assert.deepEqual(demoFreeAgents(L, players).freeAgents.map((f) => f.onWaivers), freeAgents.map((f) => f.onWaivers));
 });
 
 test("every demo team gets a full valued lineup", () => {

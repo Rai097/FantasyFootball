@@ -1,10 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { claimThreshold, rankWaivers, snapTrendOf } from "./waivers.js";
+import { claimThreshold, rankWaivers, snapTrendOf, thesisItems } from "./waivers.js";
 import { analyzeTeams } from "./analysis.js";
-import { league, team, vp } from "./testkit.js";
+import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { TradeContext } from "./trades.js";
-import type { ValuedPlayer } from "./types.js";
+import type { ValuedPlayer, WaiverTarget } from "./types.js";
+
+/** Everything the user can read for a row: the summary plus every details line. */
+const txt = (t: WaiverTarget) => [t.summary, ...t.details.map((d) => `${d.label}: ${d.value}`)].join("\n");
 
 const REPL = { QB: 15, RB: 8, WR: 8, TE: 6, K: 7, DEF: 6 };
 // 13 active slots (9 starters + 4 BN) + IRGUY → full roster, so every add needs a drop.
@@ -36,9 +39,9 @@ test("claim for a big lineup gain; wait for a marginal waiver player below the 5
   assert.equal(big.recommendation, "claim");
   assert.equal(big.gain, 7); // replaces the 3-ppg WR2
   assert.equal(big.drop?.id, "BN3"); // lowest value, never the IR player
-  assert.match(big.why, /Using your #3 priority drops you to #12/);
+  assert.match(txt(big), /uses your #3 priority \(you drop to #12\)/);
   const low = r.freeAgents.find((t) => t.id === "FA_TE_low")!;
-  assert.equal(low.recommendation, "wait", low.why);
+  assert.equal(low.recommendation, "wait", txt(low));
   assert.match(r.advice, /#3 of 12/);
 });
 
@@ -50,7 +53,7 @@ test("pass when not an upgrade; free agents cost no priority", () => {
   assert.equal(r.freeAgents.find((t) => t.id === "FA_meh")!.recommendation, "pass");
   const g = r.freeAgents.find((t) => t.id === "FA_good")!;
   assert.equal(g.recommendation, "claim");
-  assert.match(g.why, /add now, no priority cost/);
+  assert.match(txt(g), /add now, no priority cost/);
   assert.ok(r.freeAgents[0].rankScore >= r.freeAgents[1].rankScore);
 });
 
@@ -86,8 +89,8 @@ test("wait rule compares ppg when the 5th-best FA has value 0", () => {
   const rbs = [4.5, 4.4, 4.3, 4.2, 4.1, 4.0].map((ppg, i) => vp(`R${i}`, "WR", ppg, 0, { vorp: 0 }));
   const r = rankWaivers(ctx, "me", rbs.map((p) => ({ player: p, onWaivers: true })), { myPriority: 6 });
   const rec = (id: string) => r.freeAgents.find((t) => t.id === id)!;
-  assert.equal(rec("R5").recommendation, "wait", rec("R5").why);
-  assert.match(rec("R5").why, /4\.1 ppg/);
+  assert.equal(rec("R5").recommendation, "wait", txt(rec("R5")));
+  assert.match(txt(rec("R5")), /4\.1 ppg/);
   assert.notEqual(rec("R0").recommendation, "wait");
 });
 
@@ -95,9 +98,9 @@ test("K / DEF never consume waiver priority", () => {
   const ctx = ctxFor([...mine, ...other]);
   const bigK = vp("FA_K", "K", 13, 10); // +5 ppg over my kicker: would be a claim for a skill player
   const onW = rankWaivers(ctx, "me", [{ player: bigK, onWaivers: true }], { myPriority: 1 }).freeAgents[0];
-  assert.equal(onW.recommendation, "pass", onW.why);
+  assert.equal(onW.recommendation, "pass", txt(onW));
   const free = rankWaivers(ctx, "me", [{ player: bigK, onWaivers: false }], { myPriority: 1 }).freeAgents[0];
-  assert.equal(free.recommendation, "optional", free.why);
+  assert.equal(free.recommendation, "optional", txt(free));
   const worse = rankWaivers(ctx, "me", [{ player: vp("FA_K2", "K", 7, 0), onWaivers: false }]).freeAgents[0];
   assert.equal(worse.recommendation, "pass");
 });
@@ -116,14 +119,14 @@ test("breakout signals: rising + open path = future-starter claim; rising role w
   ]);
   const r = rankWaivers(ctx, "me", [future, riser, plain].map((p) => ({ player: p, onWaivers: true })), { myPriority: 3, breakouts });
   const by = (id: string) => r.freeAgents.find((t) => t.id === id)!;
-  assert.equal(by("FA_FUT").recommendation, "claim", by("FA_FUT").why);
-  assert.match(by("FA_FUT").why, /future starter/);
-  assert.match(by("FA_FUT").why, /RB2 behind an injured starter/);
+  assert.equal(by("FA_FUT").recommendation, "claim", txt(by("FA_FUT")));
+  assert.match(txt(by("FA_FUT")), /Future starter/);
+  assert.match(txt(by("FA_FUT")), /RB2 behind an injured starter/);
   assert.equal(by("FA_FUT").breakout?.score, 70);
-  assert.equal(by("FA_RISE").recommendation, "stash", by("FA_RISE").why);
+  assert.equal(by("FA_RISE").recommendation, "stash", txt(by("FA_RISE")));
   assert.equal(by("FA_PLAIN").recommendation, "pass");
   assert.deepEqual(r.freeAgents.map((t) => t.id), ["FA_FUT", "FA_RISE", "FA_PLAIN"]);
-  assert.match(r.advice, /1 to stash or watch/);
+  assert.match(r.advice, /1 to stash/);
 });
 
 test("future starter needs score, path and flex-level expected points; the bar is per position", () => {
@@ -149,11 +152,72 @@ test("an injured would-be claim on waivers becomes a stash (no priority spent si
   const ctx = ctxFor([...mine, ...other], ["IRGUY"]);
   const q = vp("FA_Q", "WR", 10, 12, { injury: { status: "Q", week: 4 } });
   const onW = rankWaivers(ctx, "me", [{ player: q, onWaivers: true }], { myPriority: 3 }).freeAgents[0];
-  assert.equal(onW.recommendation, "stash", onW.why);
-  assert.match(onW.why, /confirm his status before spending priority/);
+  assert.equal(onW.recommendation, "stash", txt(onW));
+  assert.match(txt(onW), /Confirm his status before spending priority/);
   const dnp = vp("FA_DNP", "WR", 10, 12, { injury: { status: "DNP", week: 4 } });
   assert.equal(rankWaivers(ctx, "me", [{ player: dnp, onWaivers: true }], { myPriority: 3 }).freeAgents[0].recommendation, "stash");
   const free = rankWaivers(ctx, "me", [{ player: q, onWaivers: false }], { myPriority: 3 }).freeAgents[0];
   assert.equal(free.recommendation, "claim");
-  assert.match(free.why, /no priority cost/);
+  assert.match(txt(free), /no priority cost/);
+});
+
+test("every summary is 1–2 sentences ≤ 255 chars; every details item is one short idea", () => {
+  const ctx = { ...ctxFor([...mine, ...other], ["IRGUY"]), replacement: REPL };
+  const longName = "Christopher Reginald Montgomery-Smithfield Jr.";
+  const fas = [
+    vp("FA_WR", "WR", 10, 12, { name: longName }), vp("FA_Q", "WR", 10, 12, { injury: { status: "Q", week: 4, detail: "Hamstring strain, limited in practice all week" } }),
+    vp("FA_K", "K", 13, 10), vp("FA_DEF", "DEF", 9, 4), vp("FA_meh", "WR", 0.5, 0), vp("A.J._X", "WR", 4.4, 0, { name: "A.J. St. Brown Jr." }),
+    vp("FA_FUT", "RB", 3.5, 0), vp("FA_RISE", "WR", 1.5, 0), vp("FA_TE", "TE", 6.5, 3),
+  ];
+  const thesis = "WR3 by snaps (depth chart says WR4) behind Somebody Long-Name (Q, hamstring); snaps 31%→45%→62%; targets 3→5→8; 9.1 expected vs 6.0 actual ppg; value ~0 (waiver-level).";
+  const breakouts = new Map([
+    ["FA_FUT", { tier: "rising" as const, score: 70, situation: 1, oppLevel: 11, thesis }],
+    ["FA_RISE", { tier: "stash" as const, score: 55, situation: 0, oppLevel: 5, thesis }],
+  ]);
+  for (const [faab, priority] of [[false, 3], [false, 12], [false, undefined], [true, undefined]] as const) {
+    const c = faab ? { ...ctx, league: { ...ctx.league, settings: { ...ctx.league.settings, usesFaab: true, faabBudget: 100 } } } : ctx;
+    for (const onWaivers of [true, false]) {
+      const r = rankWaivers(c, "me", fas.map((p) => ({ player: p, onWaivers })), { myPriority: priority, breakouts });
+      assert.deepEqual(summaryProblems(r.advice), [], r.advice);
+      assert.deepEqual(detailProblems(r.rules), []);
+      for (const t of r.freeAgents) {
+        assert.deepEqual(summaryProblems(t.summary), [], `${t.id}: ${t.summary}`);
+        assert.deepEqual(detailProblems(t.details), [], t.id);
+      }
+    }
+  }
+});
+
+test("thesis splits into one item per fact (no ';' chain) and drops the price", () => {
+  const items = thesisItems("RB2 behind X (Q); snaps 40%→62%; touch opps 8→12; 9.1 expected vs 6.0 actual ppg; value ~0 (waiver-level).");
+  assert.deepEqual(items, [
+    { label: "Depth chart", value: "RB2 behind X (Q)" },
+    { label: "Snaps by week", value: "40% → 62%" },
+    { label: "Touches by week", value: "8 → 12" },
+    { label: "Production", value: "6.0 actual vs 9.1 expected ppg" },
+  ]);
+});
+
+test("summary leads with the fact; free agents say no priority cost and sort with waiver players by call", () => {
+  const ctx = ctxFor([...mine, ...other], ["IRGUY"]);
+  const freeClaim = vp("FA_free", "WR", 10, 12);
+  const wOptional = vp("FA_wopt", "RB", 9.5, 5);
+  const r = rankWaivers(ctx, "me", [{ player: wOptional, onWaivers: true }, { player: freeClaim, onWaivers: false }], { myPriority: 3 });
+  assert.deepEqual(r.freeAgents.map((t) => t.id), ["FA_free", "FA_wopt"]);
+  const f = r.freeAgents[0];
+  assert.equal(f.availability, "fa");
+  assert.match(f.summary, /^Starts at WR2 over WR2 \(\+7\.0 ppg\)\. Free agent: add now, no priority cost\.$/);
+  assert.equal(r.freeAgents[1].availability, "waivers");
+  assert.match(r.advice, /^You hold waiver priority #3 of 12\. /);
+  assert.match(r.advice, /1 free to add now \(FA_free\)/);
+  assert.equal(r.faStatusKnown, true);
+});
+
+test("unknown availability (old import) is treated as on waivers and flagged", () => {
+  const ctx = ctxFor([...mine, ...other], ["IRGUY"]);
+  const r = rankWaivers(ctx, "me", [{ player: vp("FA_x", "WR", 10, 12), onWaivers: true, availability: "unknown" }], { myPriority: 3 });
+  assert.equal(r.faStatusKnown, false);
+  assert.equal(r.freeAgents[0].availability, "unknown");
+  assert.equal(r.freeAgents[0].onWaivers, true);
+  assert.match(r.freeAgents[0].summary, /uses your #3 priority/);
 });

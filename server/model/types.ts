@@ -280,7 +280,18 @@ export interface TradeFinderResult {
   partners?: { teamId: string; complementarity: number; pitch: string }[];
 }
 
-export interface WaiverTarget extends ValuedPlayer {
+/** One line of a details panel: a short label and a short value (≤ ~90 chars, one idea, never a paragraph). */
+export interface DetailItem {
+  label: string;
+  value: string;
+  /** Optional colour hint for the value. */
+  tone?: "pos" | "neg" | "warn";
+}
+
+/** Where a free agent sits on Yahoo: free to add now, on waivers (needs a claim), or not captured (old import). */
+export type Availability = "fa" | "waivers" | "unknown";
+
+export interface WaiverTarget extends Omit<ValuedPlayer, "why"> {
   gain: number; // starter ppg gain if added (and `drop` released)
   benchGain: number; // value - dropped value
   drop: ValuedPlayer | null;
@@ -289,8 +300,13 @@ export interface WaiverTarget extends ValuedPlayer {
   snapTrend: number;
   /** stash = not a lineup upgrade yet, but his role is rising (Breakout Targets signal). */
   recommendation: "claim" | "optional" | "stash" | "wait" | "pass";
-  why: string;
+  /** 1–2 plain sentences, ≤ 255 chars, most important fact first (the row text). */
+  summary: string;
+  /** The full analysis, one short item per line (shown when the row is tapped). */
+  details: DetailItem[];
+  /** true = needs a claim (also when unknown: the safe assumption). */
   onWaivers: boolean;
+  availability: Availability;
   percentOwned?: number;
   /** Ranking score: max(gain*3, benchGain/10). */
   rankScore: number;

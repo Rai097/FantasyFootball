@@ -396,17 +396,24 @@ function waivers(myId: string): WaiversResponse {
       rankScore: Math.max(gain * 3, benchGain / 10),
       onWaivers: i % 3 === 0,
       percentOwned: r1(5 + 40 * Math.abs(noise(i + 401))),
-      why:
+      availability: i % 3 === 0 ? ("waivers" as const) : ("fa" as const),
+      summary:
         gain > 0
-          ? `Starts over your current ${fa.pos === "TE" ? "TE" : "flex"} for +${gain.toFixed(1)} ppg; drop ${drop?.name ?? "nobody"} (${(drop?.value ?? 0).toFixed(1)}).`
-          : `Would sit on your bench; value ${fa.value.toFixed(1)} vs ${drop?.name ?? "drop"} ${(drop?.value ?? 0).toFixed(1)}.`,
+          ? `Starts over your current ${fa.pos === "TE" ? "TE" : "flex"} (+${gain.toFixed(1)} ppg). ${i % 3 === 0 ? "A claim uses your #3 priority." : "Free agent: add now, no priority cost."}`
+          : "Would sit on your bench.",
+      details: [
+        { label: "Lineup gain", value: `${gain >= 0 ? "+" : "−"}${Math.abs(gain).toFixed(1)} ppg` },
+        { label: "Drop", value: drop ? `${drop.name} (value ${drop.value.toFixed(1)})` : "Nobody: open roster spot" },
+      ],
     };
   }).sort((a, b) => Math.max(b.gain * 3, b.benchGain / 10) - Math.max(a.gain * 3, a.benchGain / 10));
   return {
     freeAgents: rows,
     myPriority: 3,
     numTeams: TEAMS.length,
-    advice: "Rolling list: using your #3 priority drops you to #4. Only claim if the gain is worth more than a future top-2 spot; otherwise wait for free agency Wednesday.",
+    advice: "You hold waiver priority #3 of 4. Sample data.",
+    rules: [{ label: "Claim", value: "He adds ≥ 2.0 ppg to your lineup" }],
+    faStatusKnown: true,
   };
 }
 
