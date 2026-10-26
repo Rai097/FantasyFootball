@@ -31,7 +31,7 @@ export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOp
           label="Power rank"
           value={`${ordinal(me.powerRank)}`}
           sub={`of ${teams.length} · see League ›`}
-          why="Place by power score (0.7 × starter ppg + 0.3 × bench strength). Tap to see who is above you and why."
+          why="Place by power score (0.7 × projected starter ppg + 0.3 × actual points per game). Tap to see who is above you and why."
           onClick={onOpenLeague}
         />
         <Stat

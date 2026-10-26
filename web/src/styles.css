@@ -357,15 +357,16 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .lg-legend { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: -4px 0 6px; }
 .lg-legend .why-btn, .lg-groups-legend .why-btn { width: 16px; height: 16px; font-size: 10px; margin-right: 6px; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
-.sw.starter, .seg.starter { background: var(--accent); }
-.sw.bench, .seg.bench { background: #9cc0ff; }
+.sw.projected, .seg.projected { background: var(--accent); }
+.sw.results, .seg.results { background: #9cc0ff; }
+.seg.results.est { opacity: 0.4; }
 .sw.them, .gbar.them { background: #9aa5b5; }
 .sw.me, .gbar.me { background: var(--accent); }
 .lg-bar { display: flex; gap: 2px; height: 12px; min-width: 0; }
 .lg-bar .seg { display: block; height: 100%; min-width: 0; }
-.lg-bar .seg.starter { border-radius: 4px 0 0 4px; }
+.lg-bar .seg.projected { border-radius: 4px 0 0 4px; }
 .lg-bar .seg:last-child { border-radius: 0 4px 4px 0; }
-.lg-bar .seg.starter:last-child { border-radius: 4px; }
+.lg-bar .seg.projected:last-child { border-radius: 4px; }
 .lg-list .xlist-head, .lg-row .xrow-head { grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) 56px 16px; }
 .lg-team { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .lg-rank { display: inline-grid; place-items: center; min-width: 22px; height: 22px; border-radius: 6px; background: var(--card-2); border: 1px solid var(--border); font-size: 11.5px; font-weight: 700; flex: none; }

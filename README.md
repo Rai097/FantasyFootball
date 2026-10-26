@@ -45,7 +45,7 @@ Trade Desk. See [docs/IMPORT.md](docs/IMPORT.md).
 |---|---|
 | **Connect** | Yahoo login, league and team picker, the demo league, or import from Yahoo's web pages ([docs/IMPORT.md](docs/IMPORT.md)). |
 | **My Team** | Optimal lineup, position-by-position strength ranked against the league, needs and surplus, bye and injury exposure. Tap Power rank to open the League tab. |
-| **League** | Power rankings as a chart (starter part + bench part), the standings table, and for every team above you a one-line why: starter points, bench strength and the position groups where they beat you, with a mini chart on tap. |
+| **League** | Power rankings as a chart (0.7 × projected starter points + 0.3 × actual points per game; bench depth only breaks ties), the standings table, and for every team above you a one-line why: projected starter points, actual points per game and the position groups where they beat you, with a mini chart on tap. |
 | **Trade Finder** | 1-for-1, 2-for-1 and 2-for-2 packages against every opponent, kept only when your lineup improves *and* the other side gets a deal they would plausibly accept. Each card explains both lineups' changes. Includes a builder to evaluate any offer. |
 | **Waivers** | Free agents ranked by how much they improve your lineup versus your most droppable player, with trend and injury flags, and a claim / optional / stash / wait / pass call that accounts for your rolling-list priority (or FAAB). Claims include future starters (rising role, path open, flex-level opportunity); injured players are never worth priority sight unseen. |
 | **Values** | Every player's projection, value, actual vs expected production, and owner, sortable and searchable. |

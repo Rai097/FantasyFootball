@@ -112,7 +112,7 @@ For each team: lineup, starterPpg, benchValue (sum value of bench), totalValue.
 group, league rank, league average. `needs`: groups ranked ≥ 9th of 12 (bottom
 third) or whose best starter is below replacement; `surplus`: positions where a
 bench player's ppg ≥ the league-average starter ppg for that slot. `powerRank`
-orders teams by `0.7·starterPpg + 0.3·benchValue/10`, ties by record.
+orders teams by the power score — superseded: see "Power score v2 (2026-10-26)" at the end.
 Also return `byeExposure`: for each remaining week, count of starters on bye,
 and `injuryFlags`.
 
@@ -293,7 +293,7 @@ architect's final review passes.
 * Rolling list: claimThreshold = 1.0 + 1.5·(N−w)/(N−1) ppg of lineup gain (priority #1 needs 2.5, last needs 1.0). FAAB leagues (`usesFaab`) get bid guidance instead of priority cost.
 * Drop candidate tie-break: value, then ppg, then ECR; never IR-slot players or the only K/DEF.
 
-**Power rank** = 0.7·starterPpg + 0.3·(sum of top-3 bench vorp).
+**Power rank**: superseded by "Power score v2 (2026-10-26)".
 
 **LeagueSettings** gains optional `usesFaab`, `faabBudget`, `tradeDeadlineWeek`.
 
@@ -446,7 +446,8 @@ Why: the owner uses waivers to find players who can *become* starters, not only 
   * Rows tie-break on breakout score after rankScore. The breakout thesis is appended to `why`.
 * **Lineup**: `optimalLineup(slots, roster, { injuryRisk: true })` ranks and totals starters on the injury-risk rate
   (`injuryRisk.ts`: Q 0.85 / D 0.70 / O 0.55, shared with trades). Used by team analysis (My Team, power ranks, group
-  ranks) for every team. `LineupSlot.riskFactor` marks discounted starters; the UI shows "×0.85 · check status".
+  ranks) for every team; IR-slotted players (`Team.irPlayerIds`) never start (`LineupOptions.irIds`, see "Power score
+  v2"). `LineupSlot.riskFactor` marks discounted starters; the UI shows "×0.85 · check status".
   Trade and waiver lineups are unchanged; `value` is unchanged.
 
 ## Waivers v3: rows + free agents (2026-10-26) — overrides "Waivers", "Waivers v2" and the waivers API line where they differ
@@ -603,9 +604,8 @@ Before: every imported team's record showed "—" and waiver priority was "unkno
 Owner: "who's ranked above me and why … NO large texts, key information and expand for details; graphs, charts and
 tables first." Power rankings moved here from My Team.
 
-* **Power score** (analysis.ts, the one formula): `POWER_WEIGHTS.starter (0.7) × starterPpg + POWER_WEIGHTS.bench
-  (0.3) × benchStrength`, where `benchStrength(bench)` = summed VORP of the 3 best playable bench players (now on
-  `TeamAnalysis.benchStrength`). The "0.3·benchValue/10" in "Team analysis" is stale. Ties by record.
+* **Power score**: superseded by "Power score v2 (2026-10-26)" (projected starters + actual results; the parts,
+  gaps and chart segments below are now "projected" and "results"; bench strength is a tie-breaker bullet).
 * **Model** (`server/model/league.ts`, pure): `buildLeagueView(teams, myTeamId)` → `{ myTeamId, numTeams, weights,
   standingsKnown, teams, above, below, summary }`. `teams` rows (by power rank): power score and its two parts,
   starter ppg, bench strength, `standingsRank` (the import's `record.rank` when every recorded team has one, else win%
@@ -676,3 +676,29 @@ Owner: "make each recommendation collapsible … everything starts collapsed, wi
 * **Connect**: instructions collapsed into `Disclosure`s with numbered short steps; imported leagues are `ExpandableRow`s
   with chips (Standings yes/no, Free agents yes/no, Updated <date> by <name>) and label/value details incl. roster moves.
 * Removed unused CSS from releases 1–4 (trade cards, target cards/grid, bench list, why-list, …).
+
+## Power score v2 (2026-10-26) — overrides every earlier power formula
+
+Owner: "RxH is #1 in power rankings but his team looks weak and he's 3-3; shouldn't power rankings be determined by
+starters?" On the real league the bench added ≤ 2.3 points, and the leader was #1 because (1) a healthy player parked
+in his IR slot was counted as a starter, and (2) results were ignored entirely.
+
+* **Formula** (analysis.ts, the one formula): `power = POWER_WEIGHTS.projected (0.7) × projected starter ppg +
+  POWER_WEIGHTS.results (0.3) × actual points per game`, where `actualPpg(record)` = `record.pointsFor / (wins + losses
+  + ties)` from the imported standings. Unknown results (no record, no points for, or 0 games) → `null`, and that
+  team's results part uses its projected starter ppg, so a league without standings ranks purely on projections.
+  `TeamAnalysis.resultsPpg` (null = unknown). Ties (on the 2-dp score): bench strength (`benchStrength`, top-3 bench
+  VORP, IR excluded), then wins, then team id. Bench strength is no longer in the score.
+* **IR slot**: players in `Team.irPlayerIds` never start in any lineup that stands for their team's startable players —
+  team analysis (lineup, starter ppg, group ranks, power), trade `teamState` / `applyTrade` / v3 slot-loss lineup,
+  `rosterParts` for trade v2/v3 scoring (`activeRoster`: no now/season/playoff lineup or depth points), and the waiver
+  base/after lineups. They stay on `bench` (shown as IR), are not bench strength or surplus, keep their trade value,
+  and can start for a team that trades for him (he is not in that team's IR slot).
+* **League view**: rows carry `projectedPart`, `resultsPart`, `starterPpg`, `resultsPpg`, `benchStrength`; comparisons
+  `starterGap`, `resultsGap` (null when either side is unknown), `benchGap`, `projectedPartGap + resultsPartGap =
+  powerGap`; `weights {projected, results}`; `resultsUnknown` (count). Summary: "+5.0 projected starter pts/wk and
+  +3.1 actual pts/game: stronger FLEX (+6.5) and RB (+5.6)." / "+25.7 actual pts/game outweighs your +6.0 projected
+  starter pts/wk…" / "… (results unknown) …" / "Level on power score; ahead on the tie-breakers (bench depth …)".
+* **UI**: chart segments "0.7 × projected starter ppg" + "0.3 × actual pts/game" (faded when results are unknown, with
+  a "Results unknown for N teams … Re-import standings" notice); detail bullets Power gap (projected, results),
+  Projected starters, Actual pts/game ("Results unknown — re-import standings"), "Bench depth: …, tie-breaker only".

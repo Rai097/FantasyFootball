@@ -9,9 +9,11 @@ import { deltaClass, f1, ordinal, signed } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
 
 const TIPS = {
-  power: "Overall team strength: 0.7 × starter ppg + 0.3 × bench strength. Higher = better team on paper.",
-  starter: "Points per game your best healthy lineup is projected to score this week and on.",
-  bench: "Points per game above a waiver-wire player, summed over your 3 best playable bench players.",
+  power: "Team strength: 0.7 × projected starter ppg + 0.3 × actual points per game this season. Bench breaks ties.",
+  starter: "Points per game your best healthy lineup (IR slot excluded) is projected to score from this week on.",
+  results: "Actual fantasy points per game this season (points for ÷ games). Unknown → the projection stands in.",
+  bench: "Points per game above a waiver player, summed over the 3 best playable bench players. Only breaks ties.",
+  unknown: "Results unknown: no points-for in the standings, so this team is ranked on projected starters only.",
   rank: "Standings place by record, then points scored (Yahoo's own rank when the import has it).",
   record: "Wins-losses (-ties) from the league standings at the last update.",
   pf: "Points for: total fantasy points this team has scored this season.",
@@ -33,7 +35,12 @@ export function LeagueTab({ active }: { analysis: Analysis; active: Active & { t
       <section className="stat-row" title={v.summary}>
         <Stat label="Power rank" value={ordinal(me.powerRank)} sub={`of ${n}`} why={TIPS.pwr} />
         <Stat label="Standings" value={me.standingsRank != null ? ordinal(me.standingsRank) : "—"} sub={me.record !== "—" ? me.record : "not captured"} why={TIPS.rank} />
-        <Stat label="Power score" value={f1(me.powerScore)} sub={`${f1(me.starterPart)} + ${f1(me.benchPart)}`} why={TIPS.power} />
+        <Stat
+          label="Power score"
+          value={f1(me.powerScore)}
+          sub={`${f1(me.projectedPart)} + ${f1(me.resultsPart)}${me.resultsPpg == null ? " (results unknown)" : ""}`}
+          why={TIPS.power}
+        />
         <Stat label="Teams above" value={String(v.above.length)} sub="by power" why="Teams with a higher power score than yours; tap a row below for why." />
       </section>
 
@@ -43,6 +50,11 @@ export function LeagueTab({ active }: { analysis: Analysis; active: Active & { t
             <span>Power rankings</span>
             <Why text={TIPS.power} />
           </h2>
+          {v.resultsUnknown > 0 && (
+            <div className="notice warn small">
+              Results unknown for {v.resultsUnknown} of {n} teams: ranked on projected starters only. Re-import standings.
+            </div>
+          )}
           <PowerChart teams={v.teams} />
         </section>
 
@@ -73,24 +85,25 @@ export function LeagueTab({ active }: { analysis: Analysis; active: Active & { t
 }
 
 /**
- * Horizontal stacked bars: starter part + bench part = power score. Scores sit close together (e.g. 68–79), so the axis
- * starts just below the lowest starter part (a round number, labelled) instead of 0, making the real gaps visible.
+ * Horizontal stacked bars: projected part + results part = power score. Scores sit close together, so the axis starts
+ * just below the lowest projected part (a round number, labelled) instead of 0, making the real gaps visible. A results
+ * part that is only the projection standing in (results unknown) is drawn faded.
  */
 function PowerChart({ teams }: { teams: LeagueTeamRow[] }) {
-  const max = Math.max(...teams.map((t) => t.starterPart + t.benchPart), 1);
-  const minStarter = Math.min(...teams.map((t) => t.starterPart));
-  const base = Math.max(0, Math.floor((minStarter - (max - minStarter) * 0.15) / 5) * 5);
+  const max = Math.max(...teams.map((t) => t.projectedPart + t.resultsPart), 1);
+  const minProjected = Math.min(...teams.map((t) => t.projectedPart));
+  const base = Math.max(0, Math.floor((minProjected - (max - minProjected) * 0.15) / 5) * 5);
   const span = Math.max(max - base, 1);
   return (
     <div className="lg-chart" role="table" aria-label="Power score by team">
       <div className="lg-legend muted small">
-        <i className="sw starter" /> 0.7 × starter ppg <Why text={TIPS.starter} />
-        <i className="sw bench" /> 0.3 × bench strength <Why text={TIPS.bench} />
+        <i className="sw projected" /> 0.7 × projected starter ppg <Why text={TIPS.starter} />
+        <i className="sw results" /> 0.3 × actual pts/game <Why text={TIPS.results} />
       </div>
       <div className="lg-chart-row lg-chart-head" role="row">
         <span>#</span>
         <span>Team</span>
-        <span>Starters + bench <span className="muted small">(axis from {base})</span></span>
+        <span>Projected + results <span className="muted small">(axis from {base})</span></span>
         <span className="num">Score</span>
       </div>
       {teams.map((t) => (
@@ -98,13 +111,17 @@ function PowerChart({ teams }: { teams: LeagueTeamRow[] }) {
           key={t.id}
           role="row"
           className={`lg-chart-row${t.mine ? " mine" : ""}`}
-          title={`${t.name}: ${f1(t.powerScore)} = ${f1(t.starterPart)} from starters (0.7 × ${f1(t.starterPpg)} ppg) + ${f1(t.benchPart)} from bench (0.3 × ${f1(t.benchStrength)})`}
+          title={`${t.name}: ${f1(t.powerScore)} = ${f1(t.projectedPart)} projected (0.7 × ${f1(t.starterPpg)}) + ${f1(t.resultsPart)} results (0.3 × ${
+            t.resultsPpg != null ? `${f1(t.resultsPpg)} actual pts/game` : `${f1(t.starterPpg)}: results unknown`
+          })`}
         >
           <span className="muted">{t.powerRank}</span>
           <span className={`lg-name${t.mine ? " strong" : ""}`}>{t.name}</span>
           <span className="lg-bar" aria-hidden>
-            <span className="seg starter" style={{ width: `${(Math.max(0, t.starterPart - base) / span) * 100}%` }} />
-            {t.benchPart > 0 && <span className="seg bench" style={{ width: `${(t.benchPart / span) * 100}%` }} />}
+            <span className="seg projected" style={{ width: `${(Math.max(0, t.projectedPart - base) / span) * 100}%` }} />
+            {t.resultsPart > 0 && (
+              <span className={`seg results${t.resultsPpg == null ? " est" : ""}`} style={{ width: `${(t.resultsPart / span) * 100}%` }} />
+            )}
           </span>
           <span className="num strong">{f1(t.powerScore)}</span>
         </div>
@@ -176,12 +193,15 @@ function CompareRow({ c }: { c: TeamComparison }) {
   const details: DetailLine[] = [
     {
       label: "Power gap",
-      value: `${signed(c.powerGap)} (starters ${signed(c.starterPartGap)}, bench ${signed(c.benchPartGap)})`,
+      value: `${signed(c.powerGap)} (projected ${signed(c.projectedPartGap)}, results ${signed(c.resultsPartGap)})`,
       tone: tone(c.powerGap),
       title: TIPS.gap,
     },
-    { label: "Starter ppg gap", value: `${signed(c.starterGap)} pts/wk`, tone: tone(c.starterGap), title: TIPS.starter },
-    { label: "Bench strength gap", value: signed(c.benchGap), tone: tone(c.benchGap), title: TIPS.bench },
+    { label: "Projected starters", value: `${signed(c.starterGap)} pts/wk`, tone: tone(c.starterGap), title: TIPS.starter },
+    c.resultsGap != null
+      ? { label: "Actual pts/game", value: signed(c.resultsGap), tone: tone(c.resultsGap), title: TIPS.results }
+      : { label: "Actual pts/game", value: "Results unknown — re-import standings", title: TIPS.unknown },
+    { label: "Bench depth", value: `${signed(c.benchGap)}, tie-breaker only`, title: TIPS.bench },
     ...c.keyPlayers.map((k) => ({
       label: `Their ${k.group} (${signed(k.gap)})`,
       value: k.players.map((p) => `${p.name} ${f1(p.ppg)}`).join(", ") || "—",

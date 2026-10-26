@@ -228,6 +228,13 @@ function byeExposure(lineup: LineupSlot[]): Record<number, number> {
   return out;
 }
 
+/** Mirrors server/model/analysis.ts actualPpg / powerScore (the mock never imports server runtime code). */
+function actualOf(r: Team["record"]): number | null {
+  const g = r ? r.wins + r.losses + r.ties : 0;
+  return r && r.pointsFor != null && g > 0 ? r1(r.pointsFor / g) : null;
+}
+const powerOf = (starterPpg: number, r: Team["record"]) => 0.7 * starterPpg + 0.3 * (actualOf(r) ?? starterPpg);
+
 function analyse(): TeamAnalysis[] {
   const base = TEAMS.map((team) => {
     const o = optimal(rosterOf(team.id));
@@ -252,7 +259,9 @@ function analyse(): TeamAnalysis[] {
     needs: [],
     surplus: [],
     powerRank: 0,
-    powerScore: r1(0.7 * b.starterPpg + 0.3 * b.bench.slice(0, 3).reduce((s, p) => s + p.vorp, 0)),
+    // Same formula as server/model/analysis.ts powerScore (mock teams have no points for → projection only).
+    powerScore: r1(powerOf(b.starterPpg, b.team.record)),
+    resultsPpg: actualOf(b.team.record),
     benchStrength: r1(b.bench.slice(0, 3).reduce((s, p) => s + p.vorp, 0)),
     byeExposure: byeExposure(b.lineup),
     injuryFlags: rosterOf(b.team.id)
@@ -275,7 +284,9 @@ function analyse(): TeamAnalysis[] {
       if (r.bench.some((p) => p.pos === pos && p.ppg >= avgStarter)) r.surplus.push(pos);
     }
   });
-  const ranked = [...result].sort((a, b) => b.powerScore - a.powerScore || (b.team.record?.wins ?? 0) - (a.team.record?.wins ?? 0));
+  const ranked = [...result].sort(
+    (a, b) => b.powerScore - a.powerScore || b.benchStrength - a.benchStrength || (b.team.record?.wins ?? 0) - (a.team.record?.wins ?? 0),
+  );
   ranked.forEach((r, i) => (r.powerRank = i + 1));
   return result;
 }
