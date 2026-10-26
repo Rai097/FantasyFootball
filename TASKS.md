@@ -16,6 +16,11 @@
   Values, My Team). Waivers also only shows players "on waivers": the import has no on-waivers vs free-agent flag, so
   every player is marked W and true free agents (no priority cost) cannot be told apart. Capture that in the import
   and show free agents worth adding.
+- Release after Waivers (owner, 2026-10-26, Trade Finder screenshot): apply the site-wide collapsed pattern to Trade
+  Finder (each recommendation and near miss collapsed to "give → get · partner · +x/wk"; Best-fit partners = who +
+  fit, tap for why; the brown summary notice = one short line; details = bullets, no "Market package values…"
+  paragraph, no "Proj … pulls to" run-on lines), then Targets, Values, My Team, Connect. Reuse the shared
+  expandable-row component from the Waivers release.
 - Open bugs: none known beyond the backlog.
 
 ## Waiting on

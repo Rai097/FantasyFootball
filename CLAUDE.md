@@ -37,6 +37,9 @@ Open work and "Resume here" live in TASKS.md.
   opens only when the row is tapped (owner, 2026-10-26; applies to every table). Details panels are bullets too: one
   idea per bullet or "label: value" row, never a paragraph or a chain of "·"/";"-joined facts (e.g. Trade Finder's
   "Market package values…" and "Proj 11.0 ppg = ECR…" text must become bullet lists).
+- Site-wide: everything starts COLLAPSED — each recommendation card, list item and section shows only its key line
+  (e.g. "Loveland → J. Williams · Caw · +1.9/wk"; Best-fit partners = who + fit), details open on tap. Notices and
+  banners are one short line with the reasoning behind a tap. No page needs long scrolling through text.
 - Never commit `.env`, `.cache/`, `.data/` (already in .gitignore).
 - Yahoo API access is pending Yahoo's approval (since July 2026 apps need it); until then
   the `import` provider is the real-league path. Yahoo code must stay defensive and
