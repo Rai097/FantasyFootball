@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { claimThreshold, rankWaivers, snapTrendOf, thesisItems } from "./waivers.js";
+import { claimThreshold, makeSummary, rankWaivers, snapTrendOf, thesisItems } from "./waivers.js";
 import { analyzeTeams } from "./analysis.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { TradeContext } from "./trades.js";
@@ -220,4 +220,10 @@ test("unknown availability (old import) is treated as on waivers and flagged", (
   assert.equal(r.freeAgents[0].availability, "unknown");
   assert.equal(r.freeAgents[0].onWaivers, true);
   assert.match(r.freeAgents[0].summary, /uses your #3 priority/);
+});
+
+test("makeSummary: no double period after a name ending in Jr.; drops the action sentence when too long", () => {
+  assert.equal(makeSummary("Worth more than Harold Fannin Jr..", "Claim him."), "Worth more than Harold Fannin Jr. Claim him.");
+  const lead = `${"x".repeat(200)}.`;
+  assert.equal(makeSummary(lead, "y".repeat(80)), lead);
 });

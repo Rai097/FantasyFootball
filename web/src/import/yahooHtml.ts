@@ -190,7 +190,10 @@ export function waiverStatusOf(
   players: ScrapedPlayer[],
   w: WaiverList | undefined,
 ): { onWaivers: Map<string, boolean | undefined>; diag: { fromColumn: number; fromList: number; unknown: number; disagree: number; listUsed: boolean } } {
-  const listUsed = !!w && !w.ignored;
+  // An empty W list cannot be told from an unreadable page: when no row had an Owner reading either, trusting it
+  // would mark everyone a free agent. Leave them unknown instead (the app then asks for a re-import).
+  const unreadable = !!w && w.keys.size === 0 && !players.some((p) => p.availability);
+  const listUsed = !!w && !w.ignored && !unreadable;
   const out = new Map<string, boolean | undefined>();
   const diag = { fromColumn: 0, fromList: 0, unknown: 0, disagree: 0, listUsed };
   for (const p of players) {

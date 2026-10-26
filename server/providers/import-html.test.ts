@@ -146,4 +146,11 @@ test("waiverStatusOf: owner column wins, else the status=W list, else unknown", 
   assert.equal(ig.onWaivers.get("2"), undefined);
   assert.equal(ig.onWaivers.get("1"), false);
   assert.equal(waiverStatusOf(ps, undefined).diag.unknown, 3);
+  // Empty W list and no owner column anywhere: unreadable, so unknown — never "everyone is a free agent".
+  const noCol = ps.map(({ availability: _a, ...p }) => p);
+  const empty = waiverStatusOf(noCol, { keys: new Set(), complete: true, ignored: false });
+  assert.ok([...empty.onWaivers.values()].every((v) => v === undefined));
+  assert.equal(empty.diag.listUsed, false);
+  // Empty W list with a readable owner column elsewhere: the list is believed (nobody is on waivers).
+  assert.equal(waiverStatusOf(ps, { keys: new Set(), complete: true, ignored: false }).onWaivers.get("2"), false);
 });

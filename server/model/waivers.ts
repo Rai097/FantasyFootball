@@ -351,7 +351,8 @@ export const SUMMARY_MAX = 255;
 export const DETAIL_MAX = 90;
 
 /** Lead fact + action, ≤ 255 chars: drops the action sentence (never cuts mid-word) when too long. */
-export function makeSummary(lead: string, action?: string): string {
+export function makeSummary(leadIn: string, action?: string): string {
+  const lead = leadIn.replace(/\.\.$/, "."); // a name ending in "Jr." at the end of the sentence
   const both = action ? `${lead} ${action}` : lead;
   if (both.length <= SUMMARY_MAX) return both;
   if (lead.length <= SUMMARY_MAX) return lead;
