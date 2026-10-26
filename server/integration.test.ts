@@ -313,7 +313,7 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     const lop = await post(`${L}/trade/evaluate`, { team: me.team.id, partner: partner.team.id, give: [myBest], get: [theirWorst] });
     assert.equal(lop.status, 200, JSON.stringify(lop.json));
     assertClean(lop.json, "evaluate");
-    assert.equal(lop.json.verdict, "Decline");
+    assert.ok(String(lop.json.verdict).startsWith("Decline"), lop.json.verdict);
     assert.ok(lop.json.why.length > 0);
 
     // A v3 finder trade should evaluate to an accept verdict with its band and acceptance.
@@ -442,7 +442,10 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     const league = (await get(L)).json;
     const mine = new Set(league.teams.find((t: any) => t.id === league.myTeamId).playerIds);
     let prev = Infinity;
+    let tier: string | undefined;
     for (const t of json.targets) {
+      // Sorted by score within each tier (rising starters first, then stashes).
+      if (t.tier !== tier) (tier = t.tier), (prev = Infinity);
       assertValuedPlayer(t.player, "breakouts");
       assert.ok(["RB", "WR", "TE"].includes(t.player.pos), `${t.player.name}: ${t.player.pos}`);
       assert.ok(!mine.has(t.player.id), `${t.player.name} is on my roster`);

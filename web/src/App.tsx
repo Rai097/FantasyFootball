@@ -11,6 +11,12 @@ import { TargetsTab } from "./tabs/TargetsTab";
 import { ValuesTab } from "./tabs/ValuesTab";
 import { WaiversTab } from "./tabs/WaiversTab";
 
+const STALE_DAYS = 3;
+function staleDays(iso: string | undefined): number {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) ? (Date.now() - t) / 86_400_000 : 0;
+}
+
 const TABS = [
   { id: "connect", label: "Connect" },
   { id: "team", label: "My Team" },
@@ -73,7 +79,15 @@ export function App() {
     if (active?.provider !== "import" || analysis.error?.status !== 404 || restored === active.id) return;
     const backup = loadImportBackup(active.id);
     setRestored(active.id);
-    if (backup) api.importPost(backup).then(() => analysis.reload(), () => undefined);
+    if (backup)
+      api.importPost(backup).then(
+        () => {
+          analysis.reload();
+          const when = typeof backup === "object" && backup && "importedAt" in backup ? String((backup as { importedAt?: string }).importedAt) : undefined;
+          setToast(`Restored your league from this browser's saved copy${when ? ` (imported ${ago(when)})` : ""}. Re-run the import bookmark for current rosters.`);
+        },
+        () => undefined,
+      );
   }, [active, analysis.error, analysis, restored]);
 
   // Adopt the server's idea of "my team" when none was chosen yet.
@@ -163,6 +177,17 @@ export function App() {
             onGo={() => setTab("team")}
             onImported={onImported}
           />
+        )}
+        {league?.import && staleDays(league.import.importedAt) >= STALE_DAYS && (
+
+          <div className="notice warn banner">
+            Rosters were imported <b>{ago(league.import.importedAt)}</b>, so trades, adds and drops since then are missing. Open your Yahoo
+            league, click the <b>Trade Desk import</b> bookmark and paste the result on the{" "}
+            <button className="link-btn" onClick={() => setTab("connect")}>
+              Connect tab
+            </button>{" "}
+            to refresh. Your settings are kept.
+          </div>
         )}
         {tab !== "connect" && league?.import?.settingsSource === "default" && (
           <div className="notice warn banner">

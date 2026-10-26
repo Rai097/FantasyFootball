@@ -157,6 +157,18 @@ function cleanScoring(v: unknown): Scoring | undefined {
 }
 
 /** Validate and normalise a POST /api/import JSON body. Throws ImportError (400). */
+/**
+ * Keep the payload's own import time (bookmarklet run, or a browser backup being
+ * restored) so an old copy is never relabelled as fresh. Future or invalid → now.
+ */
+function keepTimestamp(v: unknown, now: Date): string {
+  if (typeof v === "string") {
+    const t = Date.parse(v);
+    if (Number.isFinite(t) && t <= now.getTime() + 5 * 60_000 && t > Date.UTC(2020, 0, 1)) return new Date(t).toISOString();
+  }
+  return now.toISOString();
+}
+
 export function validateImport(body: unknown, now = new Date()): StoredImport {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new ImportError("Import must be a JSON object", "Paste the text the bookmarklet copied, unchanged.");
   if (JSON.stringify(body).length > MAX_BYTES) throw new ImportError("Import is larger than 1 MB");
@@ -201,7 +213,7 @@ export function validateImport(body: unknown, now = new Date()): StoredImport {
     regularSeasonEnd,
     finalWeek,
     teams,
-    importedAt: now.toISOString(),
+    importedAt: keepTimestamp(o.importedAt, now),
     settingsSource,
   };
   const deadline = int(o.tradeDeadlineWeek, 1, 18);
