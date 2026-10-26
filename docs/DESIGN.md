@@ -702,3 +702,96 @@ in his IR slot was counted as a starter, and (2) results were ignored entirely.
 * **UI**: chart segments "0.7 × projected starter ppg" + "0.3 × actual pts/game" (faded when results are unknown, with
   a "Results unknown for N teams … Re-import standings" notice); detail bullets Power gap (projected, results),
   Projected starters, Actual pts/game ("Results unknown — re-import standings"), "Bench depth: …, tie-breaker only".
+
+## Model v4: playoff value, perception gaps, returns (2026-10-26) — design, supersedes the value model for v4 consumers
+
+**Goal (owner):** the strongest possible starting lineup for the fantasy playoffs (weeks 15–17), built through trades,
+free agents, waivers and stashes. Points-to-date already exist in Yahoo's evaluator; our edge is forward-looking value:
+role, opportunity, context and talent, BEFORE it shows in the box score. Industry practice (sources in the release
+notes): expected fantasy points vs actual (luck vs skill, buy-low/sell-high), target share + air-yards share (WOPR),
+weighted opportunity for RBs (PPR target ≈ 2.8 carries; snap share ≥ 50% threshold), weeks 15–17 strength of schedule,
+contingent (handcuff) value, rest-of-season projections over points-to-date, contender mode.
+
+**Data (all already downloaded):** ffopportunity `ep_weekly_<season>.csv` (per player-week: targets `rec_attempt`,
+`rec_air_yards`, `rush_attempt`, expected/actual fantasy points), nflverse `games.csv` (`spread_line`, `total_line`,
+`home_qb_id`/`away_qb_id` = the QB who started), `injuries_<season>.csv` (`report_status`, `practice_status` per week),
+`roster_<season>.csv` (`status`, `birth_date`, `draft_number`, `rookie_year`), snap counts, FantasyPros ECR (weekly +
+ROS). Not available free: routes run (TPRR / YPRR need PFF) → proxy = snap share on team pass plays.
+
+**1. Player signals (server/model/signals/, pure, one module per signal, sibling tests)**
+* Opportunity per week: target share and air-yards share (player ÷ team totals from ep_weekly, by posteam+week),
+  WOPR = 1.5·tgt share + 0.7·air share; RB weighted opportunity = carries + 2.8·targets (PPR; scale by `scoring.rec`),
+  snap share; expected fantasy points under LEAGUE scoring.
+* Context flags per game: `qbOut` (team's usual starter not the starting QB per games.csv), `leftEarly` (snap share
+  < 15% after ≥ 50% before), `blowout` (|result| ≥ 21). Flagged games get weight 0.25 in rates.
+* Recency: exponentially weighted rate over unflagged games, half-life 2 games (the last 3 games carry ~70%).
+* Luck: expected − actual points (recency-weighted). Positive = under-producing his usage (buy-low); negative and
+  driven by TDs above expected TDs = sell-high. Labels renamed accordingly; the old market-gap tag becomes
+  "market undervalues" / "market overvalues".
+* Talent prior: last season's expected/actual per game, age (≤ 26 rising), draft capital for rookies (small weight).
+
+**2. Projection v4 (replaces projection.ts ppg as the value base; Replace = delete the old blend)**
+`rate = expected points per game from recency-weighted, context-adjusted opportunity × efficiency shrunk toward 1.0`
+(efficiency = actual/expected, shrunk by sample size, so TD spikes regress), blended with ECR only as a sanity anchor
+(weight 0.25, falling to 0.1 when ≥ 4 unflagged games). Per remaining week w: `pts(w) = rate × matchup(w) × avail(w)`.
+* matchup(w): opponent's fantasy points allowed to the position (league scoring, season, shrunk to league average)
+  relative to average; when the week's Vegas total exists, scale by implied team total / league average. Bye = 0.
+* avail(w): healthy 1; Q 0.85 / D 0.7 for the current week only; Out / IR / suspended → 0 until the estimated return
+  week (section 4), then 1.
+* Values: `playoffValue = Σ pts(15..17)` (weight 1.0), `seasonValue = Σ pts(current..14)` (weight from mode). Default
+  mode for a team in a playoff spot = "playoffs" (0.25 rest of season / 0.75 playoffs); else balanced.
+
+**3. Team objective and move ranking**
+* Team strength = expected points of the optimal lineup in weeks 15–17 (IR-slot players excluded; depth term =
+  expected points from the bench covering one random starter injury).
+* Every move is scored by Δ team strength: free-agent adds (no cost), waiver claims (cost = priority), stashes,
+  trades. One "Best moves" list ranks them together (Waivers and Trade Finder keep their own views).
+
+**4. Returns and stashes (Stash watch)**
+* Candidate: unrostered (or on my IR) with a healthy-role rate ≥ flex level from pre-absence games / last season and
+  status Out / IR / PUP / suspended or 0 snaps the last 2 weeks.
+* Return estimate: designated to return / IR minimum / suspension end when known; practice trend (DNP → limited →
+  full) ⇒ "back ~week N" with confidence high / medium / low; unknown ⇒ "return date unconfirmed" (never a guess).
+* Value = Σ pts(return..17) with playoff weighting. Waivers shows "Stash: add now while free" for free agents and
+  flags "about to become a waiver fight" on a practice upgrade. My IR players show "hold: back ~week N".
+
+**5. Trades v4 (perception gaps)**
+* Our value = section 2. Their perceived value = Yahoo's rest-of-season projection for the player (captured by the
+  bookmarklet; until captured: FantasyPros ROS rank → points) + recency bias (last 3 games actual points) + market.
+* Gem = (our value − their perceived value) in my favour on what I get, and the reverse on what I give.
+* Acceptance from THEIR view: Yahoo-visible lineup delta for them (dominant), recent points of what they give,
+  market edge (minor). A Yahoo-visible loss for them ⇒ low acceptance, never in the main list.
+* Rules: no suggestion with my Δ team strength < 1.0 pt/week of playoff lineup; never sell a player whose opportunity
+  trend is rising; flag bye/playoff cover lost; pitch = reasons that matter to them (need, bye cover, Yahoo numbers).
+
+**6. League: playoff odds** — simulate the remaining regular season (weekly points ~ team projection ± spread,
+10k runs, seeded) → playoff probability per team; shown on the League tab; feeds the default mode in section 2.
+
+**Releases:** (a) signals + context flags (enabler, no UI change); (b) projection v4 + labels + power score v2
+(held build) on top; (c) stash watch + returns; (d) bookmarklet captures Yahoo ROS projections (enabler) + trades v4;
+(e) playoff odds + "Best moves". Each: developer → adversarial tester → review → deploy → real-league check.
+Owner-specific worked cases live outside the repo (public).
+
+**Model v4 — amendments after advisor review and a data check (override the above)**
+* Data verified on the cached 2026 files: games.csv `home_qb_name`/`away_qb_name` are filled for played weeks (e.g. a
+  team's three backup-QB starts are visible), `total_line`/`spread_line` exist for played weeks and the NEXT week only;
+  ep_weekly team target totals are sane (median 32/team-week); injuries `practice_status` ∈ {Full / Limited / Did Not
+  Participate In Practice}, `report_status` ∈ {Out, Questionable, Doubtful, ""}; roster `status` ∈ {ACT, RES, INA, DEV,
+  CUT, …} (suspensions/IR live there, not in injuries). ep_weekly has no K/DEF rows → K/DEF keep the existing model.
+* `qbOut`: the team's most frequent starting QB over the season ≠ this game's starter. If the QB names are missing for
+  a game, infer the starter from ep_weekly pass attempts.
+* Default matchup factor = opponent points allowed to the position only; next week's Vegas implied total is a bonus.
+* **Opportunity trend (single definition, used by trades, stashes and labels):** slope of WOPR (WR/TE) or RB weighted
+  opportunity per game over the last 3 unflagged games; "rising" = slope ≥ +0.03 WOPR/game (WR/TE) or ≥ +1.5 weighted
+  opportunities/game (RB). Calibration values, revisited after the first real-league run.
+* **Efficiency shrinkage:** efficiency = (actual + k·expected)/(expected·(1 + k)) with pseudo-count k = 6 games; caps
+  RB/TE 0.75–1.35, WR 0.8–1.3, QB 0.85–1.2. Calibration values.
+* **Team-strength function moves to release (b)** (pure, on lineups); release (e) only merges the "Best moves" UI.
+* **Until release (d) captures Yahoo projections**, "their perceived value" ≈ FantasyPros ROS, which is close to our
+  ECR anchor, so perception gaps are small and the Trade Finder will look quiet: expected, not a bug.
+* **Replace scope in (b):** projection v4 is THE value for lineup, analysis, waivers, breakouts, League, trades v3 and
+  the evaluate route. Trades v1 (`/trades`) and v2 are deleted in (b) (routes, code, tests, UI references) so the app
+  has one valuation.
+* **Playoff odds (e):** weekly team points ~ Normal(v4 lineup projection for that week, σ = the team's own weekly
+  std-dev this season, shrunk to the league's), 10k seeded runs over the league's remaining schedule. The import does
+  not capture the matchup schedule yet → release (e) starts with a bookmarklet step for it.
