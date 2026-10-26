@@ -17,6 +17,7 @@ import {
   parseSlotList,
   snapshotOf,
   stripLeaguePrefix,
+  cleanStoredTeamNames,
   upsertImport,
   validateImport,
   waiverPriorityOf,
@@ -272,6 +273,16 @@ test("league-name prefix is stripped from team names when every team shares it",
   assert.deepEqual(v.teams.map((x) => x.name), ["No Cap Rai", "Caw"]);
 });
 
+test("league-name prefix: strip once — ambiguous nested prefixes stay; the read path strips only the league's own name", () => {
+  const t = (n: string) => ({ name: n });
+  const nested = [t("L - Team - One"), t("L - Team - Two")];
+  assert.deepEqual(stripLeaguePrefix(nested).map((x) => x.name), ["L - Team - One", "L - Team - Two"]);
+  // Read path (readImport passes the stored league name): legacy names are cleaned, stripped names left alone.
+  assert.deepEqual(stripLeaguePrefix(nested, "L").map((x) => x.name), ["Team - One", "Team - Two"]);
+  assert.deepEqual(stripLeaguePrefix([t("Team - One"), t("Team - Two")], "L").map((x) => x.name), ["Team - One", "Team - Two"]);
+  assert.deepEqual(stripLeaguePrefix([t("No Cap Rai"), t("Caw")], "Kingshot").map((x) => x.name), ["No Cap Rai", "Caw"]);
+});
+
 // ------------------------------------------------------------------ standings and waiver order (2026-10-26)
 const withStandings = () => {
   const b = body();
@@ -358,4 +369,20 @@ test("re-import refreshes standings; a hand-entered priority is kept; a paste ke
   assert.equal(pasted.teams[0].record?.wins, 5);
   assert.equal(pasted.teams[0].waiverRank, 9);
   assert.equal(pasted.teams[0].players[0].name, "Josh Allen");
+});
+
+test("read-path migration: a legacy league is cleaned once even when its stored name differs from the prefix", () => {
+  const legacy = { ...validateImport({ name: "Yahoo league 1405188", teams: [{ id: "1", name: "x", players: [] }, { id: "2", name: "y", players: [] }] }) };
+  delete legacy.teamNamesClean;
+  legacy.teams = [
+    { id: "1", name: "Kingshot Gridiron Chumps - No Cap Rai", players: [] },
+    { id: "2", name: "Kingshot Gridiron Chumps - Playmaker Caw", players: [] },
+  ];
+  const once = cleanStoredTeamNames(legacy);
+  assert.deepEqual(once.teams.map((t) => t.name), ["No Cap Rai", "Playmaker Caw"]);
+  assert.equal(once.teamNamesClean, true);
+  // A league saved after the rule keeps names such as "Team - One" intact on every read.
+  const fresh = validateImport({ teams: [{ id: "1", name: "Team - One", players: [] }, { id: "2", name: "Team - Two", players: [] }] });
+  assert.equal(fresh.teamNamesClean, true);
+  assert.deepEqual(cleanStoredTeamNames(cleanStoredTeamNames(fresh)).teams.map((t) => t.name), ["One", "Two"].map((n, i) => fresh.teams[i].name));
 });

@@ -4,6 +4,7 @@ import { eligible, optimalLineup, slotLabels } from "./lineup.js";
 import { rosterOf } from "./analysis.js";
 import type { TradeContext } from "./trades.js";
 import { riskStatus } from "./injuryRisk.js";
+import { injuryKind } from "./projection.js";
 
 export interface FreeAgentInput {
   player: ValuedPlayer;
@@ -23,11 +24,16 @@ export interface WaiverResult {
   rules: DetailItem[];
   /** false when the source did not say who is a free agent vs on waivers (old import: re-import to see). */
   faStatusKnown: boolean;
+  /** Data problems worth a line (e.g. imported free agents we could not match), when any. */
+  notes?: string[];
 }
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const r2 = (x: number) => Math.round(x * 100) / 100;
-const fmtSigned = (x: number) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(1)}`;
+/** "+1.2" / "−0.4"; a missing number (NaN / undefined) is "—", never "NaN". */
+const fmtSigned = (x: number) => (Number.isFinite(x) ? `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(1)}` : "—");
+/** A number with `d` decimals, or "—" when missing (NaN / undefined): unknown, never 0. */
+const fmtNum = (x: number | undefined, d: number) => (typeof x === "number" && Number.isFinite(x) ? x.toFixed(d) : "—");
 
 /** Lineup gain needed to spend priority w of N on a rolling list (#1 needs 2.5, #N needs 1.0). */
 export function claimThreshold(w: number | undefined, n: number): number {
@@ -68,7 +74,7 @@ export function rankWaivers(
   ctx: TradeContext,
   myTeamId: string,
   freeAgents: FreeAgentInput[],
-  opts: { myPriority?: number; limit?: number; breakouts?: Map<string, WaiverBreakout> } = {},
+  opts: { myPriority?: number; limit?: number; perPosition?: number; breakouts?: Map<string, WaiverBreakout> } = {},
 ): WaiverResult {
   const S = ctx.league.settings;
   const n = S.numTeams || ctx.league.teams.length;
@@ -149,8 +155,9 @@ export function rankWaivers(
     let action: string | undefined;
     const ruleItems: DetailItem[] = [];
     if (isKDef) {
-      // Kickers / defenses are streamed: never spend rolling-list priority on them.
-      if (gain <= 0.05 && benchGain <= 0) {
+      // Kickers / defenses are streamed: never spend rolling-list priority (or a bid) on them, and only a real
+      // weekly gain makes one worth streaming (value alone, e.g. more games left, is not a streaming upgrade).
+      if (!(gain > 0.05)) {
         recommendation = "pass";
         rule = `Not an upgrade on your current ${fa.pos}`;
         lead = `Not an upgrade on your current ${fa.pos}.`;
@@ -161,8 +168,8 @@ export function rankWaivers(
         action = "Free agent, add any time.";
       } else {
         recommendation = "pass";
-        rule = `${fa.pos} on waivers: never worth priority`;
-        lead = `${fa.pos} on waivers: not worth your priority.`;
+        rule = S.usesFaab ? `${fa.pos} on waivers: never worth a bid` : `${fa.pos} on waivers: never worth priority`;
+        lead = S.usesFaab ? `${fa.pos} on waivers: not worth a bid.` : `${fa.pos} on waivers: not worth your priority.`;
         action = "Stream one from free agents after waivers clear.";
       }
     } else if (gain >= threshold) {
@@ -201,7 +208,34 @@ export function rankWaivers(
       recommendation = "optional";
       rule = `Modest upgrade (gain ${fmtSigned(gain)} < ${threshold.toFixed(1)} ppg)`;
       lead = gain > 0.05 ? `Small upgrade: ${fmtSigned(gain)} ppg in your lineup.` : `Bench upgrade: ${fmtSigned(benchGain)} value${drop ? ` over ${drop.name}` : ""}.`;
-      action = free ? "Free agent, no priority cost." : "Not worth priority, so add him only if he clears waivers.";
+      action = free
+        ? S.usesFaab
+          ? "Free agent, no bid needed."
+          : "Free agent, no priority cost."
+        : S.usesFaab
+          ? "Bid the minimum at most, or add him if he clears waivers."
+          : "Not worth priority, so add him only if he clears waivers.";
+    }
+    const injText = fa.injury ? `${fa.injury.status.trim() || "injured"}${fa.injury.detail?.trim() ? ` (${fa.injury.detail.trim()})` : ""}` : "";
+    const kind = injuryKind(fa.injury);
+    if (kind === "long" && recommendation !== "pass") {
+      // Long-term injured (IR, PUP, NFI, NA, "Out (IR)", "Out (ACL)"): never a claim or a bid. Out for the season → pass;
+      // else a would-be claim becomes a stash while his return is confirmed.
+      if (fa.remainingGames <= 0) {
+        recommendation = "pass";
+        rule = `${rule}, but out for the season`;
+        lead = `Out for the season (${injText}).`;
+        action = undefined;
+      } else if (recommendation === "claim") {
+        recommendation = "stash";
+        rule = `${rule}, but on a long-term injury list: confirm his status`;
+        lead = `Would be a claim, but he is ${injText}, out long-term.`;
+        action = free
+          ? "Stash him only if you have a spare bench spot; confirm when he returns."
+          : S.usesFaab
+            ? "Confirm his status before bidding, or add him after waivers clear."
+            : "Confirm his status before spending priority, or add him after waivers clear.";
+      }
     }
     // An injured player is never worth rolling-list priority sight unseen: hold him as a stash until his status is known.
     // "DNP" = did not practice, no game status yet: treated like Questionable here.
@@ -209,7 +243,7 @@ export function rankWaivers(
     if (recommendation === "claim" && hurt && onWaivers && !S.usesFaab) {
       recommendation = "stash";
       rule = `${rule}, but injured: hold until his status is known`;
-      lead = `Would be a claim, but he is ${fa.injury!.status}.`;
+      lead = `Would be a claim, but he is ${injText}.`;
       action = "Confirm his status before spending priority, or add him after waivers clear.";
     }
 
@@ -227,10 +261,11 @@ export function rankWaivers(
     if (snapTrend !== 0) item("Snaps", `${fmtSigned(snapTrend * 100)}% last week vs earlier weeks`, toneOf(snapTrend));
     if (fa.injury) item("Injury", `${fa.injury.status}${fa.injury.detail ? ` (${fa.injury.detail})` : ""}`, "warn");
     if (bo) {
-      item("Breakout score", `${bo.score.toFixed(0)} of 100`);
-      item("Path to more work", bo.situation >= 1 ? "Open" : bo.situation > 0 ? "Partly open" : "Blocked");
-      item("Expected pts/g, last 2 weeks", bo.oppLevel.toFixed(1));
-      for (const d of thesisItems(bo.thesis)) item(d.label, d.value);
+      // Missing breakout numbers (NaN / undefined) are unknown: "—", never "NaN" or 0.
+      item("Breakout score", Number.isFinite(bo.score) ? `${bo.score.toFixed(0)} of 100` : "—");
+      item("Path to more work", !Number.isFinite(bo.situation) ? "—" : bo.situation >= 1 ? "Open" : bo.situation > 0 ? "Partly open" : "Blocked");
+      item("Expected pts/g, last 2 weeks", fmtNum(bo.oppLevel, 1));
+      for (const d of thesisItems(bo.thesis ?? "")) item(d.label, d.value);
     }
     // The call pill and the FA / W badge are on the row already; details add the cost, or the status when it costs nothing to know.
     if (ACTIONABLE.has(recommendation)) item("Cost", cost);
@@ -273,7 +308,7 @@ export function rankWaivers(
       b.ppg - a.ppg ||
       a.id.localeCompare(b.id),
   );
-  const limited = targets.slice(0, opts.limit ?? 60);
+  const limited = capRows(targets, opts.limit ?? 60, opts.perPosition ?? 5);
   const needList = [...needs].join(", ") || "none";
   const rules: DetailItem[] = [];
   const rule = (label: string, value: string) => rules.push({ label, value });
@@ -281,17 +316,35 @@ export function rankWaivers(
   else rule("Claim", `He adds ≥ ${threshold.toFixed(1)} ppg to your lineup`);
   rule("Claim", "Or a future starter: rising role, flex-level expected points");
   rule("Claim", `Or a top-3 free agent at a need (${needList})`);
-  rule("Optional", "A smaller upgrade: add only if it costs no priority");
+  rule("Optional", S.usesFaab ? "A smaller upgrade: a minimum bid at most" : "A smaller upgrade: add only if it costs no priority");
   rule("Stash", "Not an upgrade yet, but his role is rising");
   rule("Stash", "Injured would-be claims on waivers wait for his status");
+  rule("Stash", "Long-term injured (IR, PUP, NA): never a claim, confirm his return");
   rule("Wait", "Similar players will clear waivers soon");
-  rule("K / DEF", "Never worth priority: stream them from free agents");
+  rule("K / DEF", S.usesFaab ? "Never worth a bid: stream them from free agents" : "Never worth priority: stream them from free agents");
   if (!S.usesFaab && w !== undefined) rule("Priority", w >= n ? `You are #${n} of ${n}: claiming costs nothing` : `You are #${w} of ${n}: a claim drops you to #${n}`);
   else if (!S.usesFaab) rule("Priority", "Your waiver priority is unknown");
-  rule("Free agents", "No priority cost: add any time");
+  rule("Free agents", S.usesFaab ? "No bid needed: add any time" : "No priority cost: add any time");
 
   const faStatusKnown = !freeAgents.length || freeAgents.some((f) => f.availability !== "unknown");
   return { freeAgents: limited, myPriority: w, numTeams: n, advice: adviceLine(limited, w, n, S.usesFaab), rules, faStatusKnown };
+}
+
+/**
+ * The best `limit` rows overall, plus the best `perPosition` rows of every position not already shown that many
+ * times, so each position chip (K and DEF streaming options included) has rows. Keeps the sorted order.
+ */
+export function capRows<T extends { pos: Position }>(sorted: T[], limit: number, perPosition: number): T[] {
+  const keep = new Set(sorted.slice(0, limit));
+  const shown = new Map<Position, number>();
+  for (const t of keep) shown.set(t.pos, (shown.get(t.pos) ?? 0) + 1);
+  for (const t of sorted.slice(limit)) {
+    const c = shown.get(t.pos) ?? 0;
+    if (c >= perPosition) continue;
+    keep.add(t);
+    shown.set(t.pos, c + 1);
+  }
+  return sorted.filter((t) => keep.has(t));
 }
 
 /** GET /waivers response: the result with slim rows (only what the Waivers tab renders). */
@@ -379,7 +432,7 @@ export function thesisItems(thesis: string): DetailItem[] {
   return out.map((d) => ({ ...d, value: clampItem(d.value) }));
 }
 function costText(usesFaab: boolean | undefined, budget: number | undefined, w: number | undefined, n: number, onWaivers: boolean, rankScore: number): string {
-  if (!onWaivers) return "Free agent: add now, no priority cost.";
+  if (!onWaivers) return usesFaab ? "Free agent: add now, no bid needed." : "Free agent: add now, no priority cost.";
   if (usesFaab) {
     const pct = Math.max(1, Math.min(40, Math.round(rankScore * 4)));
     return budget ? `Bid about $${Math.max(1, Math.round((budget * pct) / 100))} (${pct}% of $${budget}).` : `Bid about ${pct}% of your FAAB.`;

@@ -135,8 +135,10 @@ test("waiverStatusOf: owner column wins, else the status=W list, else unknown", 
   assert.equal(r.onWaivers.get("1"), false); // column says FA (the list disagrees: counted)
   assert.equal(r.onWaivers.get("2"), true);
   assert.equal(r.onWaivers.get("3"), false);
-  assert.equal(r.onWaivers.get(playerKey(ps[3])), false);
-  assert.deepEqual(r.diag, { fromColumn: 1, fromList: 3, unknown: 0, disagree: 1, listUsed: true });
+  // Completeness is judged per position group: the flat list has no defense in it and no defense row had an owner
+  // reading, so an empty DEF list cannot be told from an unread one → unknown, not a free agent.
+  assert.equal(r.onWaivers.get(playerKey(ps[3])), undefined);
+  assert.deepEqual(r.diag, { fromColumn: 1, fromList: 2, unknown: 1, disagree: 1, listUsed: true });
   // Truncated list: members are on waivers, the rest unknown (not guessed as free agents).
   const t = waiverStatusOf(ps, { ...list, complete: false });
   assert.equal(t.onWaivers.get("2"), true);

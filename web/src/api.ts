@@ -65,6 +65,8 @@ export interface WaiversResponse {
   rules: DetailItem[];
   /** false = the import did not say who is a free agent vs on waivers (re-import to see). */
   faStatusKnown: boolean;
+  /** Data problems worth a line (e.g. imported free agents we could not match), when any. */
+  notes?: string[];
 }
 
 

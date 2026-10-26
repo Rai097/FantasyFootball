@@ -4,7 +4,7 @@
 // pages while the user is logged in, reads the league's own pages with
 // same-origin fetches, and shows the result for the user to copy/download.
 // It never sends data anywhere else.
-import { parseMyTeamId, parsePlayersHtml, parseSettingsHtml, parseStandingsHtml, playerKey, waiverStatusOf, type ScrapedPlayer, type StandingsRecord, type WaiverList } from "./yahooHtml";
+import { parseMyTeamId, parsePlayersHtml, parseSettingsHtml, parseStandingsHtml, playerKey, waiverGroupOf, waiverStatusOf, type ScrapedPlayer, type StandingsRecord, type WaiverGroup, type WaiverGroupList, type WaiverList } from "./yahooHtml";
 
 const DEFAULT_SLOTS = ["QB", "WR", "WR", "RB", "RB", "TE", "FLEX", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN", "IR"];
 const HALF_PPR = { passYd: 0.04, passTd: 4, passInt: -1, rushYd: 0.1, rushTd: 6, rec: 0.5, recYd: 0.1, recTd: 6, twoPt: 2, fumLost: -2, teRec: 0 };
@@ -143,18 +143,21 @@ async function run(): Promise<void> {
   /** What goes into the payload: one entry per free agent, `onWaivers` only when known. */
   const faOut: (Pick<ScrapedPlayer, "yahooId" | "name" | "pos" | "team" | "status"> & { onWaivers?: boolean })[] = [];
   const seen = new Set<string>();
-  const firstPage = new Map<string, string[]>(); // "A|O" → keys on the first page, to spot an ignored status filter
-  /** Read up to `max` players of one list into `into` (de-duplicated by `seenSet`). Returns the number added. */
+  /**
+   * Read up to `max` players of one list into `into` (de-duplicated by `seenSet`). `failed` = a page did not load
+   * (HTTP error or network error): the list is then partial and must not be trusted as complete.
+   */
   const readList = async (status: "A" | "W", pos: string, sort: string, max: number, into: ScrapedPlayer[], seenSet: Set<string>, step: string) => {
     let total = 0;
     let full = false;
+    let failed = false;
     for (let start = 0; start < 2 * max + 25; start += 25) {
       const url = `${base}/players?status=${status}&pos=${pos}&sort=${sort}&count=${start}`;
       let added = 0;
       try {
         const page = await getPage(url);
+        if (!page.ok) failed = true;
         const r = page.ok ? parsePlayersHtml(page.html) : undefined;
-        if (start === 0 && r) firstPage.set(`${status}|${pos}`, r.players.map(playerKey));
         for (const p of r?.players ?? []) {
           const k = playerKey(p);
           if (seenSet.has(k)) continue;
@@ -167,13 +170,14 @@ async function run(): Promise<void> {
           added++;
           total++;
         }
-        diagnostics.push({ step, url, status: page.status, players: r?.players.length ?? 0, added, ...(r?.diag ?? {}) });
+        diagnostics.push({ step, url, status: page.status, players: r?.players.length ?? 0, added, ...(r?.diag ?? {}), ...(page.ok ? {} : { note: "not ok: list partial" }) });
       } catch (e) {
+        failed = true;
         diagnostics.push({ step, url, note: `fetch failed: ${(e as Error).message}` });
       }
       if (!added || full || total >= max) break;
     }
-    return { total, full: full || total >= max };
+    return { total, full: full || total >= max, failed };
   };
 
   let sortUsed = "AR";
@@ -190,22 +194,26 @@ async function run(): Promise<void> {
       say(`reading free agents (${pos})…`);
       await readList("A", pos, sortUsed, MAX_KDEF, freeAgents, seen, `freeAgents ${pos}`);
     }
-    // Waivers list (fallback + cross-check for the owner column).
-    const wPlayers: ScrapedPlayer[] = [];
-    const wSeen = new Set<string>();
-    let complete = true;
+    // Waivers lists, one per position group (fallback + cross-check for the owner column). Each group is judged on
+    // its own: a failed or truncated page makes that group's list partial (non-members unknown, never free agents).
+    const groups: Partial<Record<WaiverGroup, WaiverGroupList>> = {};
+    const groupDiag: Record<string, unknown> = {};
     for (const [pos, max] of [["O", MAX_W_PAGES * 25], ["K", 25], ["DEF", 25]] as const) {
       say(`reading players on waivers (${pos})…`);
+      const wPlayers: ScrapedPlayer[] = [];
+      const wSeen = new Set<string>();
       const r = await readList("W", pos, sortUsed, max, wPlayers, wSeen, `waivers ${pos}`);
-      if (r.full) complete = false;
+      // Yahoo ignored the filter when the W list holds a row whose owner cell says FA, or when it holds every
+      // available player read for the group (compared as sets, not page order).
+      const aKeys = freeAgents.filter((p) => waiverGroupOf(p.pos) === pos).map(playerKey);
+      const ignored = wPlayers.some((p) => p.availability === "FA") || (aKeys.length >= 5 && aKeys.every((k) => wSeen.has(k)));
+      groups[pos] = { keys: wSeen, complete: !r.full && !r.failed, ignored };
+      groupDiag[pos] = { size: wSeen.size, complete: !r.full && !r.failed, failed: r.failed, ignored };
     }
-    // If status=W returned the same first page as status=A, Yahoo ignored the filter: do not trust the list.
-    const a0 = firstPage.get("A|O") ?? [];
-    const w0 = firstPage.get("W|O") ?? [];
-    const ignored = !firstPage.has("W|O") || (w0.length >= 5 && w0.length === a0.length && w0.every((k, i) => k === a0[i])) || wPlayers.some((p) => p.availability === "FA");
-    const wList: WaiverList = { keys: wSeen, complete, ignored };
+    const all = new Set(Object.values(groups).flatMap((g) => [...g.keys]));
+    const wList: WaiverList = { keys: all, complete: Object.values(groups).every((g) => g.complete), ignored: Object.values(groups).every((g) => g.ignored), groups };
     const ws = waiverStatusOf(freeAgents, wList);
-    diagnostics.push({ step: "waiverStatus", ...ws.diag, listSize: wSeen.size, listComplete: complete, listIgnored: ignored });
+    diagnostics.push({ step: "waiverStatus", ...ws.diag, listSize: all.size, lists: groupDiag });
     for (const p of freeAgents) {
       const onWaivers = ws.onWaivers.get(playerKey(p));
       faOut.push({ yahooId: p.yahooId, name: p.name, pos: p.pos, team: p.team, status: p.status, ...(onWaivers !== undefined ? { onWaivers } : {}) });

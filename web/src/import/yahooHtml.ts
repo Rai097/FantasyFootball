@@ -1,11 +1,14 @@
 // Pure string parsing of Yahoo Fantasy Football *web pages* (not the API).
 // Shared by the bookmarklet (web/src/import/bookmarklet.ts, runs on
 // football.fantasysports.yahoo.com) and unit tests (server/providers/import-html.test.ts).
-// No DOM, no imports with runtime code: this file is bundled into the bookmarklet.
+// No DOM; the only runtime import is server/data/names.ts (pure, dependency-free), since this file is bundled
+// into the bookmarklet.
 //
 // We have never seen Yahoo's real markup from this project, so every extractor
 // is defensive: several strategies, first one that yields something wins, and
 // what happened is reported in diagnostics so the parser can be tuned later.
+
+import { normTeam, teamFromDefenseName } from "../../../server/data/names.js";
 
 export const POS_RE = "QB|RB|WR|TE|K|DEF";
 
@@ -122,7 +125,18 @@ const STATUS_RE = /^(Q|D|O|P|IR|IR-R|PUP|PUP-R|PUP-P|NFI|NFI-R|NA|SUSP|COVID-19)
 
 // ------------------------------------------------------------------ players
 const PLAYER_LINK = /<a\b([^>]*?)href\s*=\s*["']([^"']*?\/nfl\/players\/(\d+)[^"']*)["']([^>]*)>([\s\S]*?)<\/a>/gi;
-const TEAM_LINK = /<a\b([^>]*?)href\s*=\s*["']([^"']*?\/nfl\/teams\/([a-z]{2,4})\/?[^"']*)["']([^>]*)>([\s\S]*?)<\/a>/gi;
+const TEAM_LINK = /<a\b([^>]*?)href\s*=\s*["']([^"']*?\/nfl\/teams\/([a-z][a-z-]{1,24})(?=[/"'?#])[^"']*)["']([^>]*)>([\s\S]*?)<\/a>/gi;
+
+/**
+ * A defense's team abbreviation from its team link: a short slug (/nfl/teams/kc/) is the abbreviation; a long one
+ * (/nfl/teams/kansas-city/) is not, so the row's "KC - DEF" text, else the slug / name read as a city or nickname,
+ * decides (server/data/names.ts). Undefined when nothing matches — never a cut slug such as "KANS".
+ */
+function defenseTeam(slug: string, rowTeam: string | undefined, name: string): string | undefined {
+  if (/^[a-z]{2,3}$/i.test(slug)) return normTeam(slug);
+  if (rowTeam) return normTeam(rowTeam);
+  return teamFromDefenseName(slug.replace(/-/g, " ")) ?? teamFromDefenseName(name);
+}
 const JUNK_NAME = /^(no new |new )?player notes?$|^notes?$|^video$|^news$|^add$|^drop$|^trade$|^watch$|^\s*$/i;
 
 /** Bounds of the innermost element named `tag` enclosing `at` (string search, tolerant of bad HTML). */
@@ -158,14 +172,18 @@ function statusFrom(rowHtmlStr: string): string | undefined {
 
 /**
  * Yahoo's player list (players?status=A) has an "Owner" column: "FA" for a free agent, "W (Wed)" (or a date)
- * for a player on waivers. Any cell of the row whose whole text is one of those counts. Defensive: absent → undefined.
+ * for a player on waivers. Any cell of the row whose whole text is one of those counts. A bare "W" cell is NOT
+ * waivers (that is how the list shows a last-game win): "W" counts only with its date, "W (Wed)". Absent → undefined.
  */
 export function availabilityFrom(rowText: string): { availability: "FA" | "W"; waiverUntil?: string } | undefined {
   for (const raw of rowText.split(/[\t\n]/)) {
     const cell = raw.trim();
     if (/^FA$/.test(cell)) return { availability: "FA" };
-    const w = /^(?:W|Waivers?)(?:\s*\(\s*([^()]{1,16}?)\s*\))?$/.exec(cell);
-    if (w) return w[1] ? { availability: "W", waiverUntil: w[1] } : { availability: "W" };
+    const w = /^(?:W\s*\(\s*([^()]{1,16}?)\s*\)|Waivers?(?:\s*\(\s*([^()]{1,16}?)\s*\))?)$/.exec(cell);
+    if (w) {
+      const until = w[1] ?? w[2];
+      return until ? { availability: "W", waiverUntil: until } : { availability: "W" };
+    }
   }
   return undefined;
 }
@@ -173,38 +191,64 @@ export function availabilityFrom(rowText: string): { availability: "FA" | "W"; w
 /** Key a scraped player the same way everywhere (defenses have no Yahoo player id). */
 export const playerKey = (p: { yahooId?: string; name: string; pos: string }) => p.yahooId ?? `${p.name}|${p.pos}`;
 
-export interface WaiverList {
-  /** Keys of players listed by players?status=W (all positions fetched). */
+/** Position groups Yahoo's player list is read in: offense ("O"), kickers, defenses. */
+export type WaiverGroup = "O" | "K" | "DEF";
+export const waiverGroupOf = (pos: string): WaiverGroup => (pos === "K" ? "K" : pos === "DEF" ? "DEF" : "O");
+
+export interface WaiverGroupList {
+  /** Keys of the players listed by players?status=W. */
   keys: Set<string>;
-  /** false when the list hit the page cap (players not in it are then unknown, not free agents). */
+  /** false when the list hit the page cap OR a page failed: players not in it are then unknown, not free agents. */
   complete: boolean;
   /** true when Yahoo seemed to ignore status=W (the list matched the status=A list): the list is not used. */
   ignored: boolean;
 }
 
+export interface WaiverList extends WaiverGroupList {
+  /**
+   * The list per position group (the bookmarklet reads one status=W list per group). When given, each group is
+   * judged on its own list only and a group without an entry is unknown. Without it, the flat list is judged per
+   * group on that group's own evidence (a member of the list, or an owner-column reading, in the group).
+   */
+  groups?: Partial<Record<WaiverGroup, WaiverGroupList>>;
+}
+
 /**
  * Free agent vs on waivers for each free agent: the owner column wins; else membership of the status=W list
- * (when that list is usable); else unknown (undefined). Disagreements are counted for diagnostics.
+ * (when that group's list is usable); else unknown (undefined). Disagreements are counted for diagnostics.
+ * Completeness is judged per position group: an empty or failed offense list never makes offense players free
+ * agents because the kicker list had a member.
  */
 export function waiverStatusOf(
   players: ScrapedPlayer[],
   w: WaiverList | undefined,
 ): { onWaivers: Map<string, boolean | undefined>; diag: { fromColumn: number; fromList: number; unknown: number; disagree: number; listUsed: boolean } } {
-  // An empty W list cannot be told from an unreadable page: when no row had an Owner reading either, trusting it
-  // would mark everyone a free agent. Leave them unknown instead (the app then asks for a re-import).
-  const unreadable = !!w && w.keys.size === 0 && !players.some((p) => p.availability);
-  const listUsed = !!w && !w.ignored && !unreadable;
+  // An empty W list cannot be told from an unreadable page: when no row of the group had an Owner reading either,
+  // trusting it would mark the whole group free agents. Leave them unknown instead (the app then asks for a re-import).
+  const usable = new Map<WaiverGroup, WaiverGroupList | undefined>();
+  for (const g of ["O", "K", "DEF"] as const) {
+    const gl = w ? (w.groups ? w.groups[g] : { keys: w.keys, complete: w.complete, ignored: w.ignored }) : undefined;
+    if (!gl || gl.ignored) {
+      usable.set(g, undefined);
+      continue;
+    }
+    const mine = players.filter((p) => waiverGroupOf(p.pos) === g);
+    const hasColumn = mine.some((p) => p.availability);
+    const evidence = w!.groups ? gl.keys.size > 0 : mine.some((p) => gl.keys.has(playerKey(p)));
+    usable.set(g, hasColumn || evidence ? gl : undefined);
+  }
   const out = new Map<string, boolean | undefined>();
-  const diag = { fromColumn: 0, fromList: 0, unknown: 0, disagree: 0, listUsed };
+  const diag = { fromColumn: 0, fromList: 0, unknown: 0, disagree: 0, listUsed: [...usable.values()].some(Boolean) };
   for (const p of players) {
     const k = playerKey(p);
-    const inList = listUsed ? w!.keys.has(k) : undefined;
+    const gl = usable.get(waiverGroupOf(p.pos));
+    const inList = gl ? gl.keys.has(k) : undefined;
     if (p.availability) {
       const onW = p.availability === "W";
       out.set(k, onW);
       diag.fromColumn++;
-      if (inList !== undefined && w!.complete && inList !== onW) diag.disagree++;
-    } else if (inList === true || (inList === false && w!.complete)) {
+      if (inList !== undefined && gl!.complete && inList !== onW) diag.disagree++;
+    } else if (inList === true || (inList === false && gl!.complete)) {
       out.set(k, inList);
       diag.fromList++;
     } else {
@@ -274,7 +318,7 @@ export function parsePlayersHtml(html: string): RosterParse {
     let pt = parsePosTeam(text2);
     if (isTeam) {
       if (!/\bDEF\b/.test(text2)) return; // team links are only defenses when the row says DEF
-      pt = { pos: "DEF", team: (abbr ?? pt?.team ?? "").toUpperCase() };
+      pt = { pos: "DEF", team: defenseTeam(abbr ?? "", pt?.team, name) };
     }
     const entry: ScrapedPlayer & { at: number } = { at, name, pos: pt?.pos ?? "" };
     if (!isTeam) entry.yahooId = id;
