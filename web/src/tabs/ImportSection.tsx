@@ -1,7 +1,7 @@
 // Connect tab → "Import from Yahoo (browser)": bookmarklet link, paste box
 // (bookmarklet JSON or copied roster text), imported-league list, settings editor.
 // Guide for users: docs/IMPORT.md (served at /api/docs/import).
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Active, type ImportResult, type ImportSummary, type StoredImport } from "../api";
 import { ErrorBox, Loading } from "../components/common";
 import { ApiError } from "../lib/errors";
@@ -56,12 +56,16 @@ export function ImportSection({ active, canManage, onChoose, onImported, onSetti
 }
 
 function BookmarkletCard() {
-  const ref = useRef<HTMLAnchorElement>(null);
   const bm = useAsync(() => api.bookmarkletUrl(), []);
-  useEffect(() => {
-    // Set javascript: href imperatively (React warns about javascript: URLs in JSX).
-    if (ref.current && bm.data) ref.current.setAttribute("href", bm.data.url);
-  }, [bm.data]);
+  const url = bm.data?.url;
+  // Set the javascript: href imperatively (React warns about javascript: URLs in JSX) on EVERY mount of the link:
+  // a link without href is plain text, so dragging it only selects the words instead of making a bookmark.
+  const ref = useCallback(
+    (el: HTMLAnchorElement | null) => {
+      if (el && url) el.setAttribute("href", url);
+    },
+    [url],
+  );
   return (
     <div className="stack-sm">
       <h3 className="no-margin">1 · Get the data from Yahoo</h3>
@@ -69,7 +73,7 @@ function BookmarkletCard() {
         <li>
           Drag this button to your browser's bookmarks bar:{" "}
           {bm.data ? (
-            <a ref={ref} className="btn primary bookmarklet" onClick={(e) => (e.preventDefault(), alert("Drag this button to your bookmarks bar, then click it while on your Yahoo league page."))}>
+            <a ref={ref} draggable className="btn primary bookmarklet" onClick={(e) => (e.preventDefault(), alert("Drag this button to your bookmarks bar, then click it while on your Yahoo league page."))}>
               Trade Desk import
             </a>
           ) : bm.loading ? (
