@@ -24,7 +24,8 @@ import {
   type TradeContext,
   type TradeOptions,
 } from "./trades.js";
-import { INJURY_RISK, MODE_WEIGHTS, combine, partsDelta, riskAdjusted, riskStatus, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
+import { MODE_WEIGHTS, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
+import { INJURY_RISK, riskAdjusted, riskStatus } from "./injuryRisk.js";
 
 export interface TradeOptionsV2 extends TradeOptions {
   mode?: TradeMode;

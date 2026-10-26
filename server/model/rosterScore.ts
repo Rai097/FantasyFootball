@@ -1,7 +1,6 @@
 // Roster score: the team objective used by Trade Finder v2. See docs/DESIGN.md "Trade finder v2".
 import type { LeagueSettings, Position, SlotKind, ValuedPlayer } from "./types.js";
 import { effPpg, isStartingSlot, SLOT_ELIGIBILITY, usable } from "./lineup.js";
-import { injuryKind } from "./projection.js";
 import { floorFactor } from "./signals.js";
 
 export type TradeMode = "now" | "balanced" | "playoffs";
@@ -273,31 +272,3 @@ export function partsDelta(after: ScoreParts, before: ScoreParts): ScoreParts {
   return { now: after.now - before.now, season: after.season - before.season, playoffs: after.playoffs - before.playoffs, depth: after.depth - before.depth };
 }
 
-// ---------------------------------------------------------------- injury risk
-
-/** Haircut on players I receive: Questionable 0.85, Doubtful 0.70, Out (incl. designated to return) 0.55. */
-export const INJURY_RISK = { questionable: 0.85, doubtful: 0.7, out: 0.55 } as const;
-
-export function riskStatus(p: ValuedPlayer): keyof typeof INJURY_RISK | null {
-  if (!p.injury) return null;
-  const k = injuryKind(p.injury);
-  if (k === "out" || k === "return") return "out";
-  if (k === "doubtful") return "doubtful";
-  const st = p.injury.status.trim().toUpperCase();
-  if (st === "Q" || st === "QUESTIONABLE") return "questionable";
-  return null;
-}
-
-const riskClones = new WeakMap<ValuedPlayer, ValuedPlayer>();
-/** The player with ppg / effPpg scaled by the injury-risk haircut (value unchanged); same object when healthy. */
-export function riskAdjusted(p: ValuedPlayer): ValuedPlayer {
-  const st = riskStatus(p);
-  if (!st) return p;
-  let c = riskClones.get(p);
-  if (!c) {
-    const f = INJURY_RISK[st];
-    c = { ...p, ppg: p.ppg * f, effPpg: (p.effPpg ?? p.ppg) * f };
-    riskClones.set(p, c);
-  }
-  return c;
-}

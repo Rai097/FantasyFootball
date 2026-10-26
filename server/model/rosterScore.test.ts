@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MODE_WEIGHTS, combine, depthCount, parseMode, riskAdjusted, riskStatus, rosterParts, rosterScore, weeklyPoints } from "./rosterScore.js";
+import { MODE_WEIGHTS, combine, depthCount, parseMode, rosterParts, rosterScore, weeklyPoints } from "./rosterScore.js";
+import { riskAdjusted, riskStatus } from "./injuryRisk.js";
 import { league, team, vp, SMALL_SLOTS } from "./testkit.js";
 import type { ValuedPlayer } from "./types.js";
 

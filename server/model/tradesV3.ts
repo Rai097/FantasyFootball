@@ -4,7 +4,8 @@ import type { FairnessBand, LeagueSettings, Position, SlotKind, TeamAnalysis, Tr
 import { FLEX_SLOTS, effPpg, eligible, optimalLineup, slotLabels, usable, type LineupResult } from "./lineup.js";
 import { applyTrade, combos, fmtSigned, lineupChanges, names, tradeDeadlinePassed, type TradeContext } from "./trades.js";
 import { state2, type State2 } from "./tradesV2.js";
-import { MODE_WEIGHTS, combine, partsDelta, riskAdjusted, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
+import { MODE_WEIGHTS, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
+import { riskAdjusted } from "./injuryRisk.js";
 import { injuryKind } from "./projection.js";
 import { edgeOf, marketOf, trueOf, type ValueSource } from "./market.js";
 import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";

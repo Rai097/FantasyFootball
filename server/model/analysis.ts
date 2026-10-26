@@ -45,13 +45,14 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
 
   const base = league.teams.map((team) => {
     const roster = rosterOf(team, players);
-    const { lineup, bench, starterPpg } = optimalLineup(S.slots, roster);
+    // This week's lineup: Questionable / Doubtful / Out starters are discounted (injuryRisk.ts), value is not.
+    const { lineup, bench, starterPpg } = optimalLineup(S.slots, roster, { injuryRisk: true });
     const groups: Record<string, { ppg: number; rank: number; count: number; leagueAvg: number }> = {};
     for (const l of lineup) {
       const g = groupOf(l.slot);
       if (!g) continue;
       groups[g] ??= { ppg: 0, rank: 0, count: 0, leagueAvg: 0 };
-      groups[g].ppg += effPpg(l.player);
+      groups[g].ppg += effPpg(l.player) * (l.riskFactor ?? 1);
       groups[g].count += 1;
     }
     const benchValue = bench.reduce((a, p) => a + p.value, 0);

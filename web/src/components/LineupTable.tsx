@@ -27,6 +27,14 @@ export function LineupTable({ lineup }: { lineup: LineupSlot[] }) {
                 </td>
                 <td>
                   <PlayerChip player={p} showValue={false} />
+                  {p && s.riskFactor != null && (
+                    <span
+                      className="tag small-tag warn-tag"
+                      title={`${p.injury?.status ?? "Injured"}: counted at ×${s.riskFactor} (${f1(p.ppg * s.riskFactor)} ppg) when picking this week's lineup. Check his status before lock.`}
+                    >
+                      ×{s.riskFactor} · check status
+                    </span>
+                  )}
                 </td>
                 <td className="num">{p ? <PpgCell player={p} /> : "–"}</td>
                 <td className="num">{p ? f1(p.value) : "–"}</td>

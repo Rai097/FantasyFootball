@@ -1,5 +1,6 @@
 // Optimal lineup + slot eligibility. See docs/DESIGN.md "Lineup".
 import type { LineupSlot, Position, SlotKind, ValuedPlayer } from "./types.js";
+import { riskAdjusted, riskFactor } from "./injuryRisk.js";
 
 export const SLOT_ELIGIBILITY: Record<SlotKind, Position[]> = {
   QB: ["QB"],
@@ -40,14 +41,23 @@ export interface LineupResult {
 const byStrength = (a: ValuedPlayer, b: ValuedPlayer) =>
   Number(usable(b)) - Number(usable(a)) || effPpg(b) - effPpg(a) || b.ppg - a.ppg || b.value - a.value || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
+export interface LineupOptions {
+  /**
+   * Rank and total starters on the injury-risk-adjusted rate (Q 0.85 / D 0.70 / O 0.55, see injuryRisk.ts).
+   * The lineup keeps the original player objects; affected slots carry `riskFactor`.
+   */
+  injuryRisk?: boolean;
+}
+
 /**
  * Greedy optimal lineup. Exact slots take the best eligible players first, then
  * flex slots from narrowest to widest. Unusable players (0 games left / 0 ppg)
  * only fill a slot when nothing else is eligible.
  */
-export function optimalLineup(slots: SlotKind[], roster: ValuedPlayer[]): LineupResult {
+export function optimalLineup(slots: SlotKind[], roster: ValuedPlayer[], opts: LineupOptions = {}): LineupResult {
   const starting = slots.map((s, i) => ({ s, i })).filter((x) => isStartingSlot(x.s));
-  const sorted = [...roster].sort(byStrength);
+  const rate = (p: ValuedPlayer) => (opts.injuryRisk ? riskAdjusted(p) : p);
+  const sorted = [...roster].sort((a, b) => byStrength(rate(a), rate(b)));
   const used = new Set<string>();
   const assigned: (ValuedPlayer | null)[] = new Array(slots.length).fill(null);
   for (const kind of FILL_ORDER) {
@@ -60,9 +70,13 @@ export function optimalLineup(slots: SlotKind[], roster: ValuedPlayer[]): Lineup
       }
     }
   }
-  const lineup: LineupSlot[] = starting.map(({ s, i }) => ({ slot: s, player: assigned[i] }));
+  const lineup: LineupSlot[] = starting.map(({ s, i }) => {
+    const player = assigned[i];
+    const f = opts.injuryRisk && player ? riskFactor(player) : 1;
+    return f < 1 ? { slot: s, player, riskFactor: f } : { slot: s, player };
+  });
   const bench = roster.filter((p) => !used.has(p.id)).sort((a, b) => b.value - a.value || b.ppg - a.ppg);
-  const starterPpg = lineup.reduce((a, l) => a + effPpg(l.player), 0);
+  const starterPpg = lineup.reduce((a, l) => a + effPpg(l.player && rate(l.player)), 0);
   return { lineup, bench, starterPpg: Math.round(starterPpg * 100) / 100 };
 }
 

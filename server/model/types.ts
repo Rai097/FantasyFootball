@@ -183,6 +183,8 @@ export interface League {
 export interface LineupSlot {
   slot: SlotKind;
   player: ValuedPlayer | null;
+  /** Injury-risk multiplier used to pick and total this starter (< 1 only for Q / D / O; absent when healthy). */
+  riskFactor?: number;
 }
 
 export interface TeamAnalysis {

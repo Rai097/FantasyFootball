@@ -59,3 +59,24 @@ test("lineup selection and starterPpg use availability-adjusted effPpg", () => {
   assert.equal(only.starterPpg, Math.round(((20 * 11) / 13) * 100) / 100);
   assert.equal(outQb.ppg, 20, "ppg unchanged");
 });
+
+test("injuryRisk: a Questionable starter is discounted ×0.85 and loses a close call; off by default", () => {
+  // WR2 at 10 ppg is Questionable (→ 8.5) vs a healthy 9 ppg WR3.
+  const q = roster.map((p) => (p.id === "wr2" ? { ...p, injury: { status: "Q", week: 4 } } : p));
+  const plain = optimalLineup(SMALL_SLOTS, q);
+  assert.ok(plain.lineup.some((l) => l.player?.id === "wr2"), "default ignores injury status");
+  assert.ok(plain.lineup.every((l) => l.riskFactor === undefined));
+
+  const adj = optimalLineup(SMALL_SLOTS, q, { injuryRisk: true });
+  const ids = adj.lineup.map((l) => l.player?.id);
+  assert.ok(ids.includes("wr3") && !ids.includes("wr2"), "healthy 9 ppg beats Q 10 × 0.85");
+  assert.equal(adj.starterPpg, 20 + 15 + 12 + 14 + 9 + 8 + 11 + 8 + 7);
+
+  // A clear Q starter still starts, flagged and totalled at the discounted rate; the player object is untouched.
+  const star = roster.map((p) => (p.id === "wr1" ? { ...p, injury: { status: "Questionable", week: 4 } } : p));
+  const s = optimalLineup(SMALL_SLOTS, star, { injuryRisk: true });
+  const slot = s.lineup.find((l) => l.player?.id === "wr1")!;
+  assert.equal(slot.riskFactor, 0.85);
+  assert.equal(slot.player!.ppg, 14);
+  assert.ok(Math.abs(s.starterPpg - (20 + 15 + 12 + 14 * 0.85 + 10 + 8 + 11 + 8 + 7)) < 0.01);
+});
