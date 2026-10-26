@@ -448,3 +448,72 @@ Why: the owner uses waivers to find players who can *become* starters, not only 
   (`injuryRisk.ts`: Q 0.85 / D 0.70 / O 0.55, shared with trades). Used by team analysis (My Team, power ranks, group
   ranks) for every team. `LineupSlot.riskFactor` marks discounted starters; the UI shows "×0.85 · check status".
   Trade and waiver lineups are unchanged; `value` is unchanged.
+
+## Discord sign-in, multi-tenant (2026-10-26) — replaces the APP_PASSWORD / APP_PUBLIC gate
+
+Owner request: sign in with Discord like perp.raibot.us; the owner is admin and can act as any user; every other
+user is tied to ONE team in ONE league. Users may view everything for their team and re-import their own league;
+delete, league settings, Yahoo OAuth and user assignment are admin-only. Reference implementation:
+~/perp-copy/src/perp_copy/dashboard/auth.py (Discord OAuth2 `identify`, signed state + state cookie, server-side
+sessions, allowlist re-checked per request, Origin + CSRF on writes, sign-in rate limit by CF-Connecting-IP behind
+the tunnel). Docs: https://discord.com/developers/docs/topics/oauth2#authorization-code-grant ,
+https://discord.com/developers/docs/resources/user#get-current-user ,
+https://owasp.org/www-community/SameSite , https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
+
+**Config** (env, in ~/FantasyFootball-run/.env, never committed): `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`,
+`SESSION_SECRET` (≥ 32 random bytes), `PUBLIC_URL` (https://ff.raibot.us; redirect URI = PUBLIC_URL + /auth/callback,
+never derived from request headers). Production without all four → refuse to start (fail closed). Non-production
+without Discord config → "dev mode": every request is a built-in admin (tests and `npm run dev` only; logged at start).
+APP_PASSWORD, APP_PUBLIC and the Basic-auth middleware are deleted.
+
+**Access list** `.data/access.json` (git-ignored; Discord ids are personal and the repo is public):
+`{ "admins": ["<discord id>"], "users": [{ "discordId": "...", "leagueId": "y1405188", "teamId": "4", "note": "..." }] }`
+Re-read on every request (tiny file; mtime cache OK), so removing an id locks that user out at once. Missing or
+unreadable file = nobody can sign in (fail closed); the owner's id is seeded as admin on first deploy by Claude.
+
+**Sessions**: server-side store `.data/sessions.json` (atomic writes via providers/store.ts): key = SHA-256 of a
+random 32-byte id; row `{ uid, name, avatar, csrf, createdMs, expiresMs, actAs? }`; TTL 7 days; logout revokes.
+Cookie `td_session` = the random id signed with HMAC-SHA256(SESSION_SECRET), httpOnly, Secure (prod), SameSite=Strict,
+Path=/. OAuth state: signed `{nonce, next, exp}` (10 min) in the URL AND in an httpOnly SameSite=Lax cookie; the
+callback requires both equal (timingSafeEqual) and a valid signature. `next` must be a same-site path (no `//`, no `\`).
+
+**Who can see what** (one guard, `server/auth/guard.ts`, called by every /api route; unit-tested per route):
+* Public: `/healthz`, `/auth/login`, `/auth/callback`, `/api/import/bookmarklet.js`, `/api/docs/import`, static UI.
+* Everything else under `/api` and `/auth/yahoo/*`: no session → 401 `{error, code:"signin"}`; id not in access list → 403.
+* Admin: everything; `POST /api/auth/act-as {discordId|null}` sets `actAs` on the session (an admin viewing as a user
+  sees exactly that user's scope; `null` = back to admin). Admin-only: DELETE /api/import/:id, PUT /api/import/:id/settings,
+  /auth/yahoo/*, /api/yahoo/*, /api/access (list users + leagues/teams to pick).
+* User (or admin acting as one): league routes only for provider `import` + their `leagueId`; the `team` query param
+  is forced to their `teamId` (another team → 403, missing → theirs); demo provider allowed read-only. `GET /api/import`
+  lists only their league. `POST /api/import` only when the payload's league is theirs (else 403). History/changes:
+  their league only.
+* Writes (POST/PUT/DELETE): Origin must equal PUBLIC_URL and `X-CSRF-Token` must equal the session's csrf
+  (timingSafeEqual); refusals are 403 with a code. `GET /api/auth/me` → `{ id, name, avatarUrl, role, csrf, scope:
+  {leagueId, teamId} | null, actingAs }`.
+* Rate limit: `/auth/login` + `/auth/callback` 30/min per client (CF-Connecting-IP only when the TCP peer is loopback,
+  else the peer) and 300/min global. Every login / refusal / admin act-as / write is one structured log line
+  (`[auth] event=login uid=… result=ok`), never tokens, codes, cookies or secrets.
+
+**UI**: no session → a sign-in screen ("Sign in with Discord"); `?error=not_allowed` → "This Discord account isn't on
+the list yet — ask the league owner." Header shows avatar + name + Sign out. Users: the team picker is hidden and the
+Connect tab shows only their league (re-import allowed; delete/settings hidden). Admin: a "View as" picker (Admin /
+each user) in the header; a banner "Viewing as <user>" while acting. API client sends X-CSRF-Token on writes and
+shows the sign-in screen on any 401.
+
+**Amendments after advisor review (override the above where they differ)**
+* **Team scope comes only from the guard.** `StoredImport.myTeamId` / `league.myTeamId` is per league (whoever imported),
+  not per user. The effective team for a request = access.json (user) or act-as / `team` param (admin). Every
+  `myTeamId` use in api.ts (teamParam default, freeAgentInputs priority/FAAB "is this my team", analysis response) goes
+  through the guard's scope. A non-admin re-import never writes `myTeamId`. Test: user B re-imports league Y → user A's
+  team and the stored `myTeamId` are unchanged.
+* **Sessions** load once at start into an in-memory Map (single process) and write through on change with
+  `writeJson` (atomic); never read-modify-write the file per request. access.json is read-only with an mtime cache.
+* **Deliberate omissions** (unlike perp): no sudo re-auth (nothing here moves money or places orders) and no per-user
+  write budget beyond the sign-in limiter. Writes are import / delete / settings / act-as only.
+* **Direct localhost writes fail Origin/Host** in production by design (Origin must be PUBLIC_URL). Smoke checks run
+  through https://ff.raibot.us.
+* **Browser-backup restore** (App.tsx) sends X-CSRF-Token; a 403 means "not your league": stop, no retry.
+* **Replace = delete**: APP_PASSWORD / APP_PUBLIC code, their two integration tests, `APP_PUBLIC` in the plist template
+  and the installed copy, README / DEPLOY / CLAUDE wording. New tests: production without the four auth vars exits 1;
+  production WITH dummy values → `/api/state` without a cookie is 401 (dev mode cannot leak into production); auth unit
+  tests with an injected fake Discord client.
