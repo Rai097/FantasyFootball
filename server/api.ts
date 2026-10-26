@@ -186,10 +186,6 @@ function requireOwnImport(req: Request, id: string): void {
   if (s.role !== "admin" && id !== s.leagueId) throw authErrors.league();
 }
 
-/** "My team" for priority / FAAB data and the league response: the guard's pinned team, else the league's. */
-function myTeamOf(req: Request, provider: Provider, league: League): string | undefined {
-  return pinnedTeam(scopeOf(req), provider) ?? league.myTeamId;
-}
 
 /** The league as this request should see it (a pinned user sees their own team as "my team"). */
 function leagueFor(req: Request, provider: Provider, league: League): League {
@@ -245,8 +241,6 @@ async function freeAgentInputs(
   id: string,
   team: string,
   refresh: boolean,
-  /** The team whose waiver priority / FAAB the stored data describes (myTeamOf). */
-  mine: string | undefined,
 ): Promise<{ input: FreeAgentInput[]; myPriority?: number; league: League; notes?: string[] }> {
   let notes: string[] | undefined;
   let fas: { player: Player; onWaivers: boolean; availability?: Availability; percentOwned?: number }[];
@@ -266,8 +260,11 @@ async function freeAgentInputs(
   } else {
     const y = await yahoo.getFreeAgents(l.db, id, { refresh });
     fas = y.freeAgents;
-    myPriority = team === mine ? y.myPriority : undefined;
-    if (team === mine && y.myFaabBalance !== undefined) {
+    // Yahoo's priority / FAAB belong to the connected account's team (league.myTeamId), whoever asks: never shown as
+    // another team's, and the cached result (keyed by team) does not depend on who asked first.
+    const owner = l.league.myTeamId;
+    myPriority = team === owner ? y.myPriority : undefined;
+    if (team === owner && y.myFaabBalance !== undefined) {
       league = { ...l.league, teams: l.league.teams.map((t) => (t.id === team ? { ...t, faabRemaining: y.myFaabBalance } : t)) };
     }
   }
@@ -460,7 +457,7 @@ apiRouter.get(
     const key = `${provider}:${req.params.id}:waivers:${team}`;
     const result = await cached(key, refresh, async () => {
       const [{ input, myPriority, league, notes }, breakouts] = await Promise.all([
-        freeAgentInputs(l, provider, req.params.id, team, refresh, myTeamOf(req, provider, l.league)),
+        freeAgentInputs(l, provider, req.params.id, team, refresh),
         faBreakoutSignals(l, team),
       ]);
       const r = toWaiversResponse(rankWaivers({ ...l.ctx, league }, team, input, { myPriority, breakouts }));
@@ -488,7 +485,7 @@ apiRouter.get(
       const [depth, market, fa] = await Promise.all([
         getDepthChart(l.db.season),
         loadMarketValues(l.league).catch(() => null),
-        freeAgentInputs(l, provider, req.params.id, team, refresh, myTeamOf(req, provider, l.league)).catch((e) => {
+        freeAgentInputs(l, provider, req.params.id, team, refresh).catch((e) => {
           console.warn(`[breakouts] free agents unavailable: ${(e as Error).message}`);
           return null;
         }),
