@@ -2,6 +2,7 @@
 import type { League, TeamAnalysis, ValuedPlayer } from "./types.js";
 import { effPpg, optimalLineup, slotLabels, type LineupResult } from "./lineup.js";
 import { irSet, rosterOf } from "./analysis.js";
+import { injuryKind } from "./projection.js";
 
 export interface TradeContext {
   league: League;
@@ -16,15 +17,39 @@ export const tradeable = (p: ValuedPlayer) => p.pos !== "K" && p.pos !== "DEF" &
 export const names = (ps: ValuedPlayer[]) => ps.map((p) => p.name).join(" + ") || "nothing";
 
 /**
- * Roster after a trade, dropping lowest-value bench players (never incoming or IR) to keep size. `irIds` = this team's
- * IR slot: those players never start (an IR player received from the partner is not in it, so he can start here).
+ * May an incoming player sit in an IR slot? Yes when the partner already has him in one (Yahoo enforced eligibility)
+ * or he is listed IR / PUP / NFI (injuryKind "long" / "return"). Conservative: a plain "Out" tag is not enough.
  */
-export function applyTrade(slots: League["settings"]["slots"], roster: ValuedPlayer[], gives: ValuedPlayer[], gets: ValuedPlayer[], irIds: Set<string>) {
+export const irEligible = (p: ValuedPlayer, fromIrIds: ReadonlySet<string>): boolean => {
+  const k = injuryKind(p.injury);
+  return fromIrIds.has(p.id) || k === "long" || k === "return";
+};
+
+/**
+ * Roster spots a side must free after a trade (> 0 = it cuts that many bench players). Owner 2026-10-26 (injured trade
+ * pieces): a player leaving this side's IR slot frees an IR spot, not an active one; an incoming IR-eligible player
+ * goes to a free IR slot (slots with "IR" minus the IR players it keeps) instead of a bench spot. Counted on the
+ * difference, so partial test rosters keep their room. Lineups still score an incoming player from his return week.
+ */
+export function rosterExcess(slots: League["settings"]["slots"], irIds: ReadonlySet<string>, gives: ValuedPlayer[], gets: ValuedPlayer[], fromIrIds: ReadonlySet<string> = new Set()): number {
+  const irSlots = slots.filter((s) => s === "IR").length;
+  const givesFromIr = gives.filter((p) => irIds.has(p.id)).length;
+  const freeIr = Math.max(0, irSlots - (irIds.size - givesFromIr));
+  const toIr = Math.min(freeIr, gets.filter((p) => irEligible(p, fromIrIds)).length);
+  return gets.length - gives.length + givesFromIr - toIr;
+}
+
+/**
+ * Roster after a trade, dropping lowest-value bench players (never incoming or IR) to keep size (rosterExcess). `irIds`
+ * = this team's IR slot: those players never start (an IR player received from the partner is not in it, so he can
+ * start here once back); `fromIrIds` = the partner's IR slot.
+ */
+export function applyTrade(slots: League["settings"]["slots"], roster: ValuedPlayer[], gives: ValuedPlayer[], gets: ValuedPlayer[], irIds: Set<string>, fromIrIds: ReadonlySet<string> = new Set()) {
   const giveIds = new Set(gives.map((p) => p.id));
   let after = roster.filter((p) => !giveIds.has(p.id)).concat(gets);
   let lu = optimalLineup(slots, after, { irIds });
   const drops: ValuedPlayer[] = [];
-  let excess = gets.length - gives.length;
+  let excess = rosterExcess(slots, irIds, gives, gets, fromIrIds);
   if (excess > 0) {
     const getIds = new Set(gets.map((p) => p.id));
     const cands = lu.bench
