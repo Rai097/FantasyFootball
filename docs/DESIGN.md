@@ -934,6 +934,13 @@ Owner-specific worked cases live outside the repo (public).
 * **Counts (2026 cache, demo league 42, week 7)**: 128 absent players with an estimate — 2 high, 24 medium, 2 low,
   100 return unconfirmed; 1 flex-level 0-snap player; flex levels QB 19.1 / RB 10.2 / WR 8.6 / TE 8.0 pts/game;
   3 Stash watch candidates (the demo's 12 full rosters hold most injured starters).
+* Fix round 1: "practice upgrade" needs a real absence (a player hurt in last week's game who practises limited this
+  week is trending down, not returning); "Missed" says "all N games this season" for a player without a game.
 * Known gaps: practice is one row per week (no Wednesday→Friday trend); suspension length is never known; the 0-snap
   rule uses his current team's games (a traded player's old team is not consulted); Finder suggestions still skip
-  injured players; the 21-day window start is a guess when the practice row is missing.
+  injured players; the 21-day window start is a guess when the practice row is missing; a designated-to-return player
+  in the practice branch (full / limited but still Out) is not capped at his window end (past it he reverts to
+  season-ending IR); games missed count weeks before `currentWeek`, so in the mid-week data state (week 7 with one
+  game unplayed) a player who already missed week 7 shows one game fewer and the IR floor lands a game late until the
+  next refresh; on an import, a rostered player the matcher failed on (`team.unmatched`) is not in the rostered set
+  and could show in Stash watch.

@@ -86,7 +86,10 @@ export function estimateReturn(x: ReturnInput): ReturnEstimate {
   const lvl = practiceLevel(thisWeek?.practice);
   // A practice row from before his last game belongs to the old injury, not this absence.
   const prevLvl = prevWeek && (x.lastGameWeek === undefined || prevWeek.week > x.lastGameWeek) ? practiceLevel(prevWeek.practice) : 1;
-  const practiceUp = lvl >= 2 && lvl > Math.max(1, prevLvl);
+  // Only an upgrade after a real absence: a player hurt in last week's game who practises limited this week is
+  // trending down, not about to return.
+  const wasOut = x.lastGameWeek === undefined || x.lastGameWeek < x.currentWeek - 1 || (x.gamesMissed ?? 0) >= 1;
+  const practiceUp = wasOut && lvl >= 2 && lvl > Math.max(1, prevLvl);
   const unknown = (why: string): ReturnEstimate => {
     add("Return", why, "warn");
     return { returnWeek: null, confidence: "unknown", reasons, practiceUp };
@@ -101,7 +104,8 @@ export function estimateReturn(x: ReturnInput): ReturnEstimate {
   const irLeft = ir && x.gamesMissed !== null && x.gamesMissed < RETURNS.irMinGames ? RETURNS.irMinGames - x.gamesMissed : 0;
   const earliestWeek = irLeft ? x.gameWeeks[irLeft] : undefined;
   if (irLeft) add("IR minimum", `${RETURNS.irMinGames} games: missed ${x.gamesMissed}, eligible from wk ${earliestWeek ?? "—"}`);
-  if (x.gamesMissed !== null && x.gamesMissed > 0 && !irLeft) add("Missed", `${x.gamesMissed} of his team's games since his last game`);
+  if (x.gamesMissed !== null && x.gamesMissed > 0 && !irLeft)
+    add("Missed", x.lastGameWeek === undefined ? `all ${x.gamesMissed} of his team's games this season` : `${x.gamesMissed} of his team's games since his last game`);
   if (thisWeek && lvl > 0) {
     const trend = prevWeek && prevLvl !== lvl && prevWeek.week > (x.lastGameWeek ?? 0) ? `${LEVEL_TEXT[prevLvl]} → ` : "";
     add("Practice", `wk ${x.currentWeek}: ${trend}${LEVEL_TEXT[lvl]}${thisWeek.report ? `, game status ${thisWeek.report}` : ""}`, lvl >= 2 ? "pos" : undefined);

@@ -94,3 +94,13 @@ test("no games left after the estimate ⇒ unknown; reasons stay short", () => {
   assert.equal(r.returnWeek, null);
   for (const x of r.reasons) assert.ok(x.value.length <= 90);
 });
+
+test("practice upgrade only after a real absence: hurt in last week's game, limited this week ⇒ no 'waiver fight' flag", () => {
+  const fresh = estimateReturn(base({ absence: "out", gamesMissed: 0, lastGameWeek: 7, status: [{ week: 8, practice: LTD, report: "Out" }] }));
+  assert.equal(fresh.practiceUp, false);
+  assert.equal(fresh.returnWeek, 9);
+  const back = estimateReturn(base({ absence: "out", gamesMissed: 1, lastGameWeek: 6, status: [{ week: 8, practice: LTD, report: "Out" }] }));
+  assert.equal(back.practiceUp, true, "missed a game, now practising: an upgrade");
+  const none = estimateReturn(base({ rosterStatus: "RES", lastGameWeek: undefined, gamesMissed: 7 }));
+  assert.ok(none.reasons.some((r) => r.label === "Missed" && /all 7 of his team's games this season/.test(r.value)));
+});
