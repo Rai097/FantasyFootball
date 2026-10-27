@@ -153,6 +153,15 @@ function availKind(p: Player, sig: PlayerSignals | null): { kind: Avail; absence
   return { kind: "healthy" };
 }
 
+/**
+ * Absent on the league source's word only (a Yahoo / import IR tag: "IR", "PUP", "NA", or "Out" in an IR slot) while
+ * nflverse does not list him on a reserve list: the estimator says so instead of "on a reserve list".
+ */
+const leagueOnlyIr = (p: Player, sig: PlayerSignals | null) => {
+  const st = p.injury?.status.trim().toUpperCase() ?? "";
+  return sig?.rosterStatus !== "RES" && (/^(IR|PUP|NFI|NA)\b/.test(st) || /\bIR\b/.test(p.injury?.detail ?? ""));
+};
+
 /** On IR / PUP per the league source or the nflverse roster (the IR minimum applies). */
 const onIr = (p: Player, sig: PlayerSignals | null) => {
   const st = p.injury?.status.trim().toUpperCase() ?? "";
@@ -357,12 +366,13 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       const last = own.length ? Math.max(...own) : 0;
       gamesMissed = played.filter((w) => w > last && w < S.currentWeek).length;
     }
-    // Healthy-role rate: the pre-anchor model rate (the ECR rank already prices the absence) with ≥ 2 unflagged
-    // games, else last season's expected points per game.
+    // Healthy-role rate = THE projection rate (same ECR anchor), so a returning player projects like his healthy
+    // twin and My Team hold, Stash watch, Values and lineups show one number. Known only with ≥ 2 unflagged games
+    // or a ≥ 4-game last season behind it (else unknown: no stash candidate on an expert rank alone).
     let healthyRate: number | null = null;
     let healthySource: "season" | "prior" | undefined;
-    if (!b.kdef && b.unflagged >= 2 && b.model !== null) [healthyRate, healthySource] = [b.model, "season"];
-    else if (!b.kdef && b.sig?.talent.priorExpPpg != null && b.sig.talent.priorGames >= V4.priorMinGames) [healthyRate, healthySource] = [b.sig.talent.priorExpPpg, "prior"];
+    if (!b.kdef && b.unflagged >= 2 && b.model !== null) [healthyRate, healthySource] = [rate, "season"];
+    else if (!b.kdef && b.sig?.talent.priorExpPpg != null && b.sig.talent.priorGames >= V4.priorMinGames) [healthyRate, healthySource] = [rate, "prior"];
     let est: ReturnEstimate | undefined;
     if (kind === "absent" && absence) {
       const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
@@ -371,6 +381,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
         rosterStatus: b.sig?.rosterStatus,
         rosterCode: b.sig?.rosterCode,
         onIr: onIr(p, b.sig),
+        ...(absence === "reserve" && leagueOnlyIr(p, b.sig) ? { leagueOnly: true } : {}),
         status: b.sig?.status ?? [],
         currentWeek: S.currentWeek,
         gameWeeks,
@@ -483,9 +494,9 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     if (hr === null || x.absence === "seasonOver") return info;
     info.healthyRate = r2(hr);
     if (x.healthySource) info.healthySource = x.healthySource;
-    // Weekly points on his return: known week → 0 before, ramp, full; unknown → from current + 4 at × 0.5.
+    // Weekly points on his return: known week → the projection's own (shown, 0.1-rounded) weekly points — 0 before,
+    // ramp, full — so hold / stash and Values agree exactly; unknown → healthy rate from current + 4 at × 0.5.
     const from = week ?? S.currentWeek + RETURNS.unknownOffset;
-    let back = 0;
     let total = 0;
     let playoff = 0;
     let stash = 0;
@@ -493,8 +504,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const repl = replacement[x.p.pos];
     for (const w of x.weeks) {
       if (!w.game || w.week < from) continue;
-      const f = week === null ? RETURNS.unknownWeight : back++ === 0 && x.absence !== "out" && absent ? RETURNS.ramp : 1;
-      const pts = hr * w.matchup * f;
+      const pts = week === null ? hr * w.matchup * RETURNS.unknownWeight : r1(w.pts);
       const po = w.week >= playoffStart;
       total += pts;
       if (po) playoff += pts;

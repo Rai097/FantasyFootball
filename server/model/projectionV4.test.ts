@@ -315,14 +315,17 @@ test("release (c): a reserve-list WR practising fully, IR minimum to week 10 →
   assert.ok(v.playoffPts! > 0 && v.value > 0, "a returner is not worth 0");
   assert.ok(v.whyItems!.some((d) => d.label === "Availability" && /back ~wk 10 \(medium\)/.test(d.value)), JSON.stringify(v.whyItems));
   assert.equal(v.ret!.returnValue, undefined, "returnValue only when the return is unconfirmed");
+  // One playoff number: My Team hold / Stash watch read the same rate and weeks as Values / lineups.
+  assert.equal(v.ret!.playoffPts, v.playoffPts, "hold / stash playoff pts = projection playoff pts");
+  assert.ok(Math.abs(v.ret!.healthyRate! - healthy.ppg) < 0.01, `healthy rate ${v.ret!.healthyRate} = his healthy twin's rate ${healthy.ppg} (no matchups here)`);
   // Not practising on the reserve list: unconfirmed, 0 every week, but a stash value (× 0.5 from week 12).
   const u = valuePlayers(L(), [...POOL, p], tables({ status: "RES", statusCode: "R01" }, [])).players.get("back")!;
   assert.equal(u.ret!.week, null);
   assert.ok(u.weekly!.every((x) => x === 0));
   assert.equal(u.value, 0, "lineups and value ignore returnValue");
   const fromWk12 = healthy.weekly!.slice(12 - 8).reduce((a, x) => a + x, 0);
-  // Healthy-role rate = the pre-anchor model rate (the ECR rank already prices the absence): within a few % of the anchored one.
-  assert.ok(Math.abs(u.ret!.returnValue! - 0.5 * fromWk12) < 0.05 * fromWk12, `returnValue ${u.ret!.returnValue} vs ½ × ${fromWk12.toFixed(1)}`);
+  // Healthy-role rate = the projection rate (same ECR anchor): returnValue = ½ × his healthy twin's weeks from week 12.
+  assert.ok(Math.abs(u.ret!.returnValue! - 0.5 * fromWk12) < 0.01 * fromWk12, `returnValue ${u.ret!.returnValue} vs ½ × ${fromWk12.toFixed(1)}`);
   assert.ok(u.ret!.tradeValue! > 0 && u.ret!.tradeValue! < healthy.value, `trade value ${u.ret!.tradeValue} (healthy ${healthy.value})`);
   for (const x of [v, u]) assert.ok(Object.values(x.ret!).every((n) => typeof n !== "number" || Number.isFinite(n)));
 });
