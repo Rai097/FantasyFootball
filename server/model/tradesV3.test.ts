@@ -25,6 +25,7 @@ import { attachMarket } from "./market.js";
 import { rosterParts } from "./rosterScore.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { League, ValuedPlayer } from "./types.js";
+import type { MarketValue } from "../data/fantasycalc.js";
 
 const G = { remainingGames: 14 };
 const REPL = { QB: 15, RB: 8, WR: 8, TE: 6, K: 7, DEF: 6 };
@@ -364,4 +365,27 @@ test("finder never suggests selling a riser or a noise-level gain (any list); bu
     P(got.id).label = savedLabel;
     P(got.id).luck = savedLuck;
   }
+});
+
+test("release (c): an injured star with an unconfirmed return is worth his return estimate in trades, and the card says so", () => {
+  // Their WR on IR: 0 every week (value 0) but a healthy role worth 30 on the return estimate.
+  const star = vp("tIR", "WR", 0, 0, {
+    remainingGames: 0,
+    injury: { status: "IR", week: 8 },
+    ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false, healthyRate: 18, returnValue: 40, playoffPts: 27, tradeValue: 30 },
+  });
+  const back = vp("tBK", "WR", 12, 16, { ret: { week: 10, confidence: "medium", reasons: [], absent: true, practiceUp: false, healthyRate: 14, playoffPts: 42 } });
+  const roster = [...theirs, star, back];
+  const c = ctxFor(league([team("me", mine), team("them", roster)]), [...mine, ...roster]);
+  const ev = evaluateTradeV3(c, "me", "them", ["mRB3"], ["tIR"]);
+  assert.ok(Math.abs(ev.packages!.trueGet - 30) < 1e-9, `true value of what I get = his trade value, got ${ev.packages!.trueGet}`);
+  assert.ok(ev.details!.some((d) => d.label === "Injured, you get" && /tIR: return unconfirmed, valued 30\.0 on a return estimate/.test(d.value)), JSON.stringify(ev.details));
+  const ev2 = evaluateTradeV3(c, "me", "them", ["mRB3"], ["tBK"]);
+  assert.ok(ev2.details!.some((d) => d.label === "Injured, you get" && /back ~wk 10 \(medium\)/.test(d.value)));
+  assert.deepEqual(detailProblems(ev.details!), []);
+  // Market attachment ranks him by the same trade value (no spurious "market overvalues" edge from a 0).
+  const ps = [vp("a", "WR", 20, 100, G), star, vp("c", "WR", 10, 10, G)];
+  const mv = (value: number, rank: number) => ({ value, raw: value, overallRank: rank, posRank: rank, trend30: 0 }) as MarketValue;
+  attachMarket(new Map(ps.map((p) => [p.id, p])), new Map([["a", mv(90, 1)], ["tIR", mv(40, 2)], ["c", mv(8, 3)]]));
+  assert.ok(star.trueMarket! > 0, `trueMarket ${star.trueMarket}`);
 });

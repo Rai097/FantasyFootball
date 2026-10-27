@@ -326,6 +326,7 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .stash-tiles { display: flex; gap: 8px; flex-wrap: wrap; }
 .stash-flag { margin-left: 6px; color: var(--warn); border-color: var(--warn); }
 .card-pad { padding: 10px 12px 0; }
+.hold-line { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: 6px; }
 .w-player { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
 .w-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .w-summary { font-size: 13px; color: var(--text); min-width: 0; }

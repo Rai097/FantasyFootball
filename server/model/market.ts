@@ -33,10 +33,10 @@ export function attachMarket(players: Map<string, ValuedPlayer>, values: Map<str
   // Market scale: every skill player's market value (0 when unlisted), high → low.
   const scale = skill.map((p) => values.get(p.id)?.value ?? 0).sort((a, b) => b - a);
   const listed = values.size;
-  const ranked = [...skill].sort((a, b) => b.value - a.value || b.ppg - a.ppg);
+  const ranked = [...skill].sort((a, b) => tradeValueOf(b) - tradeValueOf(a) || b.ppg - a.ppg);
   ranked.forEach((p, i) => {
     const m = values.get(p.id);
-    const tm = p.value > 0 ? scale[i] ?? 0 : 0;
+    const tm = tradeValueOf(p) > 0 ? scale[i] ?? 0 : 0;
     p.trueMarket = r1(tm);
     if (m) {
       p.market = m.value;
@@ -50,9 +50,16 @@ export function attachMarket(players: Map<string, ValuedPlayer>, values: Map<str
   });
 }
 
+/**
+ * Our value for trades: the projection value, or — for an absent player whose return is unconfirmed (value 0 because
+ * every week is 0) — the 0–100 value of his return estimate (healthy rate from current week + 4, × 0.5). Release (c):
+ * an injured star is not worth 0 in a trade. Lineups never use it.
+ */
+export const tradeValueOf = (p: ValuedPlayer): number => Math.max(p.value, p.ret?.tradeValue ?? 0);
+
 /** Perceived (market) value; our value when the market is unavailable. */
-export const marketOf = (p: ValuedPlayer): number => p.market ?? p.value;
+export const marketOf = (p: ValuedPlayer): number => p.market ?? tradeValueOf(p);
 /** True value on the market scale (our value when the market is unavailable). */
-export const trueOf = (p: ValuedPlayer): number => p.trueMarket ?? p.value;
+export const trueOf = (p: ValuedPlayer): number => p.trueMarket ?? tradeValueOf(p);
 /** trueMarket − market (0 without market values). */
 export const edgeOf = (p: ValuedPlayer): number => p.edge ?? 0;

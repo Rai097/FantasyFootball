@@ -10,6 +10,7 @@ import { edgeOf, marketOf, trueOf, type ValueSource } from "./market.js";
 import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
 import { marketTag } from "./labels.js";
+import { returnText } from "./returns.js";
 
 /** Config for Trade Finder v3 (architect's design after user feedback on v2). */
 export const V3 = {
@@ -585,6 +586,7 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   if (j.fixesWorst) add("Fixes their weakest slot", `× ${V3.fixesWorstMult}`);
   for (const d of byeItems(S, j, meAfter.lineup)) add(d.label, d.value, d.tone);
   for (const d of qbItems(my, their, give, get) ?? []) add(d.label, d.value, d.tone);
+  for (const d of injuredItems(give, get)) add(d.label, d.value, d.tone);
   add("Rank score", `${j.score.toFixed(2)} = min(your gain, theirs + ${V3.margin}) × acceptance`);
   return {
     key,
@@ -863,4 +865,18 @@ export function benchUpgradeFilter(ctx: TradeContext, myTeamId: string) {
     if (theirs.pos === "QB" && qbTradeable(their.roster, my.roster)?.id !== theirs.id) return false;
     return benchUpgradeOk(mine, theirs, mySeasonDelta);
   };
+}
+
+/** Release (c): an out player in the deal is valued on his return estimate, not 0 — say so on the card. */
+export function injuredItems(give: ValuedPlayer[], get: ValuedPlayer[]): DetailItem[] {
+  const out: DetailItem[] = [];
+  const line = (p: ValuedPlayer) =>
+    p.ret!.week !== null
+      ? `${p.name}: ${returnText(p.ret!.week, p.ret!.confidence)}, valued from his return (${p.value.toFixed(1)})`
+      : p.ret!.tradeValue
+        ? `${p.name}: return unconfirmed, valued ${p.ret!.tradeValue.toFixed(1)} on a return estimate (× 0.5)`
+        : `${p.name}: return unconfirmed, no healthy role on record: value 0`;
+  for (const p of give) if (p.ret?.absent) out.push({ label: "Injured, you give", value: line(p), tone: "warn" });
+  for (const p of get) if (p.ret?.absent) out.push({ label: "Injured, you get", value: line(p), tone: "warn" });
+  return out;
 }

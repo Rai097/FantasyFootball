@@ -1,6 +1,6 @@
 import type { Analysis, VP } from "../api";
 import { Empty, PosBadge, Stat } from "../components/common";
-import { ColumnHelp } from "../components/HelpTip";
+import { ColumnHelp, HelpTip } from "../components/HelpTip";
 import { LineupTable } from "../components/LineupTable";
 import { InjuryDot } from "../components/PlayerChip";
 import { PositionStrength } from "../components/PositionStrength";
@@ -21,7 +21,7 @@ export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOp
     const count = me.byeExposure?.[w] ?? players.length;
     weeks.push({ week: w, count, players });
   }
-  const injured = everyone.filter((p) => p.injury && p.injury.status);
+  const injured = everyone.filter((p) => (p.injury && p.injury.status) || p.ret?.absent);
   const extraFlags = (me.injuryFlags ?? []).filter((f) => !injured.some((p) => f.includes(p.name)));
 
   return (
@@ -129,10 +129,11 @@ export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOp
                     <InjuryDot player={p} />
                     <PosBadge pos={p.pos} /> <span className="strong">{p.name}</span>{" "}
                     <span className="muted">
-                      {p.injury!.status}
-                      {p.injury!.detail ? ` – ${p.injury!.detail}` : ""}
+                      {p.injury?.status ?? "Reserve list"}
+                      {p.injury?.detail ? ` – ${p.injury.detail}` : ""}
                     </span>
                     {starters.includes(p) && <span className="tag need">starter</span>}
+                    {p.ret?.absent && <HoldLine p={p} weeks={`${league.settings.regularSeasonEnd + 1}–${finalWeek}`} />}
                   </li>
                 ))}
               </ul>
@@ -151,5 +152,26 @@ export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOp
         </ul>
       )}
     </div>
+  );
+}
+
+/** IR / Out player: "hold: back ~wk N" (or "return unconfirmed") with his playoff points on return instead of 0. */
+function HoldLine({ p, weeks }: { p: VP; weeks: string }) {
+  const r = p.ret!;
+  const back = r.week === null ? "return unconfirmed" : `back ~wk ${r.week} (${r.confidence})`;
+  const items = [
+    { label: "Return", value: r.week === null ? `no practice or return signal yet${r.earliestWeek ? `: wk ${r.earliestWeek} at the earliest` : ""}` : `estimated first game back, ${r.confidence} confidence` },
+    ...r.reasons.filter((d) => d.label !== "Return"),
+    {
+      label: "Playoff pts",
+      value: r.playoffPts === undefined ? "— (no healthy role on record)" : `${f1(r.playoffPts)} in weeks ${weeks} at his healthy role${r.week === null ? ", halved: return unconfirmed" : ""}`,
+    },
+  ];
+  return (
+    <span className="hold-line">
+      <span className="tag">hold: {back}</span>
+      <span className="muted small">playoff pts {r.playoffPts === undefined ? "—" : f1(r.playoffPts)}</span>
+      <HelpTip items={items} label="Why hold him?" />
+    </span>
   );
 }

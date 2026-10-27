@@ -431,11 +431,12 @@ apiRouter.get(
     const players: Record<string, ValuedPlayer> = {};
     for (const p of relevantPlayers(l)) players[p.id] = p;
     const body = { league: leagueFor(req, provider, l.league), players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes, valueSource: l.valueSource, valueMode: l.ctx.mode };
-    // My Team renders the value bullets of the request team's players only: everyone else's stay out of this big payload.
+    // My Team renders the value bullets and return estimates ("hold: back ~wk N") of the request team's players only:
+    // everyone else's stay out of this big payload.
     const mine = new Set(l.ctx.teams.find((t) => t.team.id === team)?.team.playerIds ?? []);
     res.type("application/json").send(
       JSON.stringify(body, function (this: { id?: unknown }, k, v) {
-        return k === "whyItems" && !(typeof this.id === "string" && mine.has(this.id)) ? undefined : v;
+        return (k === "whyItems" || k === "ret") && !(typeof this.id === "string" && mine.has(this.id)) ? undefined : v;
       }),
     );
   }),
