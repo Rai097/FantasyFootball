@@ -20,7 +20,8 @@ export interface PlayerDb {
 
 const VALID: Position[] = ["QB", "RB", "WR", "TE", "K", "DEF"];
 
-function lineFrom(r: Record<string, string>, suffix: "" | "_exp"): StatLine {
+/** Actual ("") or expected ("_exp") stat line of one ep_weekly row. */
+export function lineFrom(r: Record<string, string>, suffix: "" | "_exp"): StatLine {
   return {
     passYd: num(r[`pass_yards_gained${suffix}`]),
     passTd: num(r[`pass_touchdown${suffix}`]),

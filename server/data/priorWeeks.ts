@@ -4,19 +4,9 @@ import { fetchCached } from "./cache.js";
 import { sources } from "./sources.js";
 import { parseCsv, num } from "./csv.js";
 import type { StatLine } from "../model/types.js";
+import { lineFrom } from "./players.js";
 
-const actual = (r: Record<string, string>): StatLine => ({
-  passYd: num(r.pass_yards_gained),
-  passTd: num(r.pass_touchdown),
-  passInt: num(r.pass_interception),
-  rushYd: num(r.rush_yards_gained),
-  rushTd: num(r.rush_touchdown),
-  rec: num(r.receptions),
-  recYd: num(r.rec_yards_gained),
-  recTd: num(r.rec_touchdown),
-  twoPt: num(r.pass_two_point_conv) + num(r.rush_two_point_conv) + num(r.rec_two_point_conv),
-  fumLost: num(r.rec_fumble_lost) + num(r.rush_fumble_lost),
-});
+const actual = (r: Record<string, string>): StatLine => lineFrom(r, "");
 
 /** Regular-season weekly lines by player id (gsis). */
 export function parsePriorWeeks(csv: string): Map<string, StatLine[]> {
