@@ -64,6 +64,8 @@ export const V3 = {
   thinPenalty: 1.0,
   /** v3.1: giving a riser costs ×1.15 of his value (selling upside); same for the partner. */
   riserPremium: 1.15,
+  /** No suggestion (any list, near misses included) below this gain for me: smaller deltas are projection noise. */
+  minMyGain: 1.0,
   /** Search bounds. */
   poolSize: 14,
   comboCap: 4000,
@@ -491,6 +493,8 @@ function edgeTags(j: Judged3): string[] {
   for (const p of j.give) if (!p.riser && p.label === "sell-high") tags.push(`sell-high: ${p.name} (TD luck ${fmtSigned(p.luck ?? 0)} pts/g)`);
   for (const p of j.get) if (marketTag(edgeOf(p)) === "market undervalues") tags.push(`market undervalues: ${p.name} (+${edgeOf(p).toFixed(1)})`);
   for (const p of j.give) if (!p.riser && marketTag(edgeOf(p)) === "market overvalues") tags.push(`market overvalues: ${p.name} (${fmtSigned(edgeOf(p))})`);
+  // Buying a touchdown-luck spike: his points run ahead of his usage, so expect them to come down.
+  for (const p of j.get) if (p.label === "sell-high") tags.push(`TD luck: ${p.name} (${fmtSigned(p.luck ?? 0)} pts/g vs usage)`);
   return tags;
 }
 
@@ -722,6 +726,8 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
       for (const [give, get] of packagesFor(my, their, { maxGive, maxGet, wantPos })) {
         const j = J(give, get);
         simulated++;
+        // Never sell a player whose role is rising, and never suggest a noise-level gain (owner, Model v4).
+        if (give.some((p) => p.riser) || j.myDelta < V3.minMyGain) continue;
         const cls = classify(j);
         if (cls) cands.push({ j, their, cls });
       }

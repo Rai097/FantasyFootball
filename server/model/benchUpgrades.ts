@@ -80,6 +80,7 @@ export function findBenchUpgrades(ctx: TradeContext, myTeamId: string, opts: { m
     const J = judge3(ctx, my, their, mode);
     for (const g of theirBench) {
       for (const m of mine) {
+        if (m.riser) continue; // never sell a player whose role is rising (Model v4)
         if (!ok(m, g, Infinity, partner.id)) continue; // eligibility / QB rule / real assets before simulating
         const j = J([m], [g]);
         if (j.fairness < BENCH.minFairness || j.myDelta <= 0.05) continue;

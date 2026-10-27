@@ -338,3 +338,30 @@ test("IR slot: teamV3 never starts a healthy IR-slotted player and scores the ro
   assert.equal(me.parts.depth, without.depth);
   assert.ok(me.parts.now < teamV3(ctx, "me").parts.now);
 });
+
+test("finder never suggests selling a riser or a noise-level gain (any list); buying a TD-luck spike is tagged", () => {
+  const before = findTradesV3(ctx, "me", { valueSource: "model", limit: 50 });
+  const listed = (r: typeof before) => [...r.trades, ...r.smallerEdges, ...r.nearMisses];
+  assert.ok(listed(before).length > 0, "baseline finds trades");
+  for (const t of listed(before)) assert.ok(t.me.scoreDelta === undefined || t.me.scoreDelta >= 1.0 - 1e-9, `${t.key}: gain ${t.me.scoreDelta} below the noise bar`);
+  const giver = listed(before)[0].me.gives[0].id;
+  P(giver).riser = true;
+  try {
+    const after = findTradesV3(ctx, "me", { valueSource: "model", limit: 50 });
+    for (const t of listed(after)) assert.ok(!t.me.gives.some((p) => p.id === giver), `${t.key} sells riser ${giver}`);
+  } finally {
+    delete P(giver).riser;
+  }
+  const got = listed(before)[0].them.gives[0];
+  const savedLabel = P(got.id).label;
+  const savedLuck = P(got.id).luck;
+  P(got.id).label = "sell-high";
+  P(got.id).luck = -3.1;
+  try {
+    const t = listed(findTradesV3(ctx, "me", { valueSource: "model", limit: 50 })).find((x) => x.them.gives.some((p) => p.id === got.id));
+    if (t) assert.ok(t.tags.some((g) => g.startsWith(`TD luck: ${got.name}`)), t.tags.join());
+  } finally {
+    P(got.id).label = savedLabel;
+    P(got.id).luck = savedLuck;
+  }
+});
