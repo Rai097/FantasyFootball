@@ -4,7 +4,7 @@
 // pages while the user is logged in, reads the league's own pages with
 // same-origin fetches, and shows the result for the user to copy/download.
 // It never sends data anywhere else.
-import { parseMyTeamId, parsePlayersHtml, parseProjectionHtml, parseSettingsHtml, parseStandingsHtml, playerKey, waiverGroupOf, waiverStatusOf, type ScrapedPlayer, type StandingsRecord, type WaiverGroup, type WaiverGroupList, type WaiverList } from "./yahooHtml";
+import { NAV_TEXT, navLink, parseMyTeamId, parsePlayersHtml, parseProjectionHtml, parseSettingsHtml, parseStandingsHtml, playerKey, waiverGroupOf, waiverStatusOf, type ScrapedPlayer, type StandingsRecord, type WaiverGroup, type WaiverGroupList, type WaiverList } from "./yahooHtml";
 
 const DEFAULT_SLOTS = ["QB", "WR", "WR", "RB", "RB", "TE", "FLEX", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN", "IR"];
 const HALF_PPR = { passYd: 0.04, passTd: 4, passInt: -1, rushYd: 0.1, rushTd: 6, rec: 0.5, recYd: 0.1, recTd: 6, twoPt: 2, fumLost: -2, teRec: 0 };
@@ -14,15 +14,6 @@ const MAX_FA = 150;
 const MAX_KDEF = 25;
 /** Pages of players?status=W read per position group to tell waivers from free agents. */
 const MAX_W_PAGES = 6;
-/** Pages of a player list read for rest-of-season projections (25 players each; 12 teams × ~14 offense ≈ 7 pages). */
-const MAX_PROJ_PAGES = 12;
-/**
- * Candidate URLs for Yahoo's projected rest-of-season stat view, tried in order until one shows that view as
- * selected (RECONSTRUCTED from Yahoo's stat-view query conventions, not verified on a real page: the diagnostics
- * record every attempt). Team pages first (already read once per team), then the taken-players list.
- */
-const ROS_TEAM_PARAMS = ["stat1=P&stat2=PSR", "stat1=S_PSR"];
-const ROS_LIST_PARAMS = ["status=T&pos=O&stat1=S_PSR&sort=PTS", "status=ALL&pos=O&stat1=S_PSR&sort=PTS"];
 const OVERLAY_ID = "ftd-import-overlay";
 
 interface Diag {
@@ -78,6 +69,39 @@ async function run(): Promise<void> {
   const teams: { id: string; name: string; players: ScrapedPlayer[]; record?: StandingsRecord; waiverRank?: number }[] = [];
   let myTeamId: string | undefined = parseMyTeamId(document.documentElement.outerHTML, leagueId);
 
+  /**
+   * Rest-of-season projections (what other managers see in Yahoo's trade evaluator) for one team: the team page's
+   * "Projected Stats" link, then that page's "Remaining Games" link — both found by anchor text, never by guessed
+   * query params; at most 2 fetches per team. A value counts only when that view shows as selected and a "Fan Pts"
+   * column is found (parseProjectionHtml). Any missing step is a diagnostics note naming it; yahooProj stays absent.
+   * Assumption: Yahoo's "Remaining Games" runs from the week AFTER the current scoring week through week 17 (the
+   * fantasy season's end); the server stamps the import's projWeek and the valuation spreads it from there.
+   */
+  const readRos = async (teamUrl: string, teamHtml: string, players: ScrapedPlayer[]) => {
+    const fail = (url: string | undefined, note: string, extra: Record<string, unknown> = {}) =>
+      diagnostics.push({ step: "projections", kind: "ros", url: url ?? teamUrl, note, ...extra });
+    const projUrl = navLink(teamHtml, NAV_TEXT.projected, teamUrl);
+    if (!projUrl) return fail(teamUrl, `no "${NAV_TEXT.projected}" link on the team page`);
+    let rosUrl: string | undefined;
+    try {
+      const proj = await getPage(projUrl);
+      if (!proj.ok) return fail(projUrl, `"${NAV_TEXT.projected}" page not ok`, { status: proj.status });
+      rosUrl = navLink(proj.html, NAV_TEXT.remaining, proj.finalUrl || projUrl);
+      if (!rosUrl) return fail(projUrl, `no "${NAV_TEXT.remaining}" link on the ${NAV_TEXT.projected} page`);
+      const ros = await getPage(rosUrl);
+      if (!ros.ok) return fail(rosUrl, `"${NAV_TEXT.remaining}" page not ok`, { status: ros.status });
+      const r = parseProjectionHtml(ros.html, "ros");
+      let set = 0;
+      for (const p of players) {
+        const v = p.yahooId ? r.values.get(p.yahooId) : p.pos === "DEF" && p.team ? r.defValues.get(p.team) : undefined;
+        if (v !== undefined) (p.yahooProj = v), set++;
+      }
+      diagnostics.push({ step: "projections", url: rosUrl, status: ros.status, ...r.diag, set });
+    } catch (e) {
+      fail(rosUrl ?? projUrl, `fetch failed: ${(e as Error).message}`);
+    }
+  };
+
   for (let n = 1; n <= MAX_TEAMS; n++) {
     say(`reading team page ${n}…`);
     const url = `${base}/${n}`;
@@ -104,68 +128,15 @@ async function run(): Promise<void> {
       if (v !== undefined) p.yahooProjWeekly = v;
     }
     if (n === 1 || !wk.diag.read) diagnostics.push({ step: "projections", url, ...wk.diag });
+    say(`reading Yahoo projections (team ${n})…`);
+    await readRos(url, page.html, r.players);
     teams.push({ id: String(n), name: r.teamName ?? `Team ${n}`, players: r.players });
   }
 
-  // Rest-of-season projections (what other managers see in Yahoo's trade evaluator). Only a page that shows the
-  // projected rest-of-season view as selected counts; every attempt is recorded.
-  say("reading Yahoo projections…");
-  const byYahooId = new Map<string, ScrapedPlayer>();
-  for (const t of teams) for (const p of t.players) if (p.yahooId) byYahooId.set(p.yahooId, p);
-  let projVia = "";
-  const tryRos = async (url: string) => {
-    try {
-      const page = await getPage(url);
-      const r = page.ok ? parseProjectionHtml(page.html, "ros") : undefined;
-      diagnostics.push({ step: "projections", url, status: page.status, ...(r?.diag ?? { note: "not ok" }) });
-      return r && r.values.size ? r.values : undefined;
-    } catch (e) {
-      diagnostics.push({ step: "projections", url, note: `fetch failed: ${(e as Error).message}` });
-      return undefined;
-    }
-  };
-  const setRos = (values: Map<string, number>) => {
-    let n = 0;
-    for (const [id, v] of values) {
-      const p = byYahooId.get(id);
-      if (p && p.yahooProj === undefined) (p.yahooProj = v), n++;
-    }
-    return n;
-  };
-  if (teams.length) {
-    for (const params of ROS_TEAM_PARAMS) {
-      const first = await tryRos(`${base}/${teams[0].id}?${params}`);
-      if (!first) continue;
-      projVia = `team pages (${params})`;
-      setRos(first);
-      for (const t of teams.slice(1)) {
-        say(`reading Yahoo projections (team ${t.id})…`);
-        const v = await tryRos(`${base}/${t.id}?${params}`);
-        if (v) setRos(v);
-      }
-      break;
-    }
-    if (!projVia) {
-      for (const params of ROS_LIST_PARAMS) {
-        let any = false;
-        for (let page = 0; page < MAX_PROJ_PAGES; page++) {
-          say(`reading Yahoo projections (list page ${page + 1})…`);
-          const v = await tryRos(`${base}/players?${params}&count=${page * 25}`);
-          if (!v) break;
-          any = true;
-          if (!setRos(v) && page > 0) break;
-        }
-        if (any) {
-          projVia = `player list (${params})`;
-          break;
-        }
-      }
-    }
-  }
-  const rostered = teams.reduce((a, t) => a + t.players.filter((p) => p.pos !== "K" && p.pos !== "DEF").length, 0);
+  const rostered = teams.reduce((a, t) => a + t.players.length, 0);
   const projRos = teams.reduce((a, t) => a + t.players.filter((p) => p.yahooProj !== undefined).length, 0);
   const projWeek = teams.reduce((a, t) => a + t.players.filter((p) => p.yahooProjWeekly !== undefined).length, 0);
-  diagnostics.push({ step: "projections", note: projVia ? `rest of season via ${projVia}` : "no projected rest-of-season view found: yahooProj not captured", rostered, ros: projRos, week: projWeek });
+  diagnostics.push({ step: "projections", note: projRos ? `rest of season via team pages (${NAV_TEXT.projected} → ${NAV_TEXT.remaining})` : "no projected rest-of-season view found: yahooProj not captured", rostered, ros: projRos, week: projWeek });
 
   say("reading league settings…");
   let settingsSource: "page" | "partial" | "default" = "default";
@@ -317,7 +288,7 @@ async function run(): Promise<void> {
 
   // ---- summary
   box.textContent = "";
-  box.appendChild(el("div", "Trade Desk import v3", "font-weight:700;font-size:15px;margin-bottom:6px"));
+  box.appendChild(el("div", "Trade Desk import v4", "font-weight:700;font-size:15px;margin-bottom:6px"));
   const summary = el("div");
   const noPos = diagnostics.reduce((a, d) => a + (Array.isArray(d.noPos) ? d.noPos.length : 0), 0);
   summary.textContent =

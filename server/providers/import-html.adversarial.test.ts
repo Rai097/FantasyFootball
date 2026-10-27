@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { availabilityFrom, parsePlayersHtml, playerKey, waiverStatusOf, type ScrapedPlayer } from "../../web/src/import/yahooHtml.js";
+import { validateImport } from "./import.js";
 
 // ------------------------------------------------------------------ HTML builders
 interface RowSpec {
@@ -391,4 +392,97 @@ test("bookmarklet (developer): Yahoo ignores status=W (same players, another ord
   );
   for (const f of payload.freeAgents) assert.equal(f.onWaivers, undefined, `${f.name}: ${f.onWaivers}`);
   assert.equal(diagnostics.find((d) => d.step === "waiverStatus").lists.O.ignored, true);
+});
+
+// ------------------------------------------------------------------ (developer) import v4: rest-of-season projections
+// Team page → "Projected Stats" link → "Remaining Games" link → Fan Pts tables, all discovered by anchor text. The
+// query params below are invented; the bookmarklet must follow whatever hrefs the page carries.
+const projNav = (n: string) =>
+  `<ul><li class="Navitem Selected"><a href="/f1/1405188/${n}?v1=S&amp;v2=W">Stats</a></li><li class="Navitem"><a href="/f1/1405188/${n}?v1=P&amp;v2=W">Projected Stats</a></li></ul>`;
+const periodNav = (n: string, selected: boolean) =>
+  `<ul><li class="Navitem Default-selected"><a href="/f1/1405188/${n}?v1=P&amp;v2=W">Week 7</a></li><li class="Navitem${selected ? "  Selected" : ""}"><a href="/f1/1405188/${n}?v1=P&amp;v2=RG">Remaining Games</a></li><li class="Navitem"><a href="/f1/1405188/${n}?v1=P&amp;v2=ST">Season Total</a></li></ul>`;
+const rosTable = (rows: [RowSpec, string][], nameCol = "Offense") =>
+  `<table class="legend"><tr><th>Level</th><th>Rating</th><th>Percentiles</th></tr><tr><td>Elite</td><td>99</td><td>90</td></tr></table>` +
+  `<table><thead><tr><th></th><th colspan="2">Fantasy</th></tr><tr><th>${nameCol}</th><th>Fan Pts</th><th>% Ros</th></tr></thead><tbody>${rows
+    .map(([r, pts]) => row({ ...r, owner: null, extra: [pts, "90%"] }))
+    .join("")}</tbody></table>`;
+
+interface ProjOpts {
+  projLink?: boolean;
+  remainingLink?: boolean;
+  selected?: boolean;
+  fanPts?: boolean;
+  pts?: Record<string, string>;
+  log?: string[];
+}
+/** Two teams (one player each; team 2 also a DEF); `pts` maps a player id / "buf" to his Fan Pts cell. */
+function projRoute(o: ProjOpts = {}): Route {
+  const { projLink = true, remainingLink = true, selected = true, fanPts = true, pts = { "901": "235.91", "902": "158.20", buf: "81.5" } } = o;
+  const rosterOf = (n: string): RowSpec[] => [{ id: `90${n}`, name: `Rostered Guy${n}`, teamPos: "KC - QB", owner: null }, ...(n === "2" ? [{ teamSlug: "buf", name: "Buffalo", teamPos: "Buf - DEF", owner: null }] : [])];
+  return (url) => {
+    const m = /\/f1\/1405188\/(\d+)$/.exec(url.pathname);
+    if (!m || Number(m[1]) > 2) return { status: 404, html: "" };
+    const n = m[1];
+    const view = url.searchParams.get("v2");
+    if (url.search) o.log?.push(`${n}${url.search}`);
+    if (!url.search) return { status: 200, html: `<title>L - Team ${n} | Yahoo</title>${projLink ? projNav(n) : ""}` + page(rosterOf(n)) };
+    if (view === "W") return { status: 200, html: remainingLink ? periodNav(n, false) : "<ul><li>Week 7</li></ul>" };
+    if (view === "RG") {
+      const rows = rosterOf(n).map((r): [RowSpec, string] => [r, pts[r.id ?? r.teamSlug!] ?? "-"]);
+      const html = periodNav(n, selected) + (fanPts ? rosTable(rows) : rosTable(rows).replace("Fan Pts", "Yds"));
+      return { status: 200, html };
+    }
+    return { status: 404, html: "" };
+  };
+}
+const playerOf = (payload: any, name: string) => payload.teams.flatMap((t: any) => t.players).find((p: any) => p.name === name);
+const rosDiags = (diagnostics: any[]) => diagnostics.filter((d) => d.step === "projections" && d.kind === "ros");
+
+test("bookmarklet v4: Projected Stats → Remaining Games discovered per team; Fan Pts feeds yahooProj (players and DEF); 2 fetches per team", async () => {
+  const log: string[] = [];
+  const { payload, diagnostics } = await runBookmarklet(projRoute({ log }));
+  assert.equal(playerOf(payload, "Rostered Guy1").yahooProj, 235.91);
+  assert.equal(playerOf(payload, "Rostered Guy2").yahooProj, 158.2);
+  assert.equal(playerOf(payload, "Buffalo").yahooProj, 81.5);
+  assert.deepEqual(log, ["1?v1=P&v2=W", "1?v1=P&v2=RG", "2?v1=P&v2=W", "2?v1=P&v2=RG"], "entities decoded; exactly 2 extra fetches per team");
+  const sum = diagnostics.find((d) => d.step === "projections" && d.ros !== undefined);
+  assert.equal(sum.ros, 3);
+  assert.equal(sum.rostered, 3);
+  assert.match(sum.note, /Projected Stats → Remaining Games/);
+  assert.ok(rosDiags(diagnostics).every((d) => d.viewIndicator === "Remaining Games" && d.column === "Fan Pts"));
+  // The payload passes the server's validation with yahooProj kept (0–450).
+  const stored = validateImport(payload);
+  const kept = stored.teams.flatMap((t) => t.players).map((p) => [p.name, p.yahooProj]);
+  assert.deepEqual(kept, [["Rostered Guy1", 235.91], ["Rostered Guy2", 158.2], ["Buffalo", 81.5]]);
+});
+
+test("bookmarklet v4: an out-of-range (> 450) or non-numeric Fan Pts leaves yahooProj absent, never 0", async () => {
+  const { payload } = await runBookmarklet(projRoute({ pts: { "901": "999.5", "902": "-", buf: "450" } }));
+  assert.equal(playerOf(payload, "Rostered Guy1").yahooProj, undefined);
+  assert.equal(playerOf(payload, "Rostered Guy2").yahooProj, undefined);
+  assert.equal(playerOf(payload, "Buffalo").yahooProj, 450);
+});
+
+for (const [name, opts, note] of [
+  ["no Projected Stats link", { projLink: false }, /no "Projected Stats" link/],
+  ["no Remaining Games link", { remainingLink: false }, /no "Remaining Games" link/],
+  ["Remaining Games view not selected", { selected: false }, /Remaining Games view not shown as selected/],
+  ["no Fan Pts column", { fanPts: false }, /no Fan Pts column/],
+] as const) {
+  test(`bookmarklet v4: ${name} → a diagnostics note naming the step; yahooProj absent; import still completes`, async () => {
+    const { payload, diagnostics } = await runBookmarklet(projRoute(opts));
+    assert.equal(payload.teams.length, 2);
+    for (const t of payload.teams) for (const p of t.players) assert.equal(p.yahooProj, undefined, `${p.name}: ${p.yahooProj}`);
+    const ros = rosDiags(diagnostics);
+    assert.equal(ros.length, 2, "one note per team");
+    for (const d of ros) assert.match(d.note ?? "", note);
+    assert.match(diagnostics.find((d) => d.step === "projections" && d.ros !== undefined).note, /yahooProj not captured/);
+  });
+}
+
+test("bookmarklet v4: the Remaining Games fetch failing is recorded and the import still completes", async () => {
+  const base = projRoute();
+  const { payload, diagnostics } = await runBookmarklet((url) => (url.searchParams.get("v2") === "RG" ? "throw" : base(url)));
+  assert.equal(playerOf(payload, "Rostered Guy1").yahooProj, undefined);
+  assert.ok(rosDiags(diagnostics).some((d) => /fetch failed/.test(d.note ?? "") && /v2=RG/.test(d.url)));
 });
