@@ -3,7 +3,7 @@
 // projections / FantasyPros rank + recent games, perception.ts), then a recent spike of what they give, market value
 // (FantasyCalc) only as a minor term. True value = our model. See docs/DESIGN.md "Trade finder v3" and "Release (d)".
 import type { DetailItem, LeagueSettings, Position, SlotKind, Team, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
-import { FLEX_SLOTS, effPpg, eligible, optimalLineup, slotLabels, usable, type LineupResult } from "./lineup.js";
+import { FLEX_SLOTS, SLOT_ELIGIBILITY, effPpg, eligible, optimalLineup, slotLabels, usable, type LineupResult } from "./lineup.js";
 import { applyTrade, combos, fmtSigned, lineupChanges, names, rosterExcess, teamState, tradeDeadlinePassed, type TradeContext } from "./tradeKit.js";
 import { irSet } from "./analysis.js";
 import { MODE_WEIGHTS, activeRoster, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
@@ -625,31 +625,43 @@ const ptsIn = (S: LeagueSettings, p: ValuedPlayer, w: number) => expectedWeeklyP
  *  - a starter's bye in the weeks ahead (current week → final week) at a position where the player I give is my best
  *    bench option that week, and nothing I keep or get covers it as well;
  *  - my only backup QB / TE (the playoff cover when the starter is hurt).
+ * A same-position player starting at a FLEX-type slot counts as a backup; for a bye he moves over and the FLEX is refilled from the bench.
  */
 export function coverLost(S: LeagueSettings, my: TeamV3, give: ValuedPlayer[], get: ValuedPlayer[]): DetailItem[] {
   const out: DetailItem[] = [];
   const giveIds = new Set(give.map((p) => p.id));
   const starters = my.starterList.filter((p) => p.pos !== "K" && p.pos !== "DEF" && !giveIds.has(p.id));
-  const benchBefore = my.roster.filter((p) => !my.starters.has(p.id) && !my.irIds.has(p.id));
-  const benchAfter = benchBefore.filter((p) => !giveIds.has(p.id)).concat(get);
-  const best = (pool: ValuedPlayer[], pos: string, w: number) =>
-    pool.filter((p) => p.pos === pos && p.bye !== w).reduce<{ p: ValuedPlayer | null; v: number }>((b, p) => (ptsIn(S, p, w) > b.v ? { p, v: ptsIn(S, p, w) } : b), { p: null, v: 0 });
+  // A same-position starter in a FLEX-type slot covers a starter in his own slot (owner 2026-10-27: a TE at W/R/T
+  // moves to TE when the TE is out). For a bye that opens the FLEX instead, so the cover is the best bench player
+  // eligible for that FLEX slot; without such a mate, the best bench player at the position.
+  const flexSlot = new Map(my.base.lineup.filter((l) => l.player && FLEX_SLOTS.includes(l.slot)).map((l) => [l.player!.id, l.slot] as const));
+  const bench = my.roster.filter((p) => !my.starters.has(p.id) && !my.irIds.has(p.id));
+  const flex = my.roster.filter((p) => flexSlot.has(p.id) && !my.irIds.has(p.id));
+  const benchAfter = bench.filter((p) => !giveIds.has(p.id)).concat(get);
+  const flexAfter = flex.filter((p) => !giveIds.has(p.id));
+  const best = (pool: ValuedPlayer[], ok: (p: ValuedPlayer) => boolean, w: number) =>
+    pool.filter((p) => ok(p) && p.bye !== w).reduce<{ p: ValuedPlayer | null; v: number }>((b, p) => (ptsIn(S, p, w) > b.v ? { p, v: ptsIn(S, p, w) } : b), { p: null, v: 0 });
+  const byeCover = (s: ValuedPlayer, w: number, benchPool: ValuedPlayer[], flexPool: ValuedPlayer[]) => {
+    const mate = flexSlot.has(s.id) ? undefined : flexPool.find((p) => p.pos === s.pos && p.id !== s.id && p.bye !== w);
+    const elig = mate ? SLOT_ELIGIBILITY[flexSlot.get(mate.id)!] : [s.pos];
+    return best(benchPool, (p) => elig.includes(p.pos), w);
+  };
   const seen = new Set<string>();
   for (const s of starters) {
     const w = s.bye;
     if (w === undefined || w < S.currentWeek || w > S.finalWeek) continue;
-    const before = best(benchBefore, s.pos, w);
+    const before = byeCover(s, w, bench, flex);
     if (!before.p || !giveIds.has(before.p.id)) continue;
-    if (best(benchAfter, s.pos, w).v >= before.v - 0.5) continue;
+    if (byeCover(s, w, benchAfter, flexAfter).v >= before.v - 0.5) continue;
     const key = `${before.p.id}:${w}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ label: "Bye cover lost", value: `${before.p.name} covers ${s.name}'s week ${w} bye (${before.v.toFixed(1)} pts)`, tone: "warn" });
   }
   for (const pos of ["QB", "TE"] as const) {
-    const startersAt = my.starterList.filter((p) => p.pos === pos).length;
+    const startersAt = my.base.lineup.filter((l) => l.player?.pos === pos && !FLEX_SLOTS.includes(l.slot)).length;
     if (!startersAt) continue;
-    const backups = benchBefore.filter((p) => p.pos === pos && usable(p));
+    const backups = bench.concat(flex).filter((p) => p.pos === pos && usable(p));
     const gone = backups.filter((p) => giveIds.has(p.id));
     if (!gone.length || backups.length > gone.length || get.some((p) => p.pos === pos)) continue;
     out.push({ label: "Playoff cover lost", value: `${gone[0].name} is your only ${pos} backup`, tone: "warn" });

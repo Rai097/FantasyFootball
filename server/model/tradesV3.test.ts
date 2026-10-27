@@ -663,3 +663,27 @@ test("search covers every partner (no early stop after the top 8 by complementar
   assert.ok(one.trades.length > 0, "identical partners each offer clear trades");
   assert.equal(all.simulated, 10 * one.simulated, "all 10 partners judged");
 });
+
+test("cover lost: a same-position player starting at FLEX counts as cover (only claim 'only backup' when true)", () => {
+  // TEs: tTop 16 at TE, mTE 14 at FLEX (beats mRB3 13.5), mTE3 5 on the bench.
+  const m = mine.map((p) => ({ ...p, ...(p.id === "mTE" ? { ppg: 14, effPpg: 14 } : {}) }));
+  m.push({ ...m.find((p) => p.id === "mTE")!, id: "mTEtop", name: "mTEtop", ppg: 16, effPpg: 16, team: "SEA" }, { ...m.find((p) => p.id === "mTE")!, id: "mTE3", name: "mTE3", ppg: 5, effPpg: 5, value: 1, team: "TB" });
+  const t = theirs.map((p) => ({ ...p }));
+  const c = ctxFor(league([team("me", m), team("them", t)]), [...m, ...t]);
+  const my = teamV3(c, "me");
+  const slotOf = (id: string) => my.base.lineup.find((l) => l.player?.id === id)?.slot;
+  assert.equal(slotOf("mTEtop"), "TE");
+  assert.ok(slotOf("mTE") && slotOf("mTE") !== "TE", `fixture: mTE starts at a flex slot (${slotOf("mTE")})`);
+  const P = (id: string) => c.players.get(id)!;
+  // Giving the bench TE: the FLEX TE still covers the TE slot.
+  assert.deepEqual(coverLost(c.league.settings, my, [P("mTE3")], [P("tWR5")]).filter((d) => d.label === "Playoff cover lost"), []);
+  // Giving the bench TE and the FLEX TE: now nobody covers.
+  const both = coverLost(c.league.settings, my, [P("mTE3"), P("mTE")], [P("tWR5")]).filter((d) => d.label === "Playoff cover lost");
+  assert.equal(both.length, 1);
+  assert.match(both[0].value, /is your only TE backup$/);
+  // A bye of the TE starter: the FLEX TE covers it, so giving the bench TE loses no bye cover.
+  const mb = m.map((p) => (p.id === "mTEtop" ? { ...p, bye: 9 } : p));
+  const byeCtx = ctxFor(league([team("me", mb), team("them", t)]), [...mb, ...t]);
+  const myB = teamV3(byeCtx, "me");
+  assert.deepEqual(coverLost(byeCtx.league.settings, myB, [byeCtx.players.get("mTE3")!], [byeCtx.players.get("tWR5")!]).filter((d) => d.label === "Bye cover lost"), []);
+});

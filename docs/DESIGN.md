@@ -1155,3 +1155,8 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   sample games → 5.75, ≥ 6 games → 2 (unchanged, so risers and breakouts with full samples keep their rate; rookies
   have no prior). The why-line "2025: x pts/game, counts as N games" shows the actual weight. Test: a 3-game 10-ppg
   player with an 18-ppg prior moves ≥ 1 pt toward it; a 7-game player is unchanged.
+* **Cover lost counts FLEX starters**: "Playoff cover lost: X is your only TE backup" ignored a TE starting at W/R/T.
+  Now a same-position starter in a FLEX-type slot counts as a backup (the claim needs every such player given and none
+  received); for a starter's bye he moves over and the FLEX is refilled from the bench, so the bye cover is the best
+  bench player eligible for that FLEX slot (giving a bench TE while a TE plays FLEX loses no bye cover; giving the best
+  bench RB while an RB plays FLEX still does).
