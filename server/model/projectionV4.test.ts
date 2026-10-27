@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { V4, defaultMode, emptyTables, valuePlayers, type ProjectionTables, type ScheduledGame } from "./projectionV4.js";
-import { computeAllSignals } from "./signals/index.js";
+import { V4, defaultMode, emptyTables, signalInputFromPlayer, valuePlayers, type ProjectionTables, type ScheduledGame } from "./projectionV4.js";
+import { computeAllSignals, computePlayerSignals } from "./signals/index.js";
 import { ASOF, fixtureInputs, IDS, PPR } from "../data/fixtures/signals2026.js";
 import { detailProblems, league, line, rawPlayer, team } from "./testkit.js";
 import type { Player, Position, StatLine, WeekLine } from "./types.js";
@@ -239,4 +239,48 @@ test("injury availability applies to his NEXT game, even when the current week i
   assert.equal(g("out")[2], g("ok")[2], "full after");
   assert.ok(Math.abs(g("q")[1] - g("ok")[1] * V4.questionable) < 0.06);
   assert.equal(val.players.get("q")!.availThisWeek, undefined, "no game this week: no 'check status' chip");
+});
+
+test("roster RES = 0 from now on even with a game last week; designated to return keeps its 4-game rule", () => {
+  const p = rawPlayer("res", "WR", { ecrPos: 10, weeks: games(7, { rec: 5, recYd: 60 }) });
+  const input = signalInputFromPlayer(p)!;
+  const tables = (status: string): ProjectionTables => ({
+    ...emptyTables(),
+    signals: new Map([["res", computePlayerSignals({ ...input, roster: { status } }, { season: 2026, scoring: PPR, asOf: ASOF })]]),
+  });
+  const res = valuePlayers(L(), [...POOL, p], tables("RES")).players.get("res")!;
+  assert.ok(res.weekly!.every((x) => x === 0), `RES weekly ${res.weekly}`);
+  assert.equal(res.remainingGames, 0);
+  assert.ok(res.whyItems!.some((d) => d.label === "Availability" && /return unconfirmed/.test(d.value)));
+  const act = valuePlayers(L(), [...POOL, p], tables("ACT")).players.get("res")!;
+  assert.ok(act.weekly![0] > 0);
+  const dtr = valuePlayers(L(), [...POOL, { ...p, injury: { status: "IR-R", week: 8 } }], tables("RES")).players.get("res")!;
+  assert.deepEqual(dtr.weekly!.slice(0, V4.returnGames), [0, 0, 0, 0]);
+  assert.equal(dtr.weekly![V4.returnGames], act.weekly![V4.returnGames], "designated to return: full after 4 games");
+});
+
+test("missing expected data (expected 0, actual > 0 over ≥ 2 games): rate from actual points, flagged, noted", () => {
+  const ghost = rawPlayer("ghost", "WR", { ecrPos: 20, weeks: games(6, { rec: 6, recYd: 120, recTd: 1 }, {}) });
+  const one = rawPlayer("one", "WR", { ecrPos: 20, weeks: [...games(5, { rec: 5, recYd: 60 }), wk(6, { rec: 6, recYd: 120, recTd: 1 }, {})] });
+  const val = valuePlayers(L(), [...POOL, ghost, one]);
+  const g = val.players.get("ghost")!;
+  assert.ok(g.ppg >= 18, `ppg ${g.ppg} for 24 actual pts/game`);
+  assert.ok(g.whyItems!.some((d) => d.label === "Usage data" && d.tone === "warn"));
+  assert.equal(g.luck, undefined, "luck stays unknown");
+  assert.ok(val.notes.some((n) => /Usage data missing for 1 player/.test(n)), val.notes.join(" | "));
+  assert.ok(!val.players.get("one")!.whyItems!.some((d) => d.label === "Usage data"), "one odd game does not switch the model");
+});
+
+test("no buy-low / sell-high label without games left; season / playoff totals = Σ of the shown weekly numbers", () => {
+  const unlucky = (id: string, injury?: { status: string; week: number }) =>
+    rawPlayer(id, "RB", { ecrPos: 15, ...(injury ? { injury } : {}), weeks: games(6, { rushYd: 40, rec: 2, recYd: 10 }, { rushYd: 70, rushTd: 0.6, rec: 4, recYd: 30 }) });
+  const val = valuePlayers(L(), [...POOL, unlucky("ok"), unlucky("ir", { status: "IR", week: 8 })]);
+  assert.equal(val.players.get("ok")!.label, "buy-low", "fixture: healthy twin is buy-low");
+  assert.equal(val.players.get("ir")!.label, undefined);
+  const S = L().settings;
+  for (const p of val.players.values()) {
+    const sum = (f: (w: number) => boolean) => Math.round(p.weekly!.reduce((a, x, i) => a + (f(S.currentWeek + i) ? x : 0), 0) * 10) / 10;
+    assert.equal(p.playoffPts, sum((w) => w > S.regularSeasonEnd), `${p.id} playoffPts`);
+    assert.equal(p.seasonPts, sum((w) => w <= S.regularSeasonEnd), `${p.id} seasonPts`);
+  }
 });

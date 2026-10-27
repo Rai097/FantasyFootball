@@ -838,19 +838,25 @@ Owner-specific worked cases live outside the repo (public).
   multiplies it by 1 + 0.5 × (implied / average − 1), total clamp 0.75–1.25. K/DEF: 1.
 * **Avail(w)**: Questionable 0.85 / Doubtful 0.7 / Out 0 for his next game only (the first remaining game, not the
   calendar week, which may be a bye or already played); IR / PUP / NFI / NA / long-term
-  detail / suspended, and nflverse roster RES with no game in 2 weeks → 0 for the rest of the season ("return
-  unconfirmed", release (c) adds return estimates); designated to return → 0 for his next 4 games, then 1; no NFL team
+  detail / suspended, and nflverse roster RES (even with a game last week: freshly placed on IR) → 0 for the rest of the
+  season ("return unconfirmed", release (c) adds return estimates); designated to return (checked before RES) → 0 for
+  his next 4 games, then 1; no NFL team
   → 0. A week without an unplayed game for his team (bye, or already played) → 0.
+* **Missing expected data**: ≥ 2 games with expected 0 but actual > 0 and no usable efficiency → the model rate uses
+  recency-weighted actual points (same prior pseudo-games and ECR anchor), a "Usage data" warn bullet and a league
+  note ("Usage data missing for N players").
 * **Fields**: `ppg` = healthy rate × mean matchup (per game played), `effPpg` = mean of `weekly` over his remaining
-  games (lineups), `weekly[]` from `weeklyFrom` (= current week), `seasonPts` (current..regular-season end),
-  `playoffPts` (15..17), `remainingGames` = Σ availability, `luck` / `luckTd` (only with real usage), `label`,
+  games (lineups), `weekly[]` from `weeklyFrom` (= current week, each rounded to 0.1), `seasonPts` (current..regular-season
+  end) and `playoffPts` (15..17) = exact sums of the shown weekly numbers, `availThisWeek` (Q 0.85 / D 0.7 / Out 0 when
+  this week's game is discounted: the My Team chip), `remainingGames` = Σ availability, `luck` / `luckTd` (only with real usage), `label`,
   `riser` (= the recalibrated opportunity trend), `valueMode`. `whyItems` are short bullets; `why` is one line.
 * **Value** = 100 × (raw / max)^1.35 with raw = Σ weeks w_mode × max(0, pts(w) − replacement ppg), `playoffs` mode
   0.25 rest of season / 0.75 playoff weeks, `balanced` 1 / 1. Mode per request team (`defaultMode`): playoffs when its
   standings seed (else rank) is in the top half of the league, otherwise — and when standings are unknown — balanced.
   The API keeps one valued context per (league, mode) on top of a shared base (league + projection tables).
 * **Labels** (`labels.ts`): buy-low = luck ≥ +2.0 pts/g; sell-high = luck ≤ −2.0 with the TD part dominant (≥ 3
-  sample games); market undervalues / overvalues = |edge| ≥ 8. Used by trade tags (a rising player is never tagged
+  sample games), never on a player with no games left (IR / reserve / out for the season); market undervalues /
+  overvalues = |edge| ≥ 8. Used by trade tags (a rising player is never tagged
   sell-high / overvalued), Targets tags, bench-upgrade and waiver details, and the Values "Luck" column.
 * **Team strength** (`teamStrength.ts`, `TeamAnalysis.playoffStrength`): mean optimal weeks 15–17 lineup from weekly
   points (IR slot excluded) + 0.25 × depth, depth = mean over starters and weeks of the points the bench recovers when

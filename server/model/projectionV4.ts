@@ -16,7 +16,6 @@ import { computePlayerSignals } from "./signals/index.js";
 import type { PlayerSignalInput, PlayerSignals, SkillPos } from "./signals/types.js";
 import { luckLabel, luckText } from "./labels.js";
 
-export { valuationNotes };
 
 // ---------------------------------------------------------------- inputs
 
@@ -65,8 +64,8 @@ export const V4 = {
   doubtful: 0.7,
   /** Designated to return: games at 0 before he counts again (the old −4 games). */
   returnGames: 4,
-  /** nflverse roster status RES (reserve: IR / PUP / NFI) counts as long-term when he has no game in this many weeks. */
-  resIdleWeeks: 2,
+  /** Missing expected data: games with expected 0 but actual > 0 needed before the rate falls back to actual points. */
+  missingExpGames: 2,
 } as const;
 
 export type ValueMode = "playoffs" | "balanced";
@@ -129,14 +128,16 @@ export function signalInputFromPlayer(p: Player): PlayerSignalInput | null {
 
 type Avail = "noTeam" | "long" | "return" | "out" | "doubtful" | "questionable" | "healthy";
 
-function availKind(p: Player, sig: PlayerSignals | null, currentWeek: number): Avail {
+function availKind(p: Player, sig: PlayerSignals | null): Avail {
   if (p.team === "FA" && p.pos !== "DEF") return "noTeam";
   const k = injuryKind(p.injury);
   const st = p.injury?.status.trim().toUpperCase() ?? "";
   if (k === "long" || st === "SUSP" || st === "SUSPENDED") return "long";
-  const lastGame = sig?.weeks.length ? sig.weeks[sig.weeks.length - 1].week : -Infinity;
-  if (sig?.rosterStatus === "RES" && lastGame < currentWeek - V4.resIdleWeeks) return "long";
+  // Designated to return beats the roster file (he is still RES there until activated).
   if (k === "return") return "return";
+  // nflverse roster RES (reserve / IR / PUP / NFI): 0 until a return estimate exists (release (c)), even when he
+  // played last week and Yahoo has no tag yet (freshly placed on IR).
+  if (sig?.rosterStatus === "RES") return "long";
   if (k === "out") return "out";
   if (k === "doubtful") return "doubtful";
   if (isQuestionable(p.injury)) return "questionable";
@@ -161,6 +162,8 @@ interface Base {
   eff: number;
   effRaw: number | null;
   sampleGames: number;
+  /** Games with expected 0 but actual > 0 when the rate fell back to actual points (missing expected data); else 0. */
+  missingExp: number;
   unflagged: number;
   flagged: number;
   priorRate: number | null;
@@ -192,6 +195,8 @@ export interface Valuation {
   players: Map<string, ValuedPlayer>;
   replacement: Record<Position, number>;
   mode: ValueMode;
+  /** League-level diagnostics shown with the analysis (scoring caveats, players rated on actual points). */
+  notes: string[];
   /** Value a player that was not in the pool (e.g. a Yahoo-only free agent or a fresher injury copy). */
   valueOf(p: Player): ValuedPlayer;
 }
@@ -238,9 +243,13 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       ppg25: hasPrior ? score(scoring, p.prior!.line, p.pos) / p.prior!.games : 0,
       trend: weeks.length >= 3 ? mean(exp.slice(-2)) - mean(exp) : 0,
     };
-    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, unflagged: 0, flagged: 0, priorRate: null };
+    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null };
     const sig = signalsOf(p);
-    const expRate = sig?.rates.expPts ?? null;
+    // Missing expected data (ffopportunity has no usage for him while he scores): rate on recency-weighted actual
+    // points, with the usual prior / ECR shrinkage, instead of ~0 usage.
+    const ghost = sig ? sig.weeks.filter((w) => w.expPts === 0 && w.actPts > 0).length : 0;
+    const missingExp = ghost >= V4.missingExpGames && !sig?.efficiency && (sig?.rates.actPts ?? 0) > 0 ? ghost : 0;
+    const expRate = missingExp ? (sig!.rates.actPts ?? null) : (sig?.rates.expPts ?? null);
     const eff = sig?.efficiency?.shrunk ?? 1;
     const unflagged = sig ? sig.weeks.filter((w) => !w.flagged).length : 0;
     const flagged = sig ? sig.weeks.length - unflagged : 0;
@@ -253,7 +262,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       const cur = expRate * eff;
       model = priorRate !== null ? (sampleGames * cur + V4.priorK * priorRate) / (sampleGames + V4.priorK) : cur;
     } else if (priorRate !== null) model = priorRate;
-    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, unflagged, flagged, priorRate };
+    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate };
   };
   const bases = all.map(makeBase);
   const baseById = new Map(bases.map((b) => [b.p.id, b]));
@@ -313,7 +322,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       }
     }
     rate = Math.max(0, Number.isFinite(rate) ? rate : 0);
-    const kind = availKind(p, b.sig, S.currentWeek);
+    const kind = availKind(p, b.sig);
     const sched = tables.schedule.size ? tables.schedule.get(p.team) : undefined;
     const weeks: WeekProj[] = [];
     let gameIdx = 0;
@@ -404,6 +413,10 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
 
   const finalize = (x: Proj): ValuedPlayer => {
     const p = x.p;
+    // Totals are sums of the shown (0.1-rounded) weekly numbers, so the UI's weeks always add up.
+    const weekly = x.weeks.map((w) => r1(w.pts));
+    const sumWeeks = (inPlayoffs: boolean) => r1(weekly.reduce((a, v, i) => a + ((x.weeks[i].week >= playoffStart) === inPlayoffs ? v : 0), 0));
+    x = { ...x, seasonPts: sumWeeks(false), playoffPts: sumWeeks(true) };
     const repl = replacement[p.pos];
     const vorp = Math.max(0, x.ppg - repl);
     const value = r1(valueOfProj(x));
@@ -411,7 +424,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const backupQb = p.pos === "QB" && oneQb && posRank > S.numTeams && value < 3;
     // Luck only means something with real usage (the efficiency ratio's threshold); otherwise unknown, not 0.
     const luck = x.sig?.efficiency ? (x.sig.luck ?? null) : null;
-    const label = luckLabel(luck, x.sampleGames);
+    // No buy-low / sell-high on a player with no games left (IR / reserve / out for the season): nothing to trade for.
+    const label = x.remainingGames > 0 ? luckLabel(luck, x.sampleGames) : null;
     const out: ValuedPlayer = {
       ...p,
       weekProj: p.weekProjByFormat?.[fmt] ?? p.weekProj,
@@ -426,10 +440,10 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       posRank,
       remainingGames: r1(x.remainingGames),
       trend: r2(x.trend),
-      weekly: x.weeks.map((w) => r1(w.pts)),
+      weekly,
       weeklyFrom: S.currentWeek,
-      seasonPts: r1(x.seasonPts),
-      playoffPts: r1(x.playoffPts),
+      seasonPts: x.seasonPts,
+      playoffPts: x.playoffPts,
       valueMode: mode,
       why: `${f1(x.ppg)} pts/game projected: ${f1(x.seasonPts)} rest of season, ${f1(x.playoffPts)} in the playoffs; value ${f1(value)}.`,
       whyItems: explainItems(x, S.currentWeek, S.regularSeasonEnd, S.finalWeek, repl, vorp, value, mode, backupQb, label),
@@ -449,10 +463,15 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
   const players = new Map<string, ValuedPlayer>();
   for (const x of projs) players.set(x.p.id, finalize(x));
 
+  const notes = valuationNotes(league);
+  const missing = projs.filter((x) => x.missingExp > 0).length;
+  if (missing) notes.push(`Usage data missing for ${missing} player${missing > 1 ? "s" : ""}: rated on actual points.`);
+
   return {
     players,
     replacement,
     mode,
+    notes,
     valueOf(p: Player) {
       const hit = players.get(p.id);
       if (hit && poolById.get(p.id) === p) return hit;
@@ -500,7 +519,8 @@ function explainItems(
     add("Rate", `${f1(x.rate)} pts/game before matchups`);
     if (x.model !== null) add("Our model", `${f1(x.model)} pts/game, ${pct(1 - x.wAnchor)} weight`);
     if (x.ecrPts !== undefined) add("Experts (ECR)", `${x.ecrUnranked ? "unranked" : `${p.pos}${Math.round(x.ecrRank! * 10) / 10}`}: ${f1(x.ecrPts)} pts/game, ${pct(x.wAnchor)} weight`);
-    if (x.expRate !== null) add("Usage", `${f1(x.expRate)} expected pts/game, latest games weigh most`);
+    if (x.missingExp) add("Usage data", `missing for ${x.missingExp} games: rate from actual points`, "warn");
+    else if (x.expRate !== null) add("Usage", `${f1(x.expRate)} expected pts/game, latest games weigh most`);
     if (x.effRaw !== null) add("Finishing", `×${x.eff.toFixed(2)} (actual ÷ expected ${x.effRaw.toFixed(2)}, pulled toward 1)`);
     if (x.flagged > 0) add("Odd games", `${x.flagged} count 25%: backup QB, left early or blowout`);
     if (x.priorRate !== null) add("2025", `${f1(x.priorRate)} pts/game, counts as ${V4.priorK} games`);
