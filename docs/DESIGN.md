@@ -912,8 +912,9 @@ Owner-specific worked cases live outside the repo (public).
   (not after a one-game "Out"), then 1; unknown ⇒ 0 every week (lineups, value). Replaces "designated to return = 0
   for 4 games" and "RES = 0 for the rest of the season". `ValuedPlayer.ret` = { week | null, confidence, reasons,
   absent, practiceUp, earliestWeek?, healthyRate?, healthySource?, playoffPts?, stashScore?, returnValue?, tradeValue? }.
-  - Healthy-role rate = the pre-anchor model rate with ≥ 2 unflagged games (the ECR rank already prices the absence,
-    so anchoring would count the injury twice), else last season's expected points per game (≥ 4 games), else unknown.
+  - Healthy-role rate = the projection rate (same ECR anchor) when he has ≥ 2 unflagged games or a ≥ 4-game last
+    season, else unknown (fix round 2 — supersedes "pre-anchor model rate": a returner must project like his healthy
+    twin, and hold / Stash watch / Values must show one number).
   - Unknown return: `returnValue` = healthy rate × matchup over his games from current week + 4 × 0.5 (stash ranking
     and the IR "hold" line only); `tradeValue` = the same weekly points on the 0–100 value scale (trades only).
   - Stash score = Σ from the return week of healthy rate × matchup × ramp, playoff weeks × 1.0, earlier × 0.33, × the
@@ -936,11 +937,20 @@ Owner-specific worked cases live outside the repo (public).
   3 Stash watch candidates (the demo's 12 full rosters hold most injured starters).
 * Fix round 1: "practice upgrade" needs a real absence (a player hurt in last week's game who practises limited this
   week is trending down, not returning); "Missed" says "all N games this season" for a player without a game.
+* Fix round 2: duplicate rows for one week merge to the most severe (lowest known practice, worst game status), in
+  any order; designated to return past the 21-day window with no practice this week ⇒ unknown (window bullet kept);
+  "IR minimum … no eligible game left this season" instead of "wk —"; a known return's `playoffPts` / stash score are
+  sums of the projection's own shown weekly points (one number in My Team hold, Stash watch, Values, lineups); no
+  market `edge` (so no "market undervalues / overvalues" tag, Values Edge "—") and no value pitch on a player whose
+  return is unconfirmed (the pitch calls the deal a bet on his recovery); an IR tag only the league source gives
+  (Yahoo / import "Out" in an IR slot, nflverse active) is absent, return unconfirmed, evidence "league lists him on
+  IR"; Stash watch skips any player matching an unmatched roster line (normalized name + position when given).
+  Real-cache check (week 7): all 238 top-60 skill players tagged "Out" in an IR slot get a `ret`; 14 have no
+  healthy-rate source (rookies / backup QBs without a qualifying sample) and show "playoff pts —".
 * Known gaps: practice is one row per week (no Wednesday→Friday trend); suspension length is never known; the 0-snap
   rule uses his current team's games (a traded player's old team is not consulted); Finder suggestions still skip
   injured players; the 21-day window start is a guess when the practice row is missing; a designated-to-return player
   in the practice branch (full / limited but still Out) is not capped at his window end (past it he reverts to
   season-ending IR); games missed count weeks before `currentWeek`, so in the mid-week data state (week 7 with one
   game unplayed) a player who already missed week 7 shows one game fewer and the IR floor lands a game late until the
-  next refresh; on an import, a rostered player the matcher failed on (`team.unmatched`) is not in the rostered set
-  and could show in Stash watch.
+  next refresh; an unmatched roster line without a position hides every same-named player from Stash watch.
