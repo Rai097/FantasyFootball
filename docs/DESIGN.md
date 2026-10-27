@@ -993,7 +993,8 @@ Owner-specific worked cases live outside the repo (public).
   best-player-loss and our-projection lineup-floor partner checks and the overpay divisor (the consolidation premium
   stays).
 * **Gem score** = acceptance × (my Δ team strength + 0.25 × min(4, perception gaps in my favour)), team strength = the
-  release (b) playoff lineup (+ 0.25 depth). Gate for any list: Δ team strength ≥ 1.0 pt/week (was the mode score);
+  release (b) playoff lineup (+ 0.25 depth). Gate for any list: Δ team strength ≥ 1.0 pt/week (was the mode score;
+  fix round 1: a "marginal" near miss — my side fails its bar — needs only Δ > 0);
   the mode score still has to clear +0.5 / main list +1.0. Never sell a riser (unchanged).
 * **Cover lost** (`coverLost`): giving my best bench player at a starter's position for that starter's bye week ahead
   (current → final week) with nothing kept or received covering it within 0.5 pts ⇒ "Bye cover lost" bullet; giving my
@@ -1003,7 +1004,8 @@ Owner-specific worked cases live outside the repo (public).
   projections put …"), recent production of a player they get (≥ 10 pts and ≥ his perceived rate last game); the
   unconfirmed-return bet first. Never a market-value claim (tested on every list and evaluate).
 * **Labels**: `bandLabel` / `band` / `fairnessPct` and `FairnessBand` deleted; `lineupLabel` = "Lineup impact: good
-  for you (+x/wk you, −y/wk them)" (our projections, rest of season per week), `marketLabel` = "Market value: they get
+  for you (playoffs +x/wk, season +s/wk; them −y/wk season)" (our projections; verdict from the playoff number, fix
+  round 1), `marketLabel` = "Market value: they get
   +z%" (help: FantasyCalc, matters only a little), `yahooView`. Row summary: "A for B: playoff lineup +x/wk, your team
   +y. Yahoo shows them +z pts, ~P% accept." Finder headline bullets "Their view" (captured N of M / estimate) and
   "Market values".
@@ -1017,4 +1019,16 @@ Owner-specific worked cases live outside the repo (public).
   Yahoo's weekly evaluator may use per-week projections we approximate by an even split; K/DEF perceived = our rate
   (never traded); calibration values (0.8 / 0.2, +1 pt/wk → 0.70, spike 1.5×, gap bonus 0.25) to revisit after the first
   real-league run.
+* **Fix round 1 (2026-10-26, adversarial tests 971a642)**: judge3 always computes my playoff-lineup Δ (evaluate showed
+  "+0.0/wk" on a losing trade; marginal near misses were all gated out) — clear / edge / refuse / unlikely keep the
+  ≥ 1.0 gate, marginal needs > 0. Bench upgrades drop a perceived loss for the partner (same rule as the main list).
+  Perception: weeks our model has a flagged (`ret`) player out are 0 on the captured-Yahoo view too, Yahoo's total is
+  divided over the games it covers (from `Player.yahooProjWeek`, the capture week; games since played count by bye),
+  and a Yahoo 0 stays 0 (no recency). Known gap: a player our model has out all season but Yahoo projects > 0 now
+  perceives 0. Import: `StoredImport.projWeek` stamped by the server on POST (never the payload); this week's number
+  only while capture week = current week; unknown week (older stored imports — none carry projections, (d) was not
+  deployed) drops the weekly number and keeps the total as of the current week (no date→week table to derive it from
+  `importedAt`). `yahooCoverage` counts weekly-only captures. `lineupLabel` verdict follows the playoff number.
+  Returns: a player ruled out of his next game (this week's report, or his own Out tag via `tagOut`) is never back for
+  it on any path (the designated-to-return window could).
 

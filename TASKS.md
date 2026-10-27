@@ -18,7 +18,9 @@ MODEL v4 (DESIGN "Model v4"): (a) signals, (b) projection v4 / labels / power sc
    (d) BUILT 2026-10-26 (DESIGN "Release (d) implemented"): import v3 captures Yahoo projections (URL params and
    markup UNVERIFIED — check the `projections` diagnostics on the owner's next import), perception.ts, Trades v4
    (acceptance from the partner's Yahoo-style lineup view, spike penalty, lost bye cover, pitch for them, lineup /
-   market labels), IR tradeValue fix. Next for (d): adversarial test → review → deploy → owner re-imports with v3.
+   market labels), IR tradeValue fix. Adversarial test done (971a642); fix round 1
+   done (DESIGN "Fix round 1"). Next for (d): review → deploy → owner re-imports with v3. Bench upgrades on the real
+   league are empty for want of tradeable bench pieces (gate probe, fix round 1), not a mis-set gate.
    Open question for the owner: should the finder suggest IR players (return unconfirmed) as pieces now that they
    carry a value? (eligibility unchanged in (d)). Next release: (e) playoff odds + Best moves.
 NEXT (backlog, highest value first):
