@@ -1141,7 +1141,7 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
 
 * **One playoff engine**: a trade card showed "playoff lineup +3.1/wk" (team strength) next to "Playoffs +0.5/wk"
   (roster score) for the same trade. Cause: `rosterParts` multiplied every column by the v3.1 floor factor
-  (0.8 × ppg + 0.2 × floor), `teamStrength` scores plain expected points (on the owner's roster 129.3 vs 136.2 pts/wk;
+  (0.8 × ppg + 0.2 × floor), `teamStrength` scores plain expected points (on a real-league roster 129.3 vs 136.2 pts/wk;
   without the factor 136.23 = 136.2). Now the floor factor applies only to the "now" column (this week's lineup and
   bench depth); the weekly columns (season, playoffs, return scenarios) are projection v4 weekly points, so
   `parts.playoffs` = `teamStrength(...).lineup` on the same active roster (tested on every demo team, ≤ 0.05).
@@ -1158,5 +1158,5 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
 * **Cover lost counts FLEX starters**: "Playoff cover lost: X is your only TE backup" ignored a TE starting at W/R/T.
   Now a same-position starter in a FLEX-type slot counts as a backup (the claim needs every such player given and none
   received); for a starter's bye he moves over and the FLEX is refilled from the bench, so the bye cover is the best
-  bench player eligible for that FLEX slot (giving a bench TE while a TE plays FLEX loses no bye cover; giving the best
-  bench RB while an RB plays FLEX still does).
+  bench player eligible for that FLEX slot, as for a FLEX starter's own bye (giving a bench TE while a TE plays FLEX
+  loses no bye cover; giving the best bench RB while an RB plays FLEX still does).

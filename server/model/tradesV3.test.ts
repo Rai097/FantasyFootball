@@ -23,6 +23,7 @@ import {
   teamV3,
 } from "./tradesV3.js";
 import type { TradeContext } from "./tradeKit.js";
+import { FLEX_SLOTS } from "./lineup.js";
 import { analyzeTeams } from "./analysis.js";
 import { attachMarket } from "./market.js";
 import { rosterParts } from "./rosterScore.js";
@@ -686,4 +687,12 @@ test("cover lost: a same-position player starting at FLEX counts as cover (only 
   const byeCtx = ctxFor(league([team("me", mb), team("them", t)]), [...mb, ...t]);
   const myB = teamV3(byeCtx, "me");
   assert.deepEqual(coverLost(byeCtx.league.settings, myB, [byeCtx.players.get("mTE3")!], [byeCtx.players.get("tWR5")!]).filter((d) => d.label === "Bye cover lost"), []);
+  // The FLEX TE's own bye: any bench W/R/T fills the FLEX (mRB3 13.5 > mTE3 5), so the bench TE is not that cover either.
+  const mf = m.map((p) => (p.id === "mTE" ? { ...p, bye: 9 } : p));
+  const flexCtx = ctxFor(league([team("me", mf), team("them", t)]), [...mf, ...t]);
+  const myF = teamV3(flexCtx, "me");
+  assert.ok(FLEX_SLOTS.includes(myF.base.lineup.find((l) => l.player?.id === "mTE")!.slot), "fixture: mTE still at FLEX");
+  assert.deepEqual(coverLost(flexCtx.league.settings, myF, [flexCtx.players.get("mTE3")!], [flexCtx.players.get("tWR5")!]).filter((d) => d.label === "Bye cover lost"), []);
+  const rb = coverLost(flexCtx.league.settings, myF, [flexCtx.players.get("mRB3")!], [flexCtx.players.get("tBN")!]).filter((d) => d.label === "Bye cover lost");
+  assert.ok(rb.some((d) => /^mRB3 covers mTE's week 9 bye/.test(d.value)), JSON.stringify(rb));
 });

@@ -625,7 +625,8 @@ const ptsIn = (S: LeagueSettings, p: ValuedPlayer, w: number) => expectedWeeklyP
  *  - a starter's bye in the weeks ahead (current week → final week) at a position where the player I give is my best
  *    bench option that week, and nothing I keep or get covers it as well;
  *  - my only backup QB / TE (the playoff cover when the starter is hurt).
- * A same-position player starting at a FLEX-type slot counts as a backup; for a bye he moves over and the FLEX is refilled from the bench.
+ * A same-position player starting at a FLEX-type slot counts as a backup; for a bye he moves over and the FLEX is
+ * refilled from the bench (any player eligible for that slot), as is a FLEX starter's own bye.
  */
 export function coverLost(S: LeagueSettings, my: TeamV3, give: ValuedPlayer[], get: ValuedPlayer[]): DetailItem[] {
   const out: DetailItem[] = [];
@@ -633,7 +634,8 @@ export function coverLost(S: LeagueSettings, my: TeamV3, give: ValuedPlayer[], g
   const starters = my.starterList.filter((p) => p.pos !== "K" && p.pos !== "DEF" && !giveIds.has(p.id));
   // A same-position starter in a FLEX-type slot covers a starter in his own slot (owner 2026-10-27: a TE at W/R/T
   // moves to TE when the TE is out). For a bye that opens the FLEX instead, so the cover is the best bench player
-  // eligible for that FLEX slot; without such a mate, the best bench player at the position.
+  // eligible for that FLEX slot; a FLEX starter's own bye is covered the same way; otherwise the best bench player at
+  // the position.
   const flexSlot = new Map(my.base.lineup.filter((l) => l.player && FLEX_SLOTS.includes(l.slot)).map((l) => [l.player!.id, l.slot] as const));
   const bench = my.roster.filter((p) => !my.starters.has(p.id) && !my.irIds.has(p.id));
   const flex = my.roster.filter((p) => flexSlot.has(p.id) && !my.irIds.has(p.id));
@@ -643,7 +645,8 @@ export function coverLost(S: LeagueSettings, my: TeamV3, give: ValuedPlayer[], g
     pool.filter((p) => ok(p) && p.bye !== w).reduce<{ p: ValuedPlayer | null; v: number }>((b, p) => (ptsIn(S, p, w) > b.v ? { p, v: ptsIn(S, p, w) } : b), { p: null, v: 0 });
   const byeCover = (s: ValuedPlayer, w: number, benchPool: ValuedPlayer[], flexPool: ValuedPlayer[]) => {
     const mate = flexSlot.has(s.id) ? undefined : flexPool.find((p) => p.pos === s.pos && p.id !== s.id && p.bye !== w);
-    const elig = mate ? SLOT_ELIGIBILITY[flexSlot.get(mate.id)!] : [s.pos];
+    const open = flexSlot.get(s.id) ?? (mate ? flexSlot.get(mate.id) : undefined);
+    const elig = open ? SLOT_ELIGIBILITY[open] : [s.pos];
     return best(benchPool, (p) => elig.includes(p.pos), w);
   };
   const seen = new Set<string>();
