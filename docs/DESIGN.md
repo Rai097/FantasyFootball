@@ -30,10 +30,10 @@ server/config.ts             env loading (dotenv): YAHOO_CLIENT_ID, YAHOO_CLIENT
 server/data/                 free data loaders (DONE: csv, cache, sources, names, nfl, players)
 server/model/types.ts        shared types (DONE — extend, don't fork; web imports it)
 server/model/scoring.ts      score StatLine under Scoring
-server/model/projection.ts   ValuedPlayer computation for a league
+server/model/projectionV4.ts ValuedPlayer computation for a league (THE valuation; projection.ts keeps shared helpers)
 server/model/lineup.ts       optimal lineup + slot eligibility
 server/model/analysis.ts     TeamAnalysis for every team, power ranks, needs/surplus
-server/model/trades.ts       trade finder + evaluator
+server/model/tradesV3.ts     trade finder + evaluator (tradeKit.ts helpers, benchUpgrades.ts)
 server/model/waivers.ts      free-agent ranking + waiver-priority advice
 server/providers/demo.ts     12-team demo league built from real ECR (seeded snake draft)
 server/providers/yahoo.ts    OAuth2 + league import → League
@@ -66,7 +66,7 @@ README.md                    quick start
 (`DEF:KC` for defenses). `db.find({yahoo, name, pos, team})` resolves a Yahoo
 roster entry; prefer yahoo id, fall back to normalised name + position + team.
 
-## Value model (server/model/projection.ts)
+## Value model (server/model/projection.ts) — superseded: projection v4 is the one valuation (see "Release (b) implemented")
 
 For a league `L` with scoring `S` and every player `p`:
 
@@ -116,7 +116,7 @@ orders teams by the power score — superseded: see "Power score v2 (2026-10-26)
 Also return `byeExposure`: for each remaining week, count of starters on bye,
 and `injuryFlags`.
 
-## Trade finder (server/model/trades.ts)
+## Trade finder (server/model/trades.ts) — v1, deleted in Model v4 release (b)
 
 Inputs: league, analysis, myTeamId, options `{maxGive: 2, maxGet: 2, partnerId?, wantPos?}`.
 Candidate pools: my players and partner players excluding K/DEF, excluding
@@ -207,11 +207,10 @@ GET  /api/yahoo/leagues               → [{ key, name, season, numTeams, curren
 GET  /api/league/:provider/:id        → League   (provider = demo | yahoo | import; demo id = seed; ?refresh=1)
 GET  /api/league/:provider/:id/analysis?team=ID
        → { league, players: Record<id, ValuedPlayer>, teams: TeamAnalysis[], replacement: Record<pos, number>, myTeamId }
-GET  /api/league/:provider/:id/trades?team=ID&partner=&wantPos=&maxGive=2&maxGet=2 → Trade[]
 GET  /api/league/:provider/:id/trades2?team=ID&mode=now|balanced|playoffs&partner=&wantPos=&maxGive=2&maxGet=2
        → { trades: Trade[] (clear wins), smallerEdges: Trade[], nearMisses: (Trade & { reason })[], mode, summary: string }   (UI uses this)
-GET  /api/league/:provider/:id/bench-upgrades?team=ID&mode= → Trade[] (≤ 15 one-for-one bench swaps)
-POST /api/league/:provider/:id/trade/evaluate  { team, partner, give: string[], get: string[], mode? } → Trade & { verdict: string }  (v2 scoring)
+GET  /api/league/:provider/:id/bench-upgrades?team=ID&mode= → Trade[] (≤ 15 one-for-one bench swaps, v3 engine: benchUpgrades.ts)
+POST /api/league/:provider/:id/trade/evaluate  { team, partner, give: string[], get: string[], mode? } → Trade & { verdict: string }  (v3)
 GET  /api/league/:provider/:id/waivers?team=ID → { freeAgents: WaiverRow[], myPriority?: number, numTeams, advice: string, rules, faStatusKnown, notes?: string[] }  (see "Waivers v3")
        WaiverTarget = ValuedPlayer & { gain: number, benchGain: number, drop: ValuedPlayer|null, trend: number, recommendation: "claim"|"wait"|"optional"|"pass", why: string, onWaivers: boolean, percentOwned?: number }
 GET  /api/league/:provider/:id/values?team=ID  → ValuedPlayer[] sorted by value, rostered flag { ...ValuedPlayer, ownerTeamId?: string }
@@ -307,7 +306,7 @@ architect's final review passes.
 * Free agents: `status=A;out=ownership,percent_owned;sort=OR`, `ownership.ownership_type ∈ {freeagents, waivers}`.
 * One call `/users;use_login=1/games;game_keys=nfl/leagues/teams` lists leagues with my team; `/game/nfl` gives the game id to build `{gid}.l.{leagueId}`.
 
-## Trade finder v2 (server/model/rosterScore.ts, tradesV2.ts) — overrides "Trade finder" for trades2 / evaluate
+## Trade finder v2 (server/model/rosterScore.ts, tradesV2.ts) — deleted in Model v4 release (b) (roster score and bench upgrades live on, on the v3 engine)
 
 Why: a strong starting lineup made v1 return nothing; managers also value depth, byes, injuries and playoffs.
 
@@ -823,3 +822,48 @@ Owner-specific worked cases live outside the repo (public).
 * Known residuals for (b): "most frequent starter" flags a returning opening-day starter's games as `qbOut` (e.g. a
   team whose backup started 5 of 7: the starter's weeks 1 and 7 are flagged); 107 of 536 players carry ≥ 1 qbOut game.
   Signal memos live for the process lifetime (the player DB rebuilds every 6 h) — (b) adds the same staleness window.
+
+**Release (b) implemented (2026-10-26) — projection v4 is the one valuation**
+* **One valuation.** `server/model/projectionV4.ts` `valuePlayers(league, pool, tables, mode)` values every player;
+  lineups, team analysis and power score v2, League, waivers, breakouts, Trade Finder v3, evaluate and bench upgrades
+  all read it. Deleted: the ECR / current / prior blend and the 35% consensus value anchor (projection.ts keeps only
+  the helpers v4 reuses: ECR rank→points curve, K/DEF line, replacement ranks, injury classification, convexity), the
+  riser ppg blend (`attachRisers`), Trade Finder v1 (`/trades`, trades.ts) and v2 (tradesV2.ts) with their tests, UI
+  and mock references. Shared trade helpers moved to `tradeKit.ts`; bench upgrades run on `judge3` (`benchUpgrades.ts`).
+* **Rate** = recency-weighted, context-adjusted expected points (signals) × shrunk efficiency, with last season's
+  per-game points as 2 pseudo-games (≥ 4 games played), blended with the ECR curve: 25%, 10% from 4 unflagged games,
+  100% when he has no game (rookies / no history), none when he has no ECR rank.
+* **Matchup(w)** = opponent's points allowed to the position this season (league scoring, actual lines of the
+  opponents' players), with 4 pseudo-games of league average, clamped 0.8–1.2; the next game's Vegas implied total
+  multiplies it by 1 + 0.5 × (implied / average − 1), total clamp 0.75–1.25. K/DEF: 1.
+* **Avail(w)**: Questionable 0.85 / Doubtful 0.7 / Out 0 for the current week only; IR / PUP / NFI / NA / long-term
+  detail / suspended, and nflverse roster RES with no game in 2 weeks → 0 for the rest of the season ("return
+  unconfirmed", release (c) adds return estimates); designated to return → 0 for his next 4 games, then 1; no NFL team
+  → 0. A week without an unplayed game for his team (bye, or already played) → 0.
+* **Fields**: `ppg` = healthy rate × mean matchup (per game played), `effPpg` = mean of `weekly` over his remaining
+  games (lineups), `weekly[]` from `weeklyFrom` (= current week), `seasonPts` (current..regular-season end),
+  `playoffPts` (15..17), `remainingGames` = Σ availability, `luck` / `luckTd` (only with real usage), `label`,
+  `riser` (= the recalibrated opportunity trend), `valueMode`. `whyItems` are short bullets; `why` is one line.
+* **Value** = 100 × (raw / max)^1.35 with raw = Σ weeks w_mode × max(0, pts(w) − replacement ppg), `playoffs` mode
+  0.25 rest of season / 0.75 playoff weeks, `balanced` 1 / 1. Mode per request team (`defaultMode`): playoffs when its
+  standings seed (else rank) is in the top half of the league, otherwise — and when standings are unknown — balanced.
+  The API keeps one valued context per (league, mode) on top of a shared base (league + projection tables).
+* **Labels** (`labels.ts`): buy-low = luck ≥ +2.0 pts/g; sell-high = luck ≤ −2.0 with the TD part dominant (≥ 3
+  sample games); market undervalues / overvalues = |edge| ≥ 8. Used by trade tags (a rising player is never tagged
+  sell-high / overvalued), Targets tags, bench-upgrade and waiver details, and the Values "Luck" column.
+* **Team strength** (`teamStrength.ts`, `TeamAnalysis.playoffStrength`): mean optimal weeks 15–17 lineup from weekly
+  points (IR slot excluded) + 0.25 × depth, depth = mean over starters and weeks of the points the bench recovers when
+  that starter is out. Shown on My Team as "Playoff lineup strength".
+* **Calibration (2026 cache, demo league 42, week 7)**:
+  - qbOut: usual starters = most frequent ∪ ≥ 3 of the last 4 ∪ opener-and-latest (the brief's simpler rule leaves
+    SEA's returning starter flagged: Darnold weeks 1 and 7 around five Lock starts). Players with a qbOut game 107 → 69.
+  - Rising: both steps up, slope ≥ 1.0 × his weekly std-dev, latest ≥ flex level (metric rate at rank RB30 / WR40 /
+    TE14). 13 of 361 players with a trend (3.6%; RB 6, WR 4, TE 3) = ~15% of the 84 flex-level roles. 10–15% of all
+    361 would need ≤ 0.5 × std-dev and no flex floor (sweep: 0.5 × std, no floor → 42).
+  - Mean |v4 ppg − old ppg| over rostered players: QB 1.12, RB 1.31, WR 1.01, TE 1.21, K/DEF 0 (unchanged model).
+  - Labels across the pool: 44 buy-low, 22 sell-high. Valuation + analysis 41 ms; projection tables 180 ms per
+    scoring (6 h memo, refreshed with the player DB).
+* Known gaps: the 2026 cache has DAL@PHI week 7 unplayed, so `currentWeek` = 7 and most teams show week 7 as "no game";
+  `getNflState` caches the current week for the process lifetime (a long-running server does not advance it);
+  `riskAdjusted` (trades, lineups) still haircuts a Q / D / O player's whole rest of season on top of v4's this-week
+  availability; the Trade Finder `mode` (now / balanced / playoffs roster score) is separate from the value mode.

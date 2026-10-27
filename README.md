@@ -46,24 +46,26 @@ Trade Desk. See [docs/IMPORT.md](docs/IMPORT.md).
 | **Connect** | Yahoo login, league and team picker, the demo league, or import from Yahoo's web pages ([docs/IMPORT.md](docs/IMPORT.md)). |
 | **My Team** | Optimal lineup, position-by-position strength ranked against the league, needs and surplus, bye and injury exposure. Tap Power rank to open the League tab. |
 | **League** | Power rankings as a chart (0.7 × projected starter points + 0.3 × actual points per game; bench depth only breaks ties), the standings table, and for every team above you a one-line why: projected starter points, actual points per game and the position groups where they beat you, with a mini chart on tap. |
-| **Trade Finder** | 1-for-1, 2-for-1 and 2-for-2 packages against every opponent, kept only when your lineup improves *and* the other side gets a deal they would plausibly accept. Each card explains both lineups' changes. Includes a builder to evaluate any offer. |
+| **Trade Finder** | Packages priced the way the other manager sees them (market values), kept only when your roster improves by our projections *and* the other side would plausibly accept; buy-low / sell-high and market-gap tags, bench upgrades, and a builder to evaluate any offer. |
 | **Waivers** | Free agents ranked by how much they improve your lineup versus your most droppable player, with trend and injury flags, and a claim / optional / stash / wait / pass call that accounts for your rolling-list priority (or FAAB). Claims include future starters (rising role, path open, flex-level opportunity); injured players are never worth priority sight unseen. |
-| **Values** | Every player's projection, value, actual vs expected production, and owner, sortable and searchable. |
+| **Values** | Every player's projection, value, luck (expected minus actual points: + = due for more), actual vs expected production, and owner, sortable and searchable. |
 
 ![Trade Finder](docs/screenshots/trades-1280.png)
 
 ## How values are computed
 
-Each player's projected points per game blends three signals under your
-league's scoring: FantasyPros expert consensus rest-of-season rank (converted
-to points on a positional curve), this season's *expected* fantasy points based
-on opportunity (targets, carries, air yards) alongside actual points, and last
-season's production as a stabiliser. That rate is multiplied by remaining
-games, with byes, injuries and playoff weeks accounted for, and measured
-against a replacement-level player for your league size and lineup slots.
-Trade value is a convex transform of that surplus, so one star is worth more
-than two mid-tier players. Every number in the UI has a **?** tooltip that
-explains how it was made.
+There is one valuation (projection v4), used by every tab. For each player and
+each remaining week: points = rate × matchup × availability. The rate is his
+*expected* fantasy points from recent usage (targets, air yards, carries; the
+latest games weigh most and games with a backup QB, an early exit or a blowout
+count less) times how well he converts it, pulled toward average so touchdown
+spikes regress, with the FantasyPros expert rank as a light sanity check. The
+matchup is what his opponent allows to his position, plus a small bonus from
+the next game's Vegas total. Byes and injuries set weeks to 0. Value is the
+surplus over a replacement-level player for your league, with the playoff weeks
+counting most when your team holds a playoff spot, on a convex scale so one star
+is worth more than two mid-tier players. Every number in the UI has a **?**
+tooltip that explains how it was made.
 
 ## Data sources
 
@@ -106,7 +108,7 @@ league and may re-import it. Missing file = nobody can sign in. Without Discord 
 
 ```
 server/data        loaders for the public data files, player database
-server/model       scoring, projection, lineup, analysis, trades, waivers
+server/model       scoring, signals, projection v4, lineup, analysis, trades, waivers
 server/providers   yahoo (OAuth + import), demo
 server/api.ts      HTTP API (contract in docs/DESIGN.md)
 server/auth        Discord sign-in, sessions, access list, the route guard

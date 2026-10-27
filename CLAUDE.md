@@ -3,7 +3,7 @@
 Read-only Yahoo Fantasy Football assistant: values players under the league's
 scoring, suggests trades, waiver moves and breakout targets. Overview in
 README.md; design spec and API contract in docs/DESIGN.md (later sections
-override earlier ones: "Amendments", "Trade finder v2", "v3", "Breakout Targets").
+override earlier ones: "Amendments", "Trade finder v3", "Breakout Targets", "Model v4" incl. "Release (b) implemented").
 Open work and "Resume here" live in TASKS.md.
 
 ## Repo
@@ -25,7 +25,7 @@ Open work and "Resume here" live in TASKS.md.
 
 ## Layout
 - `server/data` public data loaders (nflverse, ffopportunity, DynastyProcess, FantasyCalc), cached in `.cache/`.
-- `server/model` pure engine: scoring, projection, lineup, analysis, trades (v1/v2/v3), waivers, breakouts. Each module has a sibling `.test.ts`.
+- `server/model` pure engine: scoring, signals, projection v4 (`projectionV4.ts`, the one valuation), lineup, analysis, team strength, trades (v3 + bench upgrades), labels, waivers, breakouts. Each module has a sibling `.test.ts`.
 - `server/providers` league sources: `demo`, `yahoo` (OAuth API), `import` (pasted Yahoo web pages / bookmarklet).
 - `server/api.ts` HTTP API — the web app depends on the contract in docs/DESIGN.md.
 - `web/src` React 18 + Vite, plain CSS, tabs in `web/src/tabs`.
