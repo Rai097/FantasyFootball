@@ -1,0 +1,195 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { V4, defaultMode, emptyTables, valuePlayers, type ProjectionTables, type ScheduledGame } from "./projectionV4.js";
+import { computeAllSignals } from "./signals/index.js";
+import { ASOF, fixtureInputs, IDS, PPR } from "../data/fixtures/signals2026.js";
+import { detailProblems, league, line, rawPlayer, team } from "./testkit.js";
+import type { Player, Position, StatLine, WeekLine } from "./types.js";
+
+const wk = (week: number, actual: Partial<StatLine>, expected: Partial<StatLine>, opp = { targets: 0, carries: 0, airYards: 0 }): WeekLine => ({
+  season: 2026, week, team: "KC", actual: line(actual), expected: line(expected), opp,
+});
+/** n identical games (weeks 1..n). */
+const games = (n: number, actual: Partial<StatLine>, expected: Partial<StatLine> = actual, opp?: WeekLine["opp"]) =>
+  Array.from({ length: n }, (_, i) => wk(i + 1, actual, expected, opp));
+
+const L = (over: Parameters<typeof league>[2] = {}) => league([team("a", [])], undefined, { currentWeek: 8, numTeams: 12, ...over });
+/** A filler pool so the ECR curve and replacement levels exist: 40 per position with descending production. */
+function filler(pos: Position, n = 40): Player[] {
+  return Array.from({ length: n }, (_, i) =>
+    rawPlayer(`${pos}${i + 1}`, pos, {
+      ecrPos: i + 1,
+      weeks: games(6, { recYd: 120 - i * 2.5, rec: 6 - i * 0.1, rushYd: pos === "RB" ? 80 - i : 0, passYd: pos === "QB" ? 280 - i * 3 : 0 }),
+      prior: { games: 16, line: line({ recYd: (120 - i * 2.5) * 16, rec: (6 - i * 0.1) * 16, passYd: pos === "QB" ? (280 - i * 3) * 16 : 0 }) },
+    }),
+  );
+}
+const POOL = [...filler("QB", 30), ...filler("RB"), ...filler("WR"), ...filler("TE", 30)];
+
+test("QB-out TE (CHI 2026, backups weeks 3-5): v4 rate above his plain season average", () => {
+  const sig = computeAllSignals(fixtureInputs().values(), { season: 2026, scoring: PPR, asOf: ASOF });
+  const lv = sig.get(IDS.loveland)!;
+  const tables: ProjectionTables = { ...emptyTables(), signals: sig };
+  const pl = rawPlayer(IDS.loveland, "TE", { team: "CHI" });
+  const v = valuePlayers(L({ scoring: PPR }), [...POOL, pl], tables).players.get(IDS.loveland)!;
+  const seasonAvgAct = lv.seasonAvg.actPts!;
+  const seasonAvgExp = lv.seasonAvg.expPts!;
+  assert.ok(v.ppg > seasonAvgAct && v.ppg > seasonAvgExp, `v4 ${v.ppg} vs season act ${seasonAvgAct.toFixed(2)} / exp ${seasonAvgExp.toFixed(2)}`);
+  assert.ok(v.whyItems!.some((d) => d.label === "Odd games" && /backup QB/.test(d.value)), "the down-weighted games are explained");
+});
+
+test("TD-spike WR regresses toward his expected points (and is labelled sell-high)", () => {
+  // 6 games: usage worth 10 pts/game (PPR), actual 22 thanks to 2 TDs a game.
+  const spike = rawPlayer("spike", "WR", { weeks: games(6, { rec: 5, recYd: 50, recTd: 2 }, { rec: 5, recYd: 50, recTd: 0 }, { targets: 7, carries: 0, airYards: 70 }) });
+  const v = valuePlayers(L({ scoring: PPR }), [...POOL, spike]).players.get("spike")!;
+  assert.equal(v.ppg26, 22);
+  assert.equal(v.ppgExp26, 10);
+  assert.ok(v.ppg < 14 && v.ppg > 10, `ppg ${v.ppg}: efficiency capped at 1.3 and shrunk`);
+  assert.equal(v.label, "sell-high");
+  assert.ok(v.luck! <= -10, `luck ${v.luck}`);
+  assert.ok(v.whyItems!.some((d) => d.label === "Luck" && /sell-high/.test(d.value)));
+});
+
+test("rookie with no history and no games: rate = the ECR anchor at his rank (100% weight)", () => {
+  const rookie = rawPlayer("rook", "WR", { ecrPos: 10 });
+  const val = valuePlayers(L(), [...POOL, rookie]);
+  const r = val.players.get("rook")!;
+  const wr10 = val.players.get("WR10")!;
+  assert.ok(r.ppg > 0, "not 0");
+  assert.ok(Math.abs(r.ppg - wr10.ppg) < 0.25 * wr10.ppg, `rookie ${r.ppg} vs WR10 ${wr10.ppg}`);
+  assert.ok(r.whyItems!.some((d) => d.label === "Experts (ECR)" && /100% weight/.test(d.value)), JSON.stringify(r.whyItems));
+  const nobody = valuePlayers(L(), [...POOL, rawPlayer("nobody", "WR")]).players.get("nobody")!;
+  assert.equal(nobody.ppg, 0);
+  assert.equal(nobody.value, 0);
+  assert.match(nobody.whyItems![0].value, /no game this season, no expert rank/);
+});
+
+test("bye week = 0 (player bye or no game in the schedule); others get rate × matchup", () => {
+  const p = rawPlayer("bye", "WR", { ecrPos: 5, bye: 10, weeks: games(6, { rec: 6, recYd: 80 }) });
+  const v = valuePlayers(L(), [...POOL, p]).players.get("bye")!;
+  assert.equal(v.weeklyFrom, 8);
+  assert.equal(v.weekly!.length, 17 - 8 + 1);
+  assert.equal(v.weekly![10 - 8], 0);
+  assert.ok(v.weekly!.every((x, i) => i === 2 || x > 0));
+  // Schedule tables: a missing week is no game (bye, or already played).
+  const sched: ProjectionTables = { ...emptyTables(), schedule: new Map([["KC", new Map([8, 9, 11, 12, 13, 14, 15, 16, 17].map((w) => [w, { opp: "DEN", home: true }]))]]) };
+  const s = valuePlayers(L(), [...POOL, p], sched).players.get("bye")!;
+  assert.equal(s.weekly![10 - 8], 0);
+  assert.ok(s.weekly![9 - 8] > 0);
+});
+
+test("Out = 0 this week only; IR = 0 rest of season; designated to return = 0 for 4 games; Q / D shade this week", () => {
+  const mk = (id: string, status?: string, detail?: string) =>
+    rawPlayer(id, "RB", { ecrPos: 8, weeks: games(6, { rushYd: 90, rec: 3, recYd: 20 }), ...(status ? { injury: { status, detail, week: 8 } } : {}) });
+  const val = valuePlayers(L(), [...POOL, mk("ok"), mk("out", "Out", "Hamstring"), mk("ir", "IR"), mk("ret", "IR-R"), mk("q", "Questionable"), mk("d", "Doubtful")]);
+  const g = (id: string) => val.players.get(id)!;
+  const healthy = g("ok").weekly!;
+  assert.equal(g("out").weekly![0], 0);
+  assert.deepEqual(g("out").weekly!.slice(1), healthy.slice(1));
+  assert.ok(g("ir").weekly!.every((x) => x === 0));
+  assert.equal(g("ir").value, 0);
+  assert.deepEqual(g("ret").weekly!.slice(0, V4.returnGames), [0, 0, 0, 0]);
+  assert.equal(g("ret").weekly![V4.returnGames], healthy[V4.returnGames]);
+  assert.ok(Math.abs(g("q").weekly![0] - healthy[0] * V4.questionable) < 0.06);
+  assert.ok(Math.abs(g("d").weekly![0] - healthy[0] * V4.doubtful) < 0.06);
+  assert.deepEqual(g("q").weekly!.slice(1), healthy.slice(1));
+  assert.equal(g("ok").ppg, g("out").ppg, "ppg is the healthy rate");
+  assert.ok(g("out").effPpg! < g("ok").effPpg!, "lineup pts/game include the missed week");
+  assert.ok(g("ir").whyItems!.some((d) => d.label === "Availability" && /return unconfirmed/.test(d.value)));
+});
+
+test("scoring.rec 1.0 vs 0.5: a 6-catch receiver gains ~3 pts/game", () => {
+  const p = rawPlayer("rec", "WR", { weeks: games(6, { rec: 6, recYd: 60 }), ecrPos: 12 });
+  const half = valuePlayers(L({ scoring: { ...PPR, rec: 0.5 } }), [...POOL, p]).players.get("rec")!;
+  const full = valuePlayers(L({ scoring: PPR }), [...POOL, p]).players.get("rec")!;
+  const d = full.ppg - half.ppg;
+  assert.ok(d > 2 && d < 4, `full ${full.ppg} − half ${half.ppg} = ${d}`);
+});
+
+test("matchup: soft defenses raise a week, tough ones lower it; the next game's Vegas total adds a bonus", () => {
+  const p = rawPlayer("m", "WR", { ecrPos: 6, weeks: games(6, { rec: 6, recYd: 80 }) });
+  const weeks = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+  const opp = (w: number) => (w === 9 ? "SOFT" : w === 10 ? "HARD" : "AVG");
+  const tables: ProjectionTables = {
+    ...emptyTables(),
+    schedule: new Map<string, Map<number, ScheduledGame>>([
+      ["KC", new Map(weeks.map((w): [number, ScheduledGame] => [w, { opp: opp(w), home: true, ...(w === 8 ? { implied: 30 } : {}) }]))],
+      ["XX", new Map<number, ScheduledGame>([[8, { opp: "KC", home: false, implied: 20 }]])],
+    ]),
+    allowed: new Map([
+      ["SOFT", { WR: { pts: 60 * 8, games: 8 } }],
+      ["HARD", { WR: { pts: 25 * 8, games: 8 } }],
+      ["AVG", { WR: { pts: 40 * 8, games: 8 } }],
+    ]),
+    leagueAllowed: { WR: 40 },
+  };
+  const v = valuePlayers(L(), [...POOL, p], tables).players.get("m")!;
+  const [w8, w9, w10, w11] = v.weekly!;
+  assert.ok(w9 > w11 && w11 > w10, `${w9} > ${w11} > ${w10}`);
+  // Shrinkage: 8 games of 60 vs 4 pseudo-games of 40 → (480 + 160) / 12 / 40 = 1.33 → clamped 1.2.
+  assert.ok(Math.abs(w9 / w11 - V4.matchupClamp[1]) < 0.02, `soft ${w9 / w11}`);
+  // Week 8: implied 30 vs average 25 → × (1 + 0.5 × 0.2) = 1.1.
+  assert.ok(Math.abs(w8 / w11 - 1.1) < 0.02, `vegas ${w8 / w11}`);
+  assert.ok(v.whyItems!.some((d) => d.label === "Next game" && /Vegas 30\.0/.test(d.value)));
+});
+
+test("value: playoffs mode weighs weeks 15-17 at 75%, so a playoff-week bye costs more than in balanced mode", () => {
+  const twin = (id: string, bye?: number) => rawPlayer(id, "WR", { ecrPos: 3, bye, weeks: games(6, { rec: 7, recYd: 95 }) });
+  const pool = [...POOL, twin("reg", 10), twin("po", 16)];
+  const bal = valuePlayers(L(), pool, emptyTables(), "balanced").players;
+  const po = valuePlayers(L(), pool, emptyTables(), "playoffs").players;
+  assert.equal(bal.get("reg")!.value, bal.get("po")!.value, "balanced: a bye is a bye");
+  assert.ok(po.get("reg")!.value > po.get("po")!.value, `playoffs: ${po.get("reg")!.value} vs ${po.get("po")!.value}`);
+  assert.equal(po.get("po")!.valueMode, "playoffs");
+  assert.ok(po.get("po")!.whyItems!.some((d) => d.label === "Value" && /playoff weeks 75%/.test(d.value)));
+  // Top player = 100 in both modes; seasonPts + playoffPts = Σ weekly.
+  assert.equal(Math.max(...[...po.values()].map((p) => p.value)), 100);
+  const r = bal.get("reg")!;
+  assert.ok(Math.abs(r.seasonPts! + r.playoffPts! - r.weekly!.reduce((a, b) => a + b, 0)) < 0.6);
+});
+
+test("K / DEF keep the ECR line; a bye is 0; no NaN anywhere; bullets are short single ideas", () => {
+  const k = rawPlayer("k1", "K", { ecrPos: 1, bye: 12 });
+  const d = rawPlayer("d20", "DEF", { ecrPos: 20 });
+  const val = valuePlayers(L(), [...POOL, k, d, rawPlayer("empty", "TE")]);
+  assert.equal(val.players.get("k1")!.ppg, 9);
+  assert.equal(val.players.get("k1")!.weekly![12 - 8], 0);
+  assert.ok(Math.abs(val.players.get("d20")!.ppg - (8.5 - 0.15 * 19)) < 1e-9);
+  for (const p of val.players.values()) {
+    for (const key of ["ppg", "effPpg", "value", "vorp", "remainingGames", "seasonPts", "playoffPts"] as const) assert.ok(Number.isFinite(p[key]), `${p.id}.${key} = ${p[key]}`);
+    assert.ok(p.weekly!.every(Number.isFinite), p.id);
+    assert.deepEqual(detailProblems(p.whyItems!), [], p.id);
+    assert.ok(p.whyItems!.some((x) => x.label === "Value"));
+    assert.ok(p.why.length > 0 && p.why.length <= 255);
+  }
+});
+
+test("rising opportunity sets riser; valueOf re-values a fresher injury copy with the same signals; deterministic", () => {
+  const p = rawPlayer("x", "RB", { ecrPos: 4, weeks: games(6, { rushYd: 85, rec: 3, recYd: 25 }) });
+  const val = valuePlayers(L(), [...POOL, p]);
+  const copy = { ...p, injury: { status: "Out", week: 8 } };
+  const c = val.valueOf(copy);
+  assert.equal(c.weekly![0], 0);
+  assert.equal(c.ppg, val.players.get("x")!.ppg);
+  assert.equal(val.valueOf(p), val.players.get("x"), "same object → cached");
+  const again = valuePlayers(L(), [...POOL, p]).players.get("x")!;
+  assert.deepEqual(again, val.players.get("x"));
+});
+
+test("default value mode: playoffs for a team in a playoff spot by standings, else balanced; unknown → balanced", () => {
+  const l = league(
+    [
+      team("1", [], { record: { wins: 6, losses: 1, ties: 0, rank: 1 } }),
+      team("2", [], { record: { wins: 3, losses: 4, ties: 0, rank: 7, seed: 7 } }),
+      team("3", []),
+      team("4", [], { record: { wins: 4, losses: 3, ties: 0, rank: 8, seed: 5 } }),
+    ],
+    undefined,
+    { numTeams: 12 },
+  );
+  assert.equal(defaultMode(l, "1"), "playoffs");
+  assert.equal(defaultMode(l, "2"), "balanced");
+  assert.equal(defaultMode(l, "3"), "balanced");
+  assert.equal(defaultMode(l, "4"), "playoffs", "seed wins over rank");
+  assert.equal(defaultMode(l, undefined), "balanced");
+});

@@ -66,6 +66,24 @@ export function curveAt(curve: number[], rank: number): number {
 }
 
 /**
+ * ECR rank → points curve for one position (the anchor of projection v4): 0.5 × this season's curve (players with
+ * ≥ 3 games) + 0.5 × last season's curve (≥ 8 games), the current one capped at 1.15× the prior one at each rank
+ * (early-season outliers), smoothed (window 3). Inputs: per-player points per game, any order.
+ */
+export function ecrCurve(current: number[], prior: number[]): number[] {
+  const a = [...current].sort((x, y) => y - x);
+  const b = [...prior].sort((x, y) => y - x);
+  for (let i = 0; i < Math.min(a.length, b.length); i++) a[i] = Math.min(a[i], CURVE_CURRENT_CAP * b[i]);
+  const n = Math.max(a.length, b.length);
+  const combined: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (a.length && b.length) combined.push(0.5 * a[Math.min(i, a.length - 1)] + 0.5 * b[Math.min(i, b.length - 1)]);
+    else combined.push((a.length ? a : b)[i]);
+  }
+  return smooth(combined, 3);
+}
+
+/**
  * Classify an injury status (nflverse report or Yahoo code).
  *  - long: IR / PUP / NFI / Yahoo NA, or Out/Doubtful with an ACL/Achilles/season/IR/NA detail → 0 games
  *  - return: Yahoo "-R" designation (IR-R etc., detail "return designation", not IR) → Out, −4 games

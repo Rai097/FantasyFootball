@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   staleMemo,
+  buildPointsAllowed,
+  buildSchedule,
   buildStarters,
   buildTeamTotals,
   buildUsualStarters,
@@ -13,6 +15,8 @@ import {
 } from "./signalTables.js";
 import { EP_2026, GAMES, INJURIES, ROSTER, SNAPS, IDS, fixtureInputs } from "./fixtures/signals2026.js";
 import { DB_STALE_MS } from "./players.js";
+import { score } from "../model/scoring.js";
+import { PPR } from "./fixtures/signals2026.js";
 
 test("team totals: file *_team columns win; summing is the fallback", () => {
   const rows = parseEpRows(EP_2026);
@@ -104,4 +108,29 @@ test("signal memos refresh on the player database's cadence (6 h) and forget fai
   await assert.rejects(memo.get("d", () => Promise.reject(new Error("x"))));
   await new Promise((r) => setImmediate(r));
   assert.equal(await memo.get("d", make), 5, "a failed build is not cached");
+});
+
+test("schedule: unplayed games only, both sides, Vegas implied totals from total ± spread", () => {
+  const games = parseGames(GAMES, 2026);
+  const sched = buildSchedule(games);
+  assert.deepEqual(sched.get("CHI")!.get(8), { opp: "SEA", home: false });
+  assert.deepEqual(sched.get("SEA")!.get(8), { opp: "CHI", home: true });
+  assert.equal(sched.get("CHI")!.has(7), false, "played week 7 is not remaining");
+  const lined = new Map(games);
+  lined.set("x", { gameId: "x", week: 9, home: "GB", away: "CAR", total: 47.5, spread: 3.5 });
+  const s2 = buildSchedule(lined);
+  assert.equal(s2.get("GB")!.get(9)!.implied, 25.5);
+  assert.equal(s2.get("CAR")!.get(9)!.implied, 22);
+});
+
+test("points allowed: the opponents' league-scored points per position, per defense, plus the league average", () => {
+  const rows = parseEpRows(EP_2026);
+  const { byDefense, leagueAvg } = buildPointsAllowed(rows, parseGames(GAMES, 2026), PPR);
+  // CAR faced CHI (week 1) and CLE (week 3); the fixture's only QB row among them is Caleb Williams's week 1.
+  const caleb = rows.find((r) => r.playerId === IDS.caleb && r.week === 1)!;
+  const car = byDefense.get("CAR")!;
+  assert.equal(car.QB!.games, 2);
+  assert.ok(Math.abs(car.QB!.pts - score(PPR, caleb.actual, "QB")) < 1e-9);
+  assert.ok(leagueAvg.QB! > 0 && leagueAvg.TE! > 0);
+  assert.equal(byDefense.has("CHI"), false, "no fixture rows for CHI's opponents: unknown, not 0");
 });

@@ -123,8 +123,24 @@ export interface ValuedPlayer extends Player {
   floor?: number;
   /** floor / mean weekly points (0..1; higher = steadier). */
   consistency?: number;
-  /** Role rising (snap share +12 pts and expected pts +2, new season high, not already full-time): ppg blends 30% of last-2-week expected ppg. */
+  /** Opportunity trend rising (Model v4 signals: WOPR / weighted touches up 3 straight games, beyond his noise, at flex level). */
   riser?: boolean;
+  // ---- Projection v4 (always set by the server; optional so hand-made fixtures stay valid)
+  /** Projected points per remaining week, weeks weeklyFrom..finalWeek (0 = no game, or not available). */
+  weekly?: number[];
+  /** First week of `weekly` (the league's current week). */
+  weeklyFrom?: number;
+  /** Σ weekly over the rest of the regular season / over the playoff weeks. */
+  seasonPts?: number;
+  playoffPts?: number;
+  /** Value weighting used for `value`: playoffs (playoff weeks 75%) or balanced (every week the same). */
+  valueMode?: "playoffs" | "balanced";
+  /** Recency-weighted expected − actual points per game (+ = he is due for more by his usage); unset = unknown. */
+  luck?: number;
+  /** Part of `luck` from touchdowns. */
+  luckTd?: number;
+  /** buy-low (luck ≥ +2) / sell-high (luck ≤ −2, TD-driven), see labels.ts. */
+  label?: "buy-low" | "sell-high";
 }
 
 export type SlotKind = "QB" | "RB" | "WR" | "TE" | "K" | "DEF" | "FLEX" | "SFLEX" | "RFLEX" | "WRRB" | "BN" | "IR";
