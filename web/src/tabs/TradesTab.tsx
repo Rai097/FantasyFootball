@@ -139,7 +139,7 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
                     Trades <span className="muted">({data.trades.length})</span>
                   </h2>
                   <Disclosure title="How they're ranked">
-                    <DetailList items={RANKING} />
+                    <DetailList items={rankingFor(mode)} />
                   </Disclosure>
                 </div>
                 {tradeList(data.trades.slice(0, shown), "Suggested trades")}
@@ -231,12 +231,24 @@ const PARTNER_HEADER = (
 const BENCH_TIP =
   "1-for-1 swaps of a bench player (or your weakest starter) that add 0.8+ pts/week to your rest-of-season lineup; both players worth 3+, the one you get a real asset.";
 
-const RANKING = [
-  { label: "Your playoff strength", value: "+1.0 pts/week or more (weeks 15–17 lineup + 0.25 × bench cover)" },
+/** "How they're ranked": the listing bar follows the mode (server/model/tradesV3.ts listsInMode). */
+const MODE_BAR: Record<TradeMode, { label: string; value: string }[]> = {
+  playoffs: [{ label: "Your playoff strength", value: "+1.0 pts/week or more (weeks 15–17 lineup + 0.25 × bench cover)" }],
+  balanced: [
+    { label: "Your team score", value: "+1.0 or more (this week, rest of season and playoffs)" },
+    { label: "Playoff strength", value: "Not down more than 0.5 pts/week" },
+  ],
+  now: [
+    { label: "Your team score", value: "+1.0 or more (this week's lineup, a little bench depth)" },
+    { label: "Playoff strength", value: "Not down more than 1.0 pts/week" },
+  ],
+};
+const rankingFor = (mode: TradeMode) => [
+  ...MODE_BAR[mode],
   { label: "Their side", value: "Not a loss in what Yahoo shows them" },
   { label: "Their view", value: "Yahoo projections + recent games (estimate until captured)" },
   { label: "Acceptance", value: "40% or more: 80% their lineup view, 20% market value" },
-  { label: "Order", value: "(your playoff strength gain + perception-gap bonus) × acceptance" },
+  { label: "Order", value: `(your ${mode === "playoffs" ? "playoff strength" : "team score"} gain + perception-gap bonus) × acceptance` },
   { label: "Variety", value: "At most 2 per partner and 2 per player you give" },
 ];
 

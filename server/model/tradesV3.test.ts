@@ -17,6 +17,9 @@ import {
   findTradesV3,
   ineligibleReason,
   judge3,
+  listsInMode,
+  modeBarText,
+  modeGain,
   packageValue,
   qbTradeable,
   spareQb,
@@ -695,4 +698,48 @@ test("cover lost: a same-position player starting at FLEX counts as cover (only 
   assert.deepEqual(coverLost(flexCtx.league.settings, myF, [flexCtx.players.get("mTE3")!], [flexCtx.players.get("tWR5")!]).filter((d) => d.label === "Bye cover lost"), []);
   const rb = coverLost(flexCtx.league.settings, myF, [flexCtx.players.get("mRB3")!], [flexCtx.players.get("tBN")!]).filter((d) => d.label === "Bye cover lost");
   assert.ok(rb.some((d) => /^mRB3 covers mTE's week 9 bye/.test(d.value)), JSON.stringify(rb));
+});
+
+// ---------------------------------------------------------------- mode-aware listing (fix 2026-10-27)
+
+test("the main list follows the mode: Playoffs gates on playoff strength, Balanced / Win now on the mode's team score with a playoff floor", () => {
+  // Helps now, not in the playoffs (e.g. injured-now players who return before the playoffs, sold for one healthy one).
+  const nowOnly = { myDelta: 2.4, strengthDelta: -0.3 };
+  assert.equal(listsInMode(nowOnly, "now"), true);
+  assert.equal(listsInMode(nowOnly, "balanced"), true);
+  assert.equal(listsInMode(nowOnly, "playoffs"), false, "never in Playoffs mode");
+  // Playoff strength −0.8: past Balanced's −0.5 floor, inside Win now's −1.0.
+  const deeper = { myDelta: 2.4, strengthDelta: -0.8 };
+  assert.deepEqual([listsInMode(deeper, "now"), listsInMode(deeper, "balanced"), listsInMode(deeper, "playoffs")], [true, false, false]);
+  // Wrecks the playoffs: listed in no mode, however big the gain now.
+  const wreck = { myDelta: 6, strengthDelta: -1.1 };
+  assert.deepEqual([listsInMode(wreck, "now"), listsInMode(wreck, "balanced"), listsInMode(wreck, "playoffs")], [false, false, false]);
+  // Playoff gain only: Playoffs lists it, the other modes need their own score ≥ minMyGain.
+  const playoffOnly = { myDelta: 0.6, strengthDelta: 1.5 };
+  assert.deepEqual([listsInMode(playoffOnly, "now"), listsInMode(playoffOnly, "balanced"), listsInMode(playoffOnly, "playoffs")], [false, false, true]);
+  // Exactly at the bars.
+  assert.equal(listsInMode({ myDelta: V3.minMyGain, strengthDelta: V3.playoffFloor.balanced! }, "balanced"), true);
+  assert.equal(listsInMode({ myDelta: V3.minMyGain, strengthDelta: V3.playoffFloor.now! }, "now"), true);
+  assert.equal(listsInMode({ myDelta: 0, strengthDelta: V3.minMyGain }, "playoffs"), true);
+  // The gain each mode lists and ranks on.
+  assert.equal(modeGain(nowOnly, "playoffs"), -0.3);
+  assert.equal(modeGain(nowOnly, "balanced"), 2.4);
+  assert.equal(modeGain(nowOnly, "now"), 2.4);
+});
+
+test("marginal near misses use the same per-mode measure: a real gain (> 0) in the mode, the same playoff floor", () => {
+  assert.equal(listsInMode({ myDelta: 0.3, strengthDelta: 0.2 }, "balanced", true), true);
+  assert.equal(listsInMode({ myDelta: 0.3, strengthDelta: -0.6 }, "balanced", true), false, "Balanced floor −0.5");
+  assert.equal(listsInMode({ myDelta: 0.3, strengthDelta: -0.6 }, "now", true), true);
+  assert.equal(listsInMode({ myDelta: 3, strengthDelta: 0 }, "playoffs", true), false, "Playoffs: needs playoff strength > 0");
+  assert.equal(listsInMode({ myDelta: -1, strengthDelta: 0.2 }, "playoffs", true), true);
+  assert.equal(listsInMode({ myDelta: 0, strengthDelta: 2 }, "now", true), false);
+});
+
+test("evaluate's mode bar bullet says why a deal clears or fails the mode's listing bar", () => {
+  assert.equal(modeBarText({ myDelta: 2.4, strengthDelta: -0.3 }, "now"), "clears: team score +2.4, playoff strength −0.3");
+  assert.equal(modeBarText({ myDelta: 2.4, strengthDelta: -0.3 }, "playoffs"), "fails: playoff strength −0.3 (needs +1.0)");
+  assert.equal(modeBarText({ myDelta: 2.4, strengthDelta: -0.8 }, "balanced"), "fails: playoff strength −0.8 (floor −0.5)");
+  assert.equal(modeBarText({ myDelta: 0.4, strengthDelta: 1.2 }, "balanced"), "fails: team score +0.4 (needs +1.0)");
+  assert.equal(modeBarText({ myDelta: 0.4, strengthDelta: 1.2 }, "playoffs"), "clears: playoff strength +1.2");
 });

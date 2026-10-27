@@ -2,7 +2,7 @@
 // invariants that must hold whatever the week's data.
 import { before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { evaluateTradeV3, findTradesV3, teamV3 } from "./tradesV3.js";
+import { V3, evaluateTradeV3, findTradesV3, teamV3 } from "./tradesV3.js";
 import { findBenchUpgrades } from "./benchUpgrades.js";
 import { attachPerception } from "./perception.js";
 import { analyzeLeague, analyzeTeams } from "./analysis.js";
@@ -69,18 +69,18 @@ describe("Trades v4 on demo/42", { timeout: 600_000 }, () => {
     assert.deepEqual(bad, []);
   });
 
-  test("marginal near misses come back (my side fails its bar) and each still has a real playoff gain (> 0)", () => {
+  test("marginal near misses come back (my side fails its bar) and each still has a real gain in the mode (> 0)", () => {
     // Fix round 1: strengthDelta was forced to 0 when my side failed, so no "marginal" near miss could pass the gate.
     let marginal = 0;
     for (const [team, l] of lists)
       for (const t of l.near)
         if (t.tags.includes("marginal")) {
           marginal++;
-          // The gate is the team-strength total (one playoff engine fix: its own "Playoff strength" bullet; the summary
-          // leads with the lineup part, which bench cover alone can leave at +0.0).
-          const row = t.details?.find((d) => d.label === "Playoff strength");
-          const playoff = Number(row?.value.match(/^([+−]\d+\.\d)/)?.[1].replace("−", "-"));
-          assert.ok(playoff > 0, `team ${team}: ${t.key} marginal with playoff strength ${playoff}`);
+          // Balanced mode (mode-aware listing, fix 2026-10-27): the gain is the mode's team score (> 0 for a marginal
+          // near miss; ≥ +0.0 once rounded) and the playoff strength (its own bullet) may fall at most V3.playoffFloor.balanced.
+          const val = (label: string) => Number(t.details?.find((d) => d.label === label)?.value.match(/^([+−]\d+\.\d)/)?.[1].replace("−", "-"));
+          assert.ok(val("Your team score") >= 0, `team ${team}: ${t.key} marginal with team score ${val("Your team score")}`);
+          assert.ok(val("Playoff strength") >= V3.playoffFloor.balanced!, `team ${team}: ${t.key} marginal with playoff strength ${val("Playoff strength")}`);
         }
     assert.ok(marginal > 0, "some marginal near misses on demo/42");
   });

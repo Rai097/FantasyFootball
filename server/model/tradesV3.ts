@@ -68,6 +68,8 @@ export const V3 = {
   /** No suggestion below this playoff-lineup (team strength) gain for me, pts/week — except a "marginal" near miss
    *  (my side fails its bar), which needs only a positive gain. */
   minMyGain: 1.0,
+  /** Mode-aware listing (fix 2026-10-27): outside Playoffs mode the playoff strength may fall at most this much. */
+  playoffFloor: { now: -1.0, balanced: -0.5 } as Partial<Record<TradeMode, number>>,
   /** Search bounds. */
   poolSize: 14,
   comboCap: 4000,
@@ -76,6 +78,34 @@ export const V3 = {
 } as const;
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
+
+/**
+ * The gain a mode lists and ranks on (fix 2026-10-27): Playoffs = playoff strength (team strength, pts/wk); Balanced /
+ * Win now = the mode's team score (MODE_WEIGHTS of now / season / playoffs / depth, minus slot-loss aversion).
+ */
+export const modeGain = (j: Pick<Judged3, "strengthDelta" | "myDelta">, mode: TradeMode): number => (mode === "playoffs" ? j.strengthDelta : j.myDelta);
+
+/**
+ * May a judged deal appear on the finder's lists in this mode? Its mode gain ≥ V3.minMyGain (a "marginal" near miss,
+ * where my side fails its bar: > 0), and outside Playoffs mode the playoff strength not below V3.playoffFloor[mode]:
+ * a deal that helps now but not in the playoffs may list in Win now / Balanced, never in Playoffs.
+ */
+export function listsInMode(j: Pick<Judged3, "strengthDelta" | "myDelta">, mode: TradeMode, marginal = false): boolean {
+  const g = modeGain(j, mode);
+  if (!(marginal ? g > 0 : g >= V3.minMyGain)) return false;
+  const floor = V3.playoffFloor[mode];
+  return floor === undefined || j.strengthDelta >= floor;
+}
+
+/** Whether a deal clears this mode's listing bar (listsInMode), as one bullet value (evaluate). */
+export function modeBarText(j: Pick<Judged3, "strengthDelta" | "myDelta">, mode: TradeMode): string {
+  const g = modeGain(j, mode);
+  const what = mode === "playoffs" ? "playoff strength" : "team score";
+  const floor = V3.playoffFloor[mode];
+  if (g < V3.minMyGain) return `fails: ${what} ${fmtSigned(g)} (needs +${V3.minMyGain.toFixed(1)})`;
+  if (floor !== undefined && j.strengthDelta < floor) return `fails: playoff strength ${fmtSigned(j.strengthDelta)} (floor ${fmtSigned(floor)})`;
+  return `clears: ${what} ${fmtSigned(g)}${floor !== undefined ? `, playoff strength ${fmtSigned(j.strengthDelta)}` : ""}`;
+}
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
@@ -552,8 +582,8 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     // misses (my side fails) are ranked on it.
     const listable = classifiable({ myOk: !myFail, partnerOk: !theirFail, fairness, myDelta, myTrueChange, trueGive, trueGet });
     const strengthDelta = opts.lazy && !listable ? NaN : teamStrength(S, myAfter.filter((p) => !me.drops.includes(p)), my.irIds).total - my.strength;
-    // Gem: playoff gain × acceptance, plus a bonus when the perception gaps favour me.
-    const score = acceptance * (strengthDelta + V3.gapBonus * Math.min(V3.gapCap, Math.max(0, gapFavor)));
+    // Gem: the mode's gain (modeGain) × acceptance, plus a bonus when the perception gaps favour me.
+    const score = acceptance * ((mode === "playoffs" ? strengthDelta : myDelta) + V3.gapBonus * Math.min(V3.gapCap, Math.max(0, gapFavor)));
     const edgeSum = get.reduce((a, p) => a + edgeOf(p), 0) - give.reduce((a, p) => a + edgeOf(p), 0);
     const coverItems = give.length ? coverLost(S, my, give, get) : [];
     return {
@@ -799,7 +829,7 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   for (const d of byeItems(S, j, meAfter.lineup)) add(d.label, d.value, d.tone);
   for (const d of qbItems(my, their, give, get) ?? []) add(d.label, d.value, d.tone);
   for (const d of injuredItems(give, get)) add(d.label, d.value, d.tone);
-  add("Rank score", `${j.score.toFixed(2)} = (playoff strength + gap bonus) × acceptance`);
+  add("Rank score", `${j.score.toFixed(2)} = (${mode === "playoffs" ? "playoff strength" : "team score"} + gap bonus) × acceptance`);
   return {
     key,
     me,
@@ -955,11 +985,11 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
       for (const [give, get] of packagesFor(my, their, { maxGive, maxGet, wantPos })) {
         const j = J(give, get);
         simulated++;
-        // Never sell a player whose role is rising, and never suggest a noise-level playoff gain (owner, Model v4);
-        // a "marginal" near miss (my side fails its bar) only needs a real playoff gain (> 0).
+        // Never sell a player whose role is rising, and never suggest a noise-level gain in the chosen mode (owner,
+        // Model v4; mode-aware since 2026-10-27: listsInMode); a "marginal" near miss only needs a real gain (> 0).
         if (give.some((p) => p.riser)) continue;
         const cls = classify(j);
-        if (cls && (cls === "marginal" ? j.strengthDelta > 0 : j.strengthDelta >= V3.minMyGain)) cands.push({ j, their, cls });
+        if (cls && listsInMode(j, mode, cls === "marginal")) cands.push({ j, their, cls });
       }
     }
   };
@@ -1075,6 +1105,7 @@ export function evaluateTradeV3(
   add("Verdict", verdict.replace(/ \(.*\)$/, ""), /^accept/i.test(verdict) ? "pos" : /decline/i.test(verdict) ? "neg" : "warn");
   if (!j.myOk) add("For you", j.myFail, "neg");
   if (!j.partnerOk) add("For them", j.theirFail, "neg");
+  add(`${MODE_LABEL[mode]} bar`, modeBarText(j, mode), listsInMode(j, mode) ? "pos" : "warn");
   for (const [p, r] of flagged) add("Outside the rules", `${p.name}: ${r.startsWith("QB rule") ? "QB rule" : r}`, "warn");
   if (tradeDeadlinePassed(ctx.league)) add("Deadline", "The trade deadline has passed", "warn");
   return { ...trade, details: [...pre, ...(trade.details ?? [])], verdict };
