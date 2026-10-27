@@ -4,15 +4,15 @@
 // (FantasyCalc) only as a minor term. True value = our model. See docs/DESIGN.md "Trade finder v3" and "Release (d)".
 import type { DetailItem, LeagueSettings, Position, SlotKind, Team, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
 import { FLEX_SLOTS, effPpg, eligible, optimalLineup, slotLabels, usable, type LineupResult } from "./lineup.js";
-import { applyTrade, combos, fmtSigned, lineupChanges, names, teamState, tradeDeadlinePassed, type TradeContext } from "./tradeKit.js";
+import { applyTrade, combos, fmtSigned, lineupChanges, names, rosterExcess, teamState, tradeDeadlinePassed, type TradeContext } from "./tradeKit.js";
 import { irSet } from "./analysis.js";
 import { MODE_WEIGHTS, activeRoster, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
 import { injuryKind } from "./projection.js";
-import { edgeOf, marketOf, returnUnconfirmed, trueOf, type ValueSource } from "./market.js";
+import { edgeOf, marketOf, returnUnconfirmed, tradeValueOf, trueOf, type ValueSource } from "./market.js";
 import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
 import { marketTag } from "./labels.js";
-import { returnText } from "./returns.js";
+import { RETURNS, returnText } from "./returns.js";
 import { isSpike, perceivedLineupTotal, perceptionOf, yahooCoverage } from "./perception.js";
 import { teamStrength } from "./teamStrength.js";
 import { weeklyPoints } from "./rosterScore.js";
@@ -21,8 +21,8 @@ import { weeklyPoints } from "./rosterScore.js";
 export const V3 = {
   /** Eligibility: a piece needs market or true value ≥ this (waiver level below). */
   minPieceValue: 3,
-  /** Players out this many weeks or more (or on IR) are not traded. */
-  outWeeks: 4,
+  /** Injured pieces (owner 2026-10-26): an absent player is tradeable when he has ≥ this many games left from his return. */
+  minGamesBack: 3,
   /** QB rule: a QB moves only from a team with two QBs ranked ≤ qbDepthRank to a team whose best QB ranks > qbNeedRank. */
   qbNeedRank: 18,
   qbDepthRank: 14,
@@ -132,7 +132,7 @@ export interface AcceptFactors {
   marketEdgePct: number;
   /** Players they give right after a spike game. */
   spikes: number;
-  /** Players I give beyond what I get (roster spots the partner must free). */
+  /** Roster spots the partner must free (players I give beyond what I get, IR slots counted: rosterExcess). */
   extraGiven: number;
   losesTheirTop: boolean;
   fixesWorst: boolean;
@@ -155,20 +155,40 @@ export function acceptanceV4(f: AcceptFactors): number {
 
 // ---------------------------------------------------------------- eligibility
 
-/** Weeks from now to the final week in which the player has a game (bye excluded). */
-function weeksLeft(p: ValuedPlayer, S: LeagueSettings): number {
+/** His games (bye excluded) from week `from` through the final week. */
+export function gamesFrom(p: ValuedPlayer, S: LeagueSettings, from: number): number {
   let n = 0;
-  for (let w = S.currentWeek; w <= S.finalWeek; w++) if (p.bye !== w) n++;
+  for (let w = Math.max(from, S.currentWeek); w <= S.finalWeek; w++) if (p.bye !== w) n++;
   return n;
 }
 
-/** Why a player cannot be a trade piece (empty string when he can), QB rule aside. */
-export function ineligibleReason(p: ValuedPlayer, S: LeagueSettings, irIds: Set<string> = new Set()): string {
+/** Out for the season: ReturnInfo.seasonOver, or (no return estimate) an injury kind "long" whose detail says "season". */
+export const seasonEnding = (p: ValuedPlayer): boolean =>
+  !!p.ret?.seasonOver || (!p.ret && injuryKind(p.injury) === "long" && /season/i.test(p.injury?.detail ?? ""));
+
+/**
+ * Why a player cannot be a trade piece (empty string when he can), QB rule aside. Injured players (owner 2026-10-26)
+ * are pieces in both directions when he has a few weeks left to play: back with ≥ minGamesBack games through the final
+ * week, or return unconfirmed with a trade value (a bet on his recovery, "½ of healthy") and ≥ minGamesBack games from
+ * the week that value assumes (current + 4, or the IR minimum if later). Out for the season never. An IR slot is not
+ * a reason on its own. The waiver-level check uses the value trades use for him (tradeValue for an unconfirmed return).
+ */
+export function ineligibleReason(p: ValuedPlayer, S: LeagueSettings): string {
   if (p.pos === "K" || p.pos === "DEF") return "K / DEF are streamed, not traded";
-  if (marketOf(p) < V3.minPieceValue && p.value < V3.minPieceValue) return "waiver-level value";
-  const k = injuryKind(p.injury);
-  if (irIds.has(p.id) || k === "long") return "on IR / out long-term";
-  if (!usable(p) || weeksLeft(p, S) - p.remainingGames >= V3.outWeeks - 1e-9 || k === "return") return `out ${V3.outWeeks}+ weeks`;
+  if (seasonEnding(p)) return "out for the season";
+  if (marketOf(p) < V3.minPieceValue && tradeValueOf(p) < V3.minPieceValue) return "waiver-level value";
+  const r = p.ret;
+  if (r?.absent) {
+    if (r.week !== null) {
+      const n = gamesFrom(p, S, r.week);
+      return n >= V3.minGamesBack ? "" : `back ~wk ${r.week}: only ${n} game${n === 1 ? "" : "s"} left`;
+    }
+    if (!(r.tradeValue && r.tradeValue > 0)) return "return unconfirmed, no trade value";
+    const from = Math.max(S.currentWeek + RETURNS.unknownOffset, r.earliestWeek ?? 0);
+    const n = gamesFrom(p, S, from);
+    return n >= V3.minGamesBack ? "" : `return unconfirmed: under ${V3.minGamesBack} games left after wk ${from}`;
+  }
+  if (!usable(p)) return "no games left";
   return "";
 }
 
@@ -255,7 +275,7 @@ export function teamV3(ctx: TradeContext, teamId: string): TeamV3 {
   const S = ctx.league.settings;
   const s = teamBase(ctx, teamId);
   const analysis = ctx.teams.find((t) => t.team.id === teamId);
-  const pieces = s.roster.filter((p) => p.pos !== "QB" && !ineligibleReason(p, S, s.irIds));
+  const pieces = s.roster.filter((p) => p.pos !== "QB" && !ineligibleReason(p, S));
   const deficit = { QB: 0, RB: 0, WR: 0, TE: 0, FLEX: 0 } as Record<Group, number>;
   for (const g of GROUPS) {
     const gr = analysis?.groups[g];
@@ -425,8 +445,11 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     const theirAfter: ValuedPlayer[] = [];
     for (const p of their.roster) if (!get.includes(p)) theirAfter.push(p);
     for (const p of give) theirAfter.push(scaledPlayer(p, overlapFactor(p, theirCore, theirStart).f));
-    const me = rosterParts(S, activeRoster(myAfter, my.irIds), repl, get.length > give.length ? { count: get.length - give.length, keep: (p) => my.irIds.has(p.id) || get.some((g) => g.id === p.id) } : undefined);
-    const th = rosterParts(S, activeRoster(theirAfter, their.irIds), repl, give.length > get.length ? { count: give.length - get.length, keep: (p) => their.irIds.has(p.id) || give.includes(p) } : undefined);
+    // Roster spots each side must free (IR slots counted: rosterExcess, owner 2026-10-26).
+    const myCuts = rosterExcess(S.slots, my.irIds, give, get, their.irIds);
+    const theirCuts = rosterExcess(S.slots, their.irIds, get, give, my.irIds);
+    const me = rosterParts(S, activeRoster(myAfter, my.irIds), repl, myCuts > 0 ? { count: myCuts, keep: (p) => my.irIds.has(p.id) || get.some((g) => g.id === p.id) } : undefined);
+    const th = rosterParts(S, activeRoster(theirAfter, their.irIds), repl, theirCuts > 0 ? { count: theirCuts, keep: (p) => their.irIds.has(p.id) || give.includes(p) } : undefined);
     const myParts = partsDelta(me.parts, my.parts);
     const theirParts = partsDelta(th.parts, their.parts);
     // B: slot loss aversion — a starting slot that drops ≥ 3 ppg counts ×1.5.
@@ -468,8 +491,8 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     const marketGet = packageValue(get.map(riserUp(marketOf)));
     const trueGive = packageValue(give.map(riserUp(trueOf)));
     const trueGet = packageValue(get.map(trueOf));
-    const theirDropP = give.length > get.length ? dropCost(th.drops.map(marketOf)) : 0;
-    const myDropT = get.length > give.length ? dropCost(me.drops.map(trueOf)) : 0;
+    const theirDropP = dropCost(th.drops.map(marketOf));
+    const myDropT = dropCost(me.drops.map(trueOf));
     const theirRecvNet = marketGive - theirDropP;
     const fairness = theirRecvNet / Math.max(1, marketGet);
     const theirMarketChange = theirRecvNet - marketGet;
@@ -524,7 +547,7 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
       perceivedLoss,
       marketEdgePct: (fairness - 1) * 100,
       spikes: spikes.length,
-      extraGiven: give.length - get.length,
+      extraGiven: Math.max(0, theirCuts),
       losesTheirTop,
       fixesWorst,
     });
@@ -693,8 +716,8 @@ export function qbItems(my: TeamV3, their: TeamV3, give: ValuedPlayer[], get: Va
 export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, mode: TradeMode): Trade {
   const S = ctx.league.settings;
   const { give, get } = j;
-  const meAfter = applyTrade(S.slots, my.roster, give, get, my.irIds);
-  const themAfter = applyTrade(S.slots, their.roster, get, give, their.irIds);
+  const meAfter = applyTrade(S.slots, my.roster, give, get, my.irIds, their.irIds);
+  const themAfter = applyTrade(S.slots, their.roster, get, give, their.irIds, my.irIds);
   const me = sideOf(my.team.id, give, my.base, meAfter, j.myParts, j.myDelta, j.marketGive);
   const them = sideOf(their.team.id, get, their.base, themAfter, j.theirParts, combine(j.theirParts, MODE_WEIGHTS.balanced), j.marketGet);
   const key = `${their.team.id}:${give.map((p) => p.id).sort().join(",")}>${get.map((p) => p.id).sort().join(",")}`;
@@ -707,7 +730,7 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   }
   if (j.fixesWorst && their.weakest) tags.push(`fixes their ${their.weakest.slot}`);
   if (give.length > get.length) tags.push("consolidation for them");
-  if (get.length > give.length) tags.push("adds depth (you drop a bench player)");
+  if (meAfter.drops.length) tags.push("adds depth (you drop a bench player)");
   if (give.some((p) => p.pos === "QB") || get.some((p) => p.pos === "QB")) tags.push("spare starting QB");
   if (j.losesTheirTop) tags.push("asks for their best player");
   if (j.theirPerceived > 0 && j.myParts.season > 0) tags.push("helps both");
@@ -717,7 +740,7 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   const lineup = lineupLabel(j.strengthDelta, j.myParts.season, j.theirLineup);
   const market = marketLabel(j.fairness);
   const summary = makeSummary(
-    `${names(give)} for ${names(get)}: playoff lineup ${fmtSigned(j.strengthDelta)}/wk, your team ${fmtSigned(j.myDelta)}.`,
+    `${markedNames(give)} for ${markedNames(get)}: playoff lineup ${fmtSigned(j.strengthDelta)}/wk, your team ${fmtSigned(j.myDelta)}.`,
     `${j.perceivedSource === "yahoo" ? "Yahoo shows" : "Yahoo likely shows"} them ${fmtSigned(j.theirPerceived)} pts, ~${p100}% accept.`,
   );
   const nWeeks = Math.max(1, S.finalWeek - S.currentWeek + 1);
@@ -745,7 +768,7 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   add("True value (ours)", `give ${j.trueGive.toFixed(1)}, get ${j.trueGet.toFixed(1)} (${fmtSigned(j.myTrueChange)})`, toneOf(j.myTrueChange));
   add("Acceptance", `${p100}%: their lineup ${fmtSigned(j.theirPerceived / nWeeks)}/wk (80%), market ${pctSigned((j.fairness - 1) * 100)} (20%)`);
   if (j.perceivedLoss) add("Their view", `a loss for them: acceptance capped at ${pct(V3.perceivedLossCap)}`, "neg");
-  if (give.length > get.length) add("Extra players", `× ${V3.extraPlayerMult} per extra player they must roster`);
+  if (j.theirDrops.length) add("Extra players", `× ${V3.extraPlayerMult} per roster spot they must free`);
   if (j.losesTheirTop) add("Their best player", `× ${V3.loseTopMult}: you ask for their most valued player`);
   if (j.fixesWorst) add("Fixes their weakest slot", `× ${V3.fixesWorstMult}`);
   for (const d of byeItems(S, j, meAfter.lineup)) add(d.label, d.value, d.tone);
@@ -1015,8 +1038,8 @@ export function evaluateTradeV3(
   const qbOk = (p: ValuedPlayer, from: TeamV3, to: TeamV3) => p.pos !== "QB" || qbTradeable(from.roster, to.roster)?.id === p.id;
   const QB_RULE = "QB rule (only a spare top-14 QB, to a team whose best QB ranks worse than 18)";
   const flagged = [
-    ...give.map((p) => [p, ineligibleReason(p, S, my.irIds) || (qbOk(p, my, their) ? "" : QB_RULE)] as const),
-    ...get.map((p) => [p, ineligibleReason(p, S, their.irIds) || (qbOk(p, their, my) ? "" : QB_RULE)] as const),
+    ...give.map((p) => [p, ineligibleReason(p, S) || (qbOk(p, my, their) ? "" : QB_RULE)] as const),
+    ...get.map((p) => [p, ineligibleReason(p, S) || (qbOk(p, their, my) ? "" : QB_RULE)] as const),
   ].filter(([, r]) => r);
   let verdict: string;
   if (j.myOk && j.partnerOk) verdict = j.acceptance >= 0.5 ? "Accept" : "Accept if they will";
@@ -1036,16 +1059,16 @@ export function evaluateTradeV3(
 // ---------------------------------------------------------------- bench-upgrade rule (benchUpgrades.ts)
 
 /**
- * v3 bench-upgrade filter: both players pass the finder's eligibility (no K/DEF, not hurt long-term,
- * QB rule) and are real assets — market ≥ 3 AND our value ≥ 3 — the player I receive has market ≥ 8 or
+ * v3 bench-upgrade filter: both players pass the finder's eligibility (no K/DEF, not out for the season / without
+ * enough games after his return, QB rule) and are real assets — market ≥ 3 AND our trade value ≥ 3 — the player I receive has market ≥ 8 or
  * value ≥ 5, and my rest-of-season weekly lineup rises ≥ 0.8.
  */
 export const BENCH_MIN_SEASON = 0.8;
 export const BENCH_GET_MARKET = 8;
 export const BENCH_GET_VALUE = 5;
 export function benchUpgradeOk(mine: ValuedPlayer, theirs: ValuedPlayer, mySeasonDelta: number): boolean {
-  const worth = (p: ValuedPlayer) => marketOf(p) >= V3.minPieceValue && p.value >= V3.minPieceValue;
-  const asset = marketOf(theirs) >= BENCH_GET_MARKET || theirs.value >= BENCH_GET_VALUE;
+  const worth = (p: ValuedPlayer) => marketOf(p) >= V3.minPieceValue && tradeValueOf(p) >= V3.minPieceValue;
+  const asset = marketOf(theirs) >= BENCH_GET_MARKET || tradeValueOf(theirs) >= BENCH_GET_VALUE;
   return worth(mine) && worth(theirs) && asset && mySeasonDelta >= BENCH_MIN_SEASON;
 }
 
@@ -1057,12 +1080,21 @@ export function benchUpgradeFilter(ctx: TradeContext, myTeamId: string) {
   return (mine: ValuedPlayer, theirs: ValuedPlayer, mySeasonDelta: number, partnerId: string): boolean => {
     let their = teams.get(partnerId);
     if (!their) teams.set(partnerId, (their = teamV3(ctx, partnerId)));
-    if (ineligibleReason(mine, S, my.irIds) || ineligibleReason(theirs, S, their.irIds)) return false;
+    if (ineligibleReason(mine, S) || ineligibleReason(theirs, S)) return false;
     if (mine.pos === "QB" && qbTradeable(my.roster, their.roster)?.id !== mine.id) return false;
     if (theirs.pos === "QB" && qbTradeable(their.roster, my.roster)?.id !== theirs.id) return false;
     return benchUpgradeOk(mine, theirs, mySeasonDelta);
   };
 }
+
+/** Row-summary marker for an injured piece: " (injured, back ~wk 10)" / " (injured, return unconfirmed)"; "" otherwise. */
+export function injuryMarker(p: ValuedPlayer): string {
+  if (!p.ret?.absent) return "";
+  return p.ret.week !== null ? ` (injured, back ~wk ${p.ret.week})` : " (injured, return unconfirmed)";
+}
+
+/** "A + B (injured, back ~wk 10)": names with the injury marker, the one wording every trade row summary uses. */
+export const markedNames = (ps: ValuedPlayer[]): string => ps.map((p) => `${p.name}${injuryMarker(p)}`).join(" + ") || "nothing";
 
 /** Release (c): an out player in the deal is valued on his return estimate, not 0 — say so on the card. */
 export function injuredItems(give: ValuedPlayer[], get: ValuedPlayer[]): DetailItem[] {

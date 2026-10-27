@@ -75,3 +75,19 @@ test("IR slot: teamBase scores lineup and depth without the team's IR-slotted pl
   assert.equal(me.parts.depth, without.depth);
   assert.equal(me.total, me0.total);
 });
+
+test("bench upgrades (owner 2026-10-26): an injured piece back in 2 weeks can be the target; the row carries the marker and the card the return line", () => {
+  // Their other bench WRs at waiver-level value (still depth, so he stays on their bench), so my one tradeable bench
+  // piece (≤ 2 offers) is not used up on healthier targets.
+  const t = theirs.map((p) => (p.id === "tWR4" || p.id === "tWR5" ? { ...p, value: 2 } : p)).map((p) => (p.id === "tWR3" ? { ...p, ppg: 10, value: 9, remainingGames: 12, injury: { status: "Out", week: 4 }, ret: { week: 6, confidence: "medium" as const, reasons: [], absent: true, practiceUp: false } } : { ...p }));
+  // tWR3 (10 ppg, out 2 weeks) sits on their bench, not in their IR slot (an IR-slot target would cost them a cut for
+  // the active player they get back: market fairness < 0.9 here).
+  const c = ctxFor(league([team("me", mine.map((p) => ({ ...p }))), team("them", t)]), [...mine, ...t]);
+  const ups = findBenchUpgrades(c, "me");
+  const hit = ups.find((u) => u.them.gives[0].id === "tWR3");
+  assert.ok(hit, `targets: ${ups.map((u) => u.key).join(", ")}`);
+  assert.match(hit.summary, /for tWR3 \(injured, back ~wk 6\): /);
+  assert.ok(hit.details!.some((d) => d.label === "Injured, you get" && /^tWR3: back ~wk 6/.test(d.value)), JSON.stringify(hit.details));
+  assert.deepEqual(summaryProblems(hit.summary), []);
+  assert.deepEqual(detailProblems(hit.details ?? []), []);
+});

@@ -3,7 +3,7 @@
 import type { DetailItem, Trade, ValuedPlayer } from "./types.js";
 import { effPpg, eligible } from "./lineup.js";
 import { fmtSigned, tradeDeadlinePassed, tradeable, type TradeContext } from "./tradeKit.js";
-import { benchUpgradeFilter, buildTrade3, judge3, qbItems, teamV3, type Judged3, type TeamV3 } from "./tradesV3.js";
+import { benchUpgradeFilter, buildTrade3, injuredItems, judge3, markedNames, qbItems, teamV3, type Judged3, type TeamV3 } from "./tradesV3.js";
 import type { TradeMode } from "./rosterScore.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
 
@@ -101,8 +101,8 @@ export function findBenchUpgrades(ctx: TradeContext, myTeamId: string, opts: { m
     gotSeen.add(g.id);
     gaveSeen.set(m.id, (gaveSeen.get(m.id) ?? 0) + 1);
     const t = buildTrade3(ctx, j, my, their, mode);
-    t.summary = makeSummary(`${m.name} for ${g.name}: your season lineup ${fmtSigned(j.myParts.season)} pts/wk.`, `${j.perceivedSource === "yahoo" ? "Yahoo shows" : "Yahoo likely shows"} them ${fmtSigned(j.theirPerceived)} pts, ~${Math.round(j.acceptance * 100)}% accept.`);
-    t.details = [...upgradeItems(ctx, j, my, m, g), ...(qbItems(my, their, [m], [g]) ?? [])];
+    t.summary = makeSummary(`${markedNames([m])} for ${markedNames([g])}: your season lineup ${fmtSigned(j.myParts.season)} pts/wk.`, `${j.perceivedSource === "yahoo" ? "Yahoo shows" : "Yahoo likely shows"} them ${fmtSigned(j.theirPerceived)} pts, ~${Math.round(j.acceptance * 100)}% accept.`);
+    t.details = [...upgradeItems(ctx, j, my, m, g), ...(qbItems(my, their, [m], [g]) ?? []), ...injuredItems([m], [g])];
     if (j.myParts.depth > 0.05 && !t.tags.includes("depth upgrade")) t.tags.unshift("depth upgrade");
     picked.push(t);
     if (picked.length >= (opts.limit ?? BENCH.limit)) break;

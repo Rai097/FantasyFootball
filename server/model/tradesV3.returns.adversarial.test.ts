@@ -7,7 +7,7 @@ import { evaluateTradeV3, findTradesV3 } from "./tradesV3.js";
 import type { TradeContext } from "./tradeKit.js";
 import { analyzeTeams } from "./analysis.js";
 import { attachMarket } from "./market.js";
-import { detailProblems, league, team, vp } from "./testkit.js";
+import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { League, ReturnInfo, ValuedPlayer } from "./types.js";
 import type { MarketValue } from "../data/fantasycalc.js";
 
@@ -63,17 +63,28 @@ test("evaluate: an out player I GIVE is valued on his return estimate (true valu
   assert.ok(!/^Accept/.test(ev.verdict), ev.verdict);
 });
 
-test("finder: IR / return-unconfirmed players on either roster are never a piece; still never sells a riser or a gain < 1.0", () => {
+test("finder (owner 2026-10-26): a return-unconfirmed piece with trade value may appear, always carded as a bet on his recovery; out for the season never; riser / gain < 1.0 still hold", () => {
   const c = make();
   c.players.get("mRB3")!.riser = true;
   const r = findTradesV3(c, "me", { valueSource: "model", limit: 50 });
   const all = [...r.trades, ...r.smallerEdges, ...r.nearMisses];
   assert.ok(all.length > 0, "baseline finds trades");
   for (const t of all) {
-    const ids = [...t.me.gives, ...t.them.gives].map((p) => p.id);
-    assert.ok(!ids.includes("mIR") && !ids.includes("tIR"), `${t.key} moves an IR player`);
     assert.ok(!t.me.gives.some((p) => p.id === "mRB3"), `${t.key} sells the riser`);
     assert.ok(t.me.scoreDelta === undefined || t.me.scoreDelta >= 1.0 - 1e-9, `${t.key}: gain ${t.me.scoreDelta}`);
+    for (const p of [...t.me.gives, ...t.them.gives].filter((x) => x.id === "mIR" || x.id === "tIR")) {
+      assert.ok(t.details!.some((d) => /^Injured, you (give|get)$/.test(d.label) && d.value.startsWith(`${p.id}: return unconfirmed, a bet on his recovery`)), `${t.key}: card for ${p.id}`);
+      assert.ok(t.summary!.includes(`${p.id} (injured, return unconfirmed)`), t.summary);
+    }
+    assert.deepEqual(summaryProblems(t.summary!), [], t.key);
+  }
+  // Out for the season: never a piece in any list.
+  const so = make();
+  for (const id of ["mIR", "tIR"]) so.players.get(id)!.ret = { ...so.players.get(id)!.ret!, seasonOver: true };
+  const r2 = findTradesV3(so, "me", { valueSource: "model", limit: 50 });
+  for (const t of [...r2.trades, ...r2.smallerEdges, ...r2.nearMisses]) {
+    const ids = [...t.me.gives, ...t.them.gives].map((p) => p.id);
+    assert.ok(!ids.includes("mIR") && !ids.includes("tIR"), `${t.key} moves a player out for the season`);
   }
 });
 

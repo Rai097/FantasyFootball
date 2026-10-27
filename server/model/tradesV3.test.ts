@@ -26,6 +26,7 @@ import type { TradeContext } from "./tradeKit.js";
 import { analyzeTeams } from "./analysis.js";
 import { attachMarket } from "./market.js";
 import { rosterParts } from "./rosterScore.js";
+import { perceptionOf } from "./perception.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { League, ValuedPlayer } from "./types.js";
 import type { MarketValue } from "../data/fantasycalc.js";
@@ -84,7 +85,7 @@ test("acceptance v4: their perceived lineup dominates (80%), market 20%; spike, 
 
 // ---------------------------------------------------------------- eligibility
 
-test("eligibility: K/DEF, waiver level, IR / long-term, out 4+ weeks", () => {
+test("eligibility: K/DEF, waiver level, no games left", () => {
   const ok = vp("ok", "WR", 12, 10, G);
   assert.equal(ineligibleReason(ok, S), "");
   assert.match(ineligibleReason(vp("k", "K", 8, 5, G), S), /K \/ DEF/);
@@ -94,12 +95,43 @@ test("eligibility: K/DEF, waiver level, IR / long-term, out 4+ weeks", () => {
   assert.equal(ineligibleReason(vp("m", "WR", 6, 1, { ...G, market: 4 }), S), "");
   assert.equal(ineligibleReason(vp("t", "WR", 6, 4, { ...G, market: 1 }), S), "");
   assert.match(ineligibleReason(vp("mw", "WR", 6, 1, { ...G, market: 2 }), S), /waiver/);
-  assert.match(ineligibleReason(ok, S, new Set(["ok"])), /IR/);
-  assert.match(ineligibleReason(vp("ir", "WR", 12, 10, { ...G, injury: { status: "IR", week: 4 } }), S), /IR/);
-  // 14 weeks left (4..17, no bye); 10 remaining games = out 4 weeks.
-  assert.match(ineligibleReason(vp("o4", "WR", 12, 10, { remainingGames: 10 }), S), /out 4\+ weeks/);
-  assert.equal(ineligibleReason(vp("o2", "WR", 12, 10, { remainingGames: 12 }), S), "");
-  assert.match(ineligibleReason(vp("r", "WR", 12, 10, { ...G, injury: { status: "Out", detail: "IR-R designation to return", week: 4 } }), S), /out 4\+ weeks|IR/);
+  assert.match(ineligibleReason(vp("none", "WR", 12, 10, { remainingGames: 0 }), S), /no games left/);
+});
+
+// Owner 2026-10-26: injured players are pieces (both directions) with a few weeks left; never out for the season.
+// S: weeks 4..17, no bye.
+const backIn = (id: string, week: number, extra: Partial<ValuedPlayer> = {}) =>
+  vp(id, "WR", 12, 10, { remainingGames: 17 - week + 1, injury: { status: "IR-R", week: 4 }, ret: { week, confidence: "medium", reasons: [], absent: true, practiceUp: false }, ...extra });
+const unconfirmed = (id: string, tradeValue: number | undefined, extra: Partial<ValuedPlayer> = {}) =>
+  vp(id, "WR", 0, 0, { remainingGames: 0, injury: { status: "IR", week: 4 }, ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false, ...(tradeValue !== undefined ? { tradeValue } : {}) }, ...extra });
+
+test("injured pieces: back with ≥ 3 games left is eligible; the IR slot is not a reason; 2 games left is not", () => {
+  assert.equal(V3.minGamesBack, 3);
+  assert.equal(ineligibleReason(backIn("b6", 6), S), "", "back in 2 weeks");
+  assert.equal(ineligibleReason(backIn("b15", 15), S), "", "weeks 15, 16, 17 = 3 games");
+  assert.match(ineligibleReason(backIn("b16", 16), S), /back ~wk 16: only 2 games left/);
+  // A bye inside the window counts as no game.
+  assert.match(ineligibleReason(backIn("b15bye", 15, { bye: 16 }), S), /only 2 games left/);
+  // Late-season week: back next week with 3 games → yes.
+  const late = league([], undefined, { currentWeek: 14 }).settings;
+  assert.equal(ineligibleReason(backIn("b15late", 15), late), "");
+});
+
+test("injured pieces: return unconfirmed + trade value > 0 is eligible (a bet on his recovery); no value or too late is not", () => {
+  assert.equal(ineligibleReason(unconfirmed("u", 40), S), "", "waiver check uses his trade value, not value 0");
+  assert.match(ineligibleReason(unconfirmed("u0", undefined, { market: 5 }), S), /return unconfirmed, no trade value/);
+  assert.match(ineligibleReason(unconfirmed("u1", 1), S), /waiver/, "trade value below waiver level");
+  // The value assumes he is back at current week + 4: late in the season that leaves < 3 games.
+  assert.match(ineligibleReason(unconfirmed("ulate", 40), league([], undefined, { currentWeek: 13 }).settings), /under 3 games left after wk 17/);
+  // The IR minimum pushes the assumed return later.
+  assert.match(ineligibleReason(unconfirmed("umin", 40, { ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false, tradeValue: 40, earliestWeek: 16 } }), S), /after wk 16/);
+});
+
+test("injured pieces: out for the season is never a piece, whatever the market says", () => {
+  const so = unconfirmed("so", undefined, { market: 30, ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false, seasonOver: true } });
+  assert.equal(ineligibleReason(so, S), "out for the season");
+  // No return estimate attached (older fixtures / sources): the injury detail is the signal.
+  assert.equal(ineligibleReason(vp("so2", "WR", 12, 10, { ...G, market: 30, injury: { status: "IR", detail: "Knee - out for season", week: 4 } }), S), "out for the season");
 });
 
 test("QB rule: only a spare top-14 QB, only to a team whose best QB ranks worse than 18", () => {
@@ -360,7 +392,9 @@ test("IR slot: teamV3 never starts a healthy IR-slotted player and scores the ro
   const me = teamV3(c, "me");
   assert.ok(!me.base.lineup.some((l) => l.player?.id === "mWR1"));
   assert.ok(!me.starters.has("mWR1") && !me.starterList.some((p) => p.id === "mWR1"));
-  assert.ok(!me.pieces.some((p) => p.id === "mWR1"), "IR players are not offered");
+  // Owner 2026-10-26: the IR slot alone is not a reason — he is offered when he passes eligibility.
+  assert.equal(ineligibleReason(P("mWR1"), c.league.settings), "");
+  assert.ok(me.pieces.some((p) => p.id === "mWR1"), "an eligible IR-slot player is a piece");
   const without = rosterParts(c.league.settings, mine.filter((p) => p.id !== "mWR1"), REPL).parts;
   assert.equal(me.parts.now, without.now);
   assert.equal(me.parts.depth, without.depth);
@@ -530,4 +564,93 @@ test("lazy judge (finder search) skips team strength only for candidates no list
     }
   }
   assert.ok(computed > 0);
+});
+
+// ---------------------------------------------------------------- injured trade pieces (owner 2026-10-26)
+
+/** A WR back in week `week` (current week 4, weeks 4..17): our weekly points are 0 before, ppg after. */
+const injuredWr = (id: string, week: number, ppg: number, value: number, name = id): ValuedPlayer => {
+  const p = backIn(id, week, { ppg, value, name, weekly: Array.from({ length: 14 }, (_, i) => (4 + i < week ? 0 : ppg)), weeklyFrom: 4 });
+  return p;
+};
+function injuredCtx(o: { myIr?: boolean; theirIrWeek?: number } = {}) {
+  const m = mine.map((p) => ({ ...p }));
+  const t = theirs.map((p) => ({ ...p }));
+  const mIRB = injuredWr("mIRB", 6, 13, 12);
+  const tIRB = injuredWr("tIRB", o.theirIrWeek ?? 6, 14, 15);
+  mIRB.team = "PHI";
+  tIRB.team = "PIT";
+  const meTeam = o.myIr ? team("me", [...m, mIRB], { irPlayerIds: ["mIRB"] }) : team("me", m);
+  return ctxFor(league([meTeam, team("them", [...t, tIRB], { irPlayerIds: ["tIRB"] })]), [...m, ...t, mIRB, tIRB]);
+}
+
+test("injured pieces: back in 2 weeks is a piece on both rosters (IR slot too); cards say 'back ~wk 6' and the row summary carries the marker", () => {
+  const c = injuredCtx({ myIr: true });
+  assert.ok(teamV3(c, "me").pieces.some((p) => p.id === "mIRB"), "my IR-slot player, back in 2 weeks");
+  assert.ok(teamV3(c, "them").pieces.some((p) => p.id === "tIRB"), "their IR-slot player, back in 2 weeks");
+  const buy = evaluateTradeV3(c, "me", "them", ["mWR2"], ["tIRB"]);
+  assert.ok(buy.details!.some((d) => d.label === "Injured, you get" && /^tIRB: back ~wk 6 \(medium\), valued from his return/.test(d.value)), JSON.stringify(buy.details));
+  assert.ok(buy.summary!.startsWith("mWR2 for tIRB (injured, back ~wk 6): "), buy.summary);
+  assert.ok(!buy.details!.some((d) => d.label === "Outside the rules"), "inside the rules");
+  const sell = evaluateTradeV3(c, "me", "them", ["mIRB"], ["tWR5"]);
+  assert.ok(sell.details!.some((d) => d.label === "Injured, you give" && /^mIRB: back ~wk 6/.test(d.value)));
+  assert.ok(sell.summary!.startsWith("mIRB (injured, back ~wk 6) for tWR5: "), sell.summary);
+  assert.deepEqual(detailProblems(sell.details!), []);
+});
+
+test("injured pieces: back with only 2 games left is not a piece; evaluate flags him outside the rules", () => {
+  const c = injuredCtx({ theirIrWeek: 16 });
+  assert.ok(!teamV3(c, "them").pieces.some((p) => p.id === "tIRB"));
+  const ev = evaluateTradeV3(c, "me", "them", ["mWR2"], ["tIRB"]);
+  assert.ok(ev.details!.some((d) => d.label === "Outside the rules" && /tIRB: back ~wk 16: only 2 games left/.test(d.value)), JSON.stringify(ev.details));
+});
+
+test("injured pieces: roster spots — an incoming IR player fills my free IR slot (no cut); my IR full → a cut; my IR player traded away → a cut", () => {
+  // Free IR slot: tIRB + tWR5 for mRB4 needs no cut; the partner frees an IR spot and a bench spot for one player.
+  const free = injuredCtx();
+  const jf = judge3(free, teamV3(free, "me"), teamV3(free, "them"), "balanced")([free.players.get("mRB4")!], [free.players.get("tIRB")!, free.players.get("tWR5")!]);
+  assert.deepEqual(jf.myDrops, []);
+  assert.deepEqual(jf.theirDrops, []);
+  const evf = evaluateTradeV3(free, "me", "them", ["mRB4"], ["tIRB", "tWR5"]);
+  assert.ok(!evf.details!.some((d) => d.label === "You cut"), "no cut with a free IR slot");
+  assert.ok(!evf.tags.includes("adds depth (you drop a bench player)"));
+  // My IR slot is full (mIRB): tIRB takes a bench spot → I cut my lowest-value bench player, on the card too.
+  const full = injuredCtx({ myIr: true });
+  const ju = judge3(full, teamV3(full, "me"), teamV3(full, "them"), "balanced")([full.players.get("mRB4")!], [full.players.get("tIRB")!, full.players.get("tWR5")!]);
+  assert.deepEqual(ju.myDrops.map((p) => p.id), ["mBN"]);
+  const evu = evaluateTradeV3(full, "me", "them", ["mRB4"], ["tIRB", "tWR5"]);
+  assert.ok(evu.details!.some((d) => d.label === "You cut" && d.value === "mBN"), JSON.stringify(evu.details));
+  // 1-for-1, I give my IR-slot player for a healthy one: my active roster grows → one cut; the partner (IR full) too
+  // gives an active player for an IR-eligible one with no IR room: no change for them.
+  const jg = judge3(full, teamV3(full, "me"), teamV3(full, "them"), "balanced")([full.players.get("mIRB")!], [full.players.get("tWR5")!]);
+  assert.deepEqual(jg.myDrops.map((p) => p.id), ["mBN"]);
+  assert.deepEqual(jg.theirDrops, []);
+  const evg = evaluateTradeV3(full, "me", "them", ["mIRB"], ["tWR5"]);
+  assert.ok(evg.details!.some((d) => d.label === "You cut" && d.value === "mBN"));
+  assert.ok(evg.packages!.myTrueChange < jg.trueGet - jg.trueGive + 1e-9, "the cut's value is charged to my side");
+});
+
+test("injured pieces: the partner's perceived view counts only his weeks back (fix round 1), so he is worth less to them than a healthy twin", () => {
+  const c = injuredCtx({ myIr: true });
+  const S4 = c.league.settings;
+  const inj = c.players.get("mIRB")!;
+  // Good enough to start for them once back (their WRs: 19, 15, 14 start).
+  inj.ppg = 25;
+  inj.weekly = inj.weekly!.map((v) => (v > 0 ? 25 : 0));
+  assert.deepEqual(perceptionOf(inj, S4).weekly.slice(0, 3).map((v) => v > 0), [false, false, true]);
+  const twin: ValuedPlayer = { ...inj, id: "mTWIN", name: "mTWIN", ret: undefined, injury: undefined, weekly: Array(14).fill(inj.ppg), remainingGames: 14 };
+  const ct = ctxFor(league([team("me", [...mine.map((p) => ({ ...p })), twin]), team("them", theirs.map((p) => ({ ...p })))]), [...mine, ...theirs, twin]);
+  const jInj = judge3(c, teamV3(c, "me"), teamV3(c, "them"), "balanced")([inj], [c.players.get("tWR5")!]);
+  const jTwin = judge3(ct, teamV3(ct, "me"), teamV3(ct, "them"), "balanced")([twin], [ct.players.get("tWR5")!]);
+  assert.ok(jInj.theirPerceived < jTwin.theirPerceived, `injured ${jInj.theirPerceived} vs healthy ${jTwin.theirPerceived}`);
+});
+
+test("injured pieces: row summary with markers stays ≤ 255 chars on a 3-for-1 with two injured long-named players", () => {
+  const c = injuredCtx({ myIr: true });
+  c.players.get("mIRB")!.name = "Christopherson Longfellow-Whitaker Jr.";
+  c.players.get("tIRB")!.name = "Bartholomew Montgomery-Fitzgerald III";
+  c.players.get("mRB3")!.name = "Maximilian Alexander Featherstonehaugh";
+  const ev = evaluateTradeV3(c, "me", "them", ["mIRB", "mRB3", "mRB4"], ["tIRB"]);
+  assert.match(ev.summary!, /Christopherson Longfellow-Whitaker Jr\. \(injured, back ~wk 6\)/);
+  assert.deepEqual(summaryProblems(ev.summary!), [], ev.summary);
 });
