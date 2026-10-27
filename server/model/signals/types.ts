@@ -117,7 +117,7 @@ export interface Efficiency {
   raw: number;
   /** Shrunk toward 1.0 with pseudo-count k games, then capped per position. */
   shrunk: number;
-  /** Effective sample size (sum of weights). */
+  /** Sample size in games (unflagged 1, flagged 0.25). */
   n: number;
 }
 

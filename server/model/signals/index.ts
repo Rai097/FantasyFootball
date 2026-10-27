@@ -1,7 +1,7 @@
 // Model v4 player signals (docs/DESIGN.md "Model v4", section 1 + amendments). Pure: inputs come from
 // server/data/signalTables.ts; nothing in the app consumes these yet (release (a) is an enabler).
 import type { Scoring } from "../types.js";
-import { contextFlags, isFlagged } from "./context.js";
+import { contextFlags, FLAGGED_WEIGHT, isFlagged } from "./context.js";
 import { efficiencyOf } from "./efficiency.js";
 import { luckOf } from "./luck.js";
 import { weekOpportunity } from "./opportunity.js";
@@ -43,7 +43,14 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
     rates[k] = weightedRate(vals, weights);
     seasonAvg[k] = plainMean(vals);
   }
-  const luckGames = weeks.map((w, i) => ({ expPts: w.expPts, actPts: w.actPts, expected: games[i].expected, actual: games[i].actual, weight: w.weight }));
+  const luckGames = weeks.map((w, i) => ({
+    expPts: w.expPts,
+    actPts: w.actPts,
+    expected: games[i].expected,
+    actual: games[i].actual,
+    weight: w.weight,
+    sample: w.flagged ? FLAGGED_WEIGHT : 1,
+  }));
   return {
     id: p.id,
     name: p.name,

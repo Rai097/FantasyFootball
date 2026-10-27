@@ -810,8 +810,9 @@ Owner-specific worked cases live outside the repo (public).
 * Choices (calibration, revisit after the first real-league run):
   - RB target weight = 1.4 + 1.4·`scoring.rec` (2.8 full PPR, 2.1 half, 1.4 standard) — a literal 2.8·rec would make
     a standard-league target worth nothing.
-  - Efficiency shrinkage read as totals over n games + k = 6 pseudo-games of his average: (n·raw + k)/(n + k), n = sum
-    of game weights (the literal formula has no sample-size term); null below 0.5 weighted expected pts/game.
+  - Efficiency shrinkage read as totals over n games + k = 6 pseudo-games of his average: (n·raw + k)/(n + k); raw is
+    recency-weighted, n counts games (unflagged 1, flagged 0.25, no decay — decayed weights sum to ≤ ~3.4 and would
+    never approach k). The literal formula has no sample-size term. Null below 0.5 weighted expected pts/game.
   - `qbOut` is never set on a QB's own games; usual-starter ties go to the earlier starter.
   - `leftEarly` "before" = mean snap share of his earlier games this season with known snaps (constants from breakouts).
   - Luck `driver` = "td" when |TD part| ≥ |yardage part|; fumbles have no expected value, so they count as yardage luck.
@@ -819,3 +820,6 @@ Owner-specific worked cases live outside the repo (public).
 * Data finding: with the amendment thresholds, 120 of the 356 players with a known trend are "rising" (87 of 263 WR/TE):
   +0.03 WOPR/game is small next to weekly noise, and skipping flagged games can stretch the 3-game window. Re-check
   before release (b)/(d) relies on "rising".
+* Known residuals for (b): "most frequent starter" flags a returning opening-day starter's games as `qbOut` (e.g. a
+  team whose backup started 5 of 7: the starter's weeks 1 and 7 are flagged); 107 of 536 players carry ≥ 1 qbOut game.
+  Signal memos live for the process lifetime (the player DB rebuilds every 6 h) — (b) adds the same staleness window.

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { efficiencyOf, SHRINK_K } from "./efficiency.js";
 
-const games = (n: number, exp: number, act: number) => Array.from({ length: n }, () => ({ expPts: exp, actPts: act, weight: 1 }));
+const games = (n: number, exp: number, act: number) => Array.from({ length: n }, () => ({ expPts: exp, actPts: act, weight: 1, sample: 1 }));
 
 test("shrinkage: (n·raw + k)/(n + k) with k = 6 — more games, less shrink", () => {
   const two = efficiencyOf(games(2, 10, 12), "WR")!;
@@ -23,4 +23,19 @@ test("per-position caps: RB/TE 0.75-1.35, WR 0.8-1.3, QB 0.85-1.2", () => {
 test("too little expected volume → null", () => {
   assert.equal(efficiencyOf(games(3, 0.2, 5), "WR"), null);
   assert.equal(efficiencyOf([], "WR"), null);
+});
+
+test("sample size counts games, not decayed recency weights: 17 games shrink less than 3", () => {
+  const decayed = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ expPts: 10, actPts: 12, weight: Math.pow(0.5, (n - 1 - i) / 2), sample: 1 }));
+  const three = efficiencyOf(decayed(3), "WR")!;
+  const seventeen = efficiencyOf(decayed(17), "WR")!;
+  assert.equal(seventeen.n, 17);
+  assert.ok(seventeen.shrunk > three.shrunk, `${seventeen.shrunk} vs ${three.shrunk}`);
+  assert.ok(Math.abs(seventeen.shrunk - (17 * 1.2 + 6) / 23) < 1e-12);
+});
+
+test("flagged games count 0.25 toward the sample", () => {
+  const g = [{ expPts: 10, actPts: 12, weight: 1, sample: 1 }, { expPts: 10, actPts: 12, weight: 0.25, sample: 0.25 }];
+  assert.equal(efficiencyOf(g, "WR")!.n, 1.25);
 });
