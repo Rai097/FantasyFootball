@@ -15,16 +15,17 @@ VERIFIED 2026-10-26 on the owner's v2 import (real Yahoo pages): standings 12/12
    edge-cached the old ".js" bookmarklet for 4 h).
 MODEL v4 (DESIGN "Model v4"): (a) signals, (b) projection v4 / labels / power score v2 / no riser sales, (c) returns +
    stash watch + IR "hold" values SHIPPED 2026-10-26 (acceptance cases checked on a data copy — see Claude's memory).
-   (d) BUILT 2026-10-26 (DESIGN "Release (d) implemented"): import v3 captures Yahoo projections (URL params and
+   (d) SHIPPED 2026-10-26 (live 3a97173; also: my side's consolidation premium uses true values, not market): import v3 captures Yahoo projections (URL params and
    markup UNVERIFIED — check the `projections` diagnostics on the owner's next import), perception.ts, Trades v4
    (acceptance from the partner's Yahoo-style lineup view, spike penalty, lost bye cover, pitch for them, lineup /
    market labels), IR tradeValue fix. Adversarial test done (971a642); fix round 1
-   done (DESIGN "Fix round 1"). Next for (d): review → deploy → owner re-imports with v3. Bench upgrades on the real
+   done (DESIGN "Fix round 1"). Pending: owner drags "Trade Desk import v3" and re-imports; then verify the
+   `projections` diagnostics and the stored projWeek on real data; authenticated smoke check of trades2 on the Mac. Bench upgrades on the real
    league are empty for want of tradeable bench pieces (gate probe, fix round 1), not a mis-set gate.
    Open question for the owner: should the finder suggest IR players (return unconfirmed) as pieces now that they
    carry a value? (eligibility unchanged in (d)). Next release: (e) playoff odds + Best moves.
 NEXT (backlog, highest value first):
-- Right after it (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
+- DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
   they get +16% (why they'd accept)"; pitch text must not say "you win on value" ambiguously; name the projection
   source in the lineup tooltip (ours blends ECR + usage; Yahoo's projections can differ a lot for the same player).
