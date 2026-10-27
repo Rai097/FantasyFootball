@@ -342,7 +342,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const t = sig?.talent;
     const priorRate =
       t && t.priorGames >= V4.priorMinGames && t.priorExpPpg !== null && t.priorActPpg !== null ? (t.priorExpPpg + t.priorActPpg) / 2 : null;
-    const priorW = priorRate !== null ? priorWeight(sampleGames) : 0;
+    // Never more pseudo-games than the prior season actually had (a 4-game 2025 counts as ≤ 4 games).
+    const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames), t!.priorGames) : 0;
     // Touchdowns are the noisiest part of expected points: the TD part regresses toward a baseline (V4.tdK pseudo-games),
     // the rest is unchanged. Not on the actual-points fallback (no expected TDs there).
     let td: TdShrink | null = null;

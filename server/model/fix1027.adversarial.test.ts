@@ -202,7 +202,7 @@ test("small-sample prior and TD regression compose without double counting beyon
   // Effective weight on this season's own TD rate: 3/11 × 3/8 ≈ 10% (documented here; see report).
 });
 
-test("FINDING prior weight exceeds the prior's own games: a 4-game 2025 counts as 5 games next to 3 games this season", { todo: "finding: cap priorWeight at the prior's games" }, () => {
+test("prior weight never exceeds the prior's own games: a 4-game 2025 counts as ≤ 4 games next to 3 games this season", () => {
   const p = rawPlayer("soph", "WR", {
     weeks: games(3, { rec: 7, recYd: 80 }, { rec: 7, recYd: 80 }, { targets: 9, carries: 0, airYards: 90 }),
     prior: { games: 4, line: line({ rec: 2 * 4, recYd: 20 * 4 }) },

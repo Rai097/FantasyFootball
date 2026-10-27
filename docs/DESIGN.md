@@ -1153,7 +1153,8 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   pseudo-games whatever this season's sample. A 3-game player (one flagged) was then ~75% this season. Now the prior
   weighs `max(V4.priorK, V4.priorKSmall − sample games)` pseudo-games, `priorKSmall` = 8 (calibration value): 2.25
   sample games → 5.75, ≥ 6 games → 2 (unchanged, so risers and breakouts with full samples keep their rate; rookies
-  have no prior). The why-line "2025: x pts/game, counts as N games" shows the actual weight. Test: a 3-game 10-ppg
+  have no prior), and never more than the prior season's own games (fix round 2: a 4-game 2025 counts as ≤ 4). The
+  why-line "2025: x pts/game, counts as N games" shows the actual weight. Test: a 3-game 10-ppg
   player with an 18-ppg prior moves ≥ 1 pt toward it; a 7-game player is unchanged.
 * **Cover lost counts FLEX starters**: "Playoff cover lost: X is your only TE backup" ignored a TE starting at W/R/T.
   Now a same-position starter in a FLEX-type slot counts as a backup (the claim needs every such player given and none
