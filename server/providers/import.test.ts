@@ -401,12 +401,36 @@ test("release (d): yahooProj / yahooProjWeekly are kept per player when valid, d
     assert.equal(p.yahooProjWeekly, undefined);
   }
   for (const v of bad.slice(1)) assert.equal(validateImport({ ...body(), teams: [{ id: "1", name: "A", players: [{ name: "X", pos: "WR", yahooProj: v }] }] }).teams[0].players[0].yahooProj, undefined, String(v));
+  s.projWeek = 8; // stamped by the server on POST /api/import
   const l = buildImportLeague(db, s, { season: 2026, currentWeek: 8 });
   assert.equal(l.playerOverrides.P1.yahooProj, 201.46);
   assert.equal(l.playerOverrides.P1.yahooProjWeekly, 22.4);
+  assert.equal(l.playerOverrides.P1.yahooProjWeek, 8);
   assert.equal(PLAYERS[0].yahooProj, undefined, "db entry untouched");
   assert.equal(l.playerOverrides.P2.yahooProj, undefined, "Chase keeps his injury copy, no projection");
   // Old payloads (no projections) are unchanged.
   const old = validateImport(body());
   assert.ok(old.teams.every((t) => t.players.every((p) => p.yahooProj === undefined && p.yahooProjWeekly === undefined)));
+});
+
+test("fix round 1: projections carry their capture week — a later week drops the stale weekly number, keeps the total with its start week", () => {
+  const b = body();
+  b.teams[0].players[0] = { ...b.teams[0].players[0], yahooProj: 200, yahooProjWeekly: 31 } as never;
+  const s = validateImport({ ...b, projWeek: 3 });
+  assert.equal(s.projWeek, undefined, "the capture week is the server's, never the payload's");
+  s.projWeek = 8;
+  const wk8 = buildImportLeague(db, s, { season: 2026, currentWeek: 8 }).playerOverrides.P1;
+  assert.deepEqual([wk8.yahooProj, wk8.yahooProjWeekly, wk8.yahooProjWeek], [200, 31, 8]);
+  const wk9 = buildImportLeague(db, s, { season: 2026, currentWeek: 9 }).playerOverrides.P1;
+  assert.equal(wk9.yahooProjWeekly, undefined, "week 8's Proj is not week 9's");
+  assert.deepEqual([wk9.yahooProj, wk9.yahooProjWeek], [200, 8], "total kept with its start week (perception rescales)");
+  // Unknown capture week (stored before the fix): weekly dropped, total kept as of the current week.
+  delete s.projWeek;
+  const unk = buildImportLeague(db, s, { season: 2026, currentWeek: 8 }).playerOverrides.P1;
+  assert.deepEqual([unk.yahooProj, unk.yahooProjWeekly, unk.yahooProjWeek], [200, undefined, undefined]);
+  // Re-import: the capture week follows the incoming rosters.
+  const prev = { ...validateImport(body()), projWeek: 6 };
+  const inc = { ...validateImport(b), projWeek: 8 };
+  assert.equal(upsertImport(prev, inc).stored.projWeek, 8);
+  assert.equal(upsertImport(prev, validateImport(b)).stored.projWeek, undefined, "never the old import's week for new rosters");
 });

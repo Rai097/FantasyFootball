@@ -697,6 +697,9 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     assert.ok(list.json.some((x: any) => x.id === id && x.numTeams === 12));
     assert.equal(r.json.importedBy, "Admin", "dev mode stamps the import as Admin");
     assert.equal(list.json.find((x: any) => x.id === id).importedBy, "Admin");
+    // The server stamps the NFL week the projections were captured in (release (d) fix round 1).
+    const st = (await get("/api/state")).json;
+    assert.equal((await get(`/api/import/${id}`)).json.projWeek, st.currentWeek);
   });
 
   test("league / analysis / values / trades / waivers work with provider=import", async () => {

@@ -663,6 +663,8 @@ apiRouter.post(
       stored.importedAt = new Date().toISOString();
     } else {
       const incoming = validateImport(body);
+      // Release (d) fix: the NFL week the Yahoo projections belong to (a later week drops the stale weekly number).
+      incoming.projWeek = (await getNflState()).currentWeek;
       // Same Yahoo league again: update rosters in place, keep the user's settings.
       previous = await findExistingImport(incoming);
       if (ownLeague !== undefined && (previous?.id ?? incoming.id) !== ownLeague) throw authErrors.league();

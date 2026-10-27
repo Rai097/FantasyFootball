@@ -69,6 +69,9 @@ export interface StoredImport {
   /** Who ran the latest import / re-import: the signed-in Discord display name ("Admin" in dev mode). Set by the
    *  server (POST /api/import), never taken from the payload. Absent on imports saved before release 5. */
   importedBy?: string;
+  /** NFL week the players' Yahoo projections were captured in (the calendar's current week at POST /api/import). Set
+   *  by the server, never taken from the payload. Absent = unknown age: the weekly number is dropped as stale. */
+  projWeek?: number;
 }
 
 export interface ImportSummary {
@@ -466,6 +469,21 @@ export function resolvePlayer(db: Finder, p: ImportPlayerRaw): Player | undefine
   return findPlayer(db, entryOf(p));
 }
 
+/**
+ * The Yahoo projections a player carries in `currentWeek`, from an import captured in `projWeek` (undefined = unknown).
+ * This week's number only while the capture week IS the current week (a stale "Proj" is never served as a later
+ * week's); the rest-of-season total is kept with its start week, so perception spreads it over the games it covered.
+ */
+export function projectionsFor(raw: ImportPlayerRaw, projWeek: number | undefined, currentWeek: number): Pick<Player, "yahooProj" | "yahooProjWeekly" | "yahooProjWeek"> | undefined {
+  const out: Pick<Player, "yahooProj" | "yahooProjWeekly" | "yahooProjWeek"> = {};
+  if (raw.yahooProj !== undefined) {
+    out.yahooProj = raw.yahooProj;
+    if (projWeek !== undefined) out.yahooProjWeek = projWeek;
+  }
+  if (raw.yahooProjWeekly !== undefined && projWeek === currentWeek) out.yahooProjWeekly = raw.yahooProjWeekly;
+  return Object.keys(out).length ? out : undefined;
+}
+
 export function buildImportLeague(db: Finder, s: StoredImport, ctx: { season: number; currentWeek: number }): ImportLeague {
   const overrides: Record<string, Player> = {};
   const teams: Team[] = s.teams.map((t) => {
@@ -484,11 +502,8 @@ export function buildImportLeague(db: Finder, s: StoredImport, ctx: { season: nu
       if (sel === "IR" || sel === "IL") irPlayerIds.push(p.id);
       // Copy with Yahoo's injury tag and projections; the shared db entry is never mutated.
       let copy = withYahooStatus(p, entryOf(raw), ctx.currentWeek);
-      if (raw.yahooProj !== undefined || raw.yahooProjWeekly !== undefined) {
-        copy = { ...(copy ?? p) };
-        if (raw.yahooProj !== undefined) copy.yahooProj = raw.yahooProj;
-        if (raw.yahooProjWeekly !== undefined) copy.yahooProjWeekly = raw.yahooProjWeekly;
-      }
+      const proj = projectionsFor(raw, s.projWeek, ctx.currentWeek);
+      if (proj) copy = { ...(copy ?? p), ...proj };
       if (copy) overrides[p.id] = copy;
     }
     return {
@@ -771,5 +786,7 @@ export function upsertImport(existing: StoredImport, incoming: StoredImport): { 
   const leagueId = incoming.leagueId ?? existing.leagueId;
   if (leagueId) next.leagueId = leagueId;
   if (incoming.diagnostics) next.diagnostics = incoming.diagnostics;
+  // The rosters (and their projections) are the incoming ones: so is the capture week (never the old import's).
+  if (incoming.projWeek !== undefined) next.projWeek = incoming.projWeek;
   return { stored: next, changes: diffSnapshots(snapshotOf(existing), snapshotOf(next)) };
 }
