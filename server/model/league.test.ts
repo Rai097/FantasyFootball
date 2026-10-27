@@ -81,6 +81,7 @@ test("power: 0-0 record is unknown, not a divide by zero", () => {
   assert.equal(actualPpg({ wins: 0, losses: 0, ties: 0, pointsFor: 0 }), null);
   assert.equal(actualPpg(undefined), null);
   assert.equal(actualPpg({ wins: 1, losses: 0, ties: 1, pointsFor: 250 }), 125);
+  assert.equal(actualPpg({ wins: 3, losses: 3, ties: 0, pointsFor: 0 }), null, "0 points for after 6 games = results unknown, not 0");
 });
 
 test("power ties: broken by bench strength, then wins (bench is not in the score)", () => {

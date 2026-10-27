@@ -473,7 +473,7 @@ function route(method: string, url: URL, body: unknown): unknown {
   if (method === "GET" && p === "/api/import") return [];
   if (method === "GET" && p === "/api/import/bookmarklet.js") return { url: "javascript:alert('Mock mode: run the real server to get the bookmarklet.')" };
   if (p.startsWith("/api/import")) throw new ApiError("Importing is not available in mock mode", 400, "Run the real server (npm run dev) to import a league.");
-  const m = p.match(/^\/api\/league\/(demo|yahoo|import)\/([^/]+)(?:\/(analysis|trades|trades2|bench-upgrades|trade\/evaluate|waivers|breakouts|values|league))?$/);
+  const m = p.match(/^\/api\/league\/(demo|yahoo|import)\/([^/]+)(?:\/(analysis|trades2|bench-upgrades|trade\/evaluate|waivers|breakouts|values|league))?$/);
   if (!m) throw new ApiError(`Mock has no route for ${method} ${p}`, 404);
   const [, provider, id, sub] = m;
   if (provider === "yahoo" && !yahooConnected) throw new ApiError("Not connected to Yahoo", 401, "Reconnect on the Connect tab.");

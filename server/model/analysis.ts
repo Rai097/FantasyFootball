@@ -29,12 +29,13 @@ export const POWER_WEIGHTS = { projected: 0.7, results: 0.3 } as const;
 
 /**
  * Actual fantasy points per game this season = pointsFor / games played, from the standings. null = unknown (no record,
- * no points for, or no games played yet), never 0.
+ * no points for, 0 points for after games were played — a standings capture without points, not a real 0 — or no
+ * games played yet), never 0.
  */
 export function actualPpg(record: TeamRecord | undefined): number | null {
   if (!record || record.pointsFor == null) return null;
   const games = record.wins + record.losses + record.ties;
-  return games > 0 ? record.pointsFor / games : null;
+  return games > 0 && record.pointsFor > 0 ? record.pointsFor / games : null;
 }
 
 /** Power score: unknown results fall back to the projection, so such a team ranks on projected starters alone. */
