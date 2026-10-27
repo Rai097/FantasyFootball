@@ -1094,8 +1094,8 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   ranking, IR hold line, finder eligibility).
   - **k returners on one roster**: k ≤ `EXACT_RETURNS` = 2 → exact 2^k mix per week. Beyond 2: the two with the most
     back points (ties by id) are mixed exactly, the rest count at their expected points p × back (deterministic). This
-    is bounded — never below the all-½ lineup, never above the exact 2^k mix (lineup value is convex in the players'
-    points). A marginal-sum alternative (Σ each player's mix over a common base) was rejected: with three 12-pt
+    is bounded — never below the all-½ lineup, never above the exact 2^k mix (true for the optimal lineup, which is convex in the players'
+    points; the greedy matches it in the tested cases). A marginal-sum alternative (Σ each player's mix over a common base) was rejected: with three 12-pt
     returners competing for one slot it gives 15 > the 12 any lineup can hold.
   - **Where**: `rosterParts` (roster score: judge3 / teamV3, season and playoff columns; "now" and bench depth never
     branch — he is out this week), `teamStrength` (lineup, and depth = each scenario's bench cover weighted by its
