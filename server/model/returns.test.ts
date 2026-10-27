@@ -132,3 +132,15 @@ test("absent on the league source's word only (import IR tag, nflverse active): 
   assert.equal(r.returnWeek, null);
   assert.equal(r.reasons.find((d) => d.label === "Return")?.value, "league lists him on IR, no practice signal: return unconfirmed");
 });
+
+test("ruled out of his next game wins over every path: DTR window, or an Out tag with a full practice row and no game status", () => {
+  // DTR in his window, this week's report says Out with no practice row: the window alone would put him back next game.
+  const dtr = estimateReturn(base({ absence: "dtr", rosterStatus: "RES", rosterCode: "R48", lastGameWeek: 3, gamesMissed: 4, status: [{ week: 6, practice: LTD }, { week: 8, report: "Out" }] }));
+  assert.ok(dtr.returnWeek === null || dtr.returnWeek > 8, `returnWeek ${dtr.returnWeek}`);
+  const dtrNoOut = estimateReturn(base({ absence: "dtr", rosterStatus: "RES", rosterCode: "R48", lastGameWeek: 3, gamesMissed: 4, status: [{ week: 6, practice: LTD }] }));
+  assert.equal(dtrNoOut.returnWeek, 8, "fixture: without the Out report the window says next game");
+  // On a reserve list, full practice this week, no game status on the row, but his tag says Out.
+  const tag = estimateReturn(base({ rosterStatus: "RES", status: [{ week: 8, practice: FULL }], tagOut: true }));
+  assert.equal(tag.returnWeek, 9);
+  assert.equal(estimateReturn(base({ rosterStatus: "RES", status: [{ week: 8, practice: FULL }] })).returnWeek, 8, "fixture: untagged = next game");
+});

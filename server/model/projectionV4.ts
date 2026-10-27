@@ -394,6 +394,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
         gameWeeks,
         gamesMissed,
         ...(own.length ? { lastGameWeek: Math.max(...own) } : {}),
+        ...(/^(O|OUT)$/.test(p.injury?.status.trim().toUpperCase() ?? "") ? { tagOut: true } : {}),
       });
     }
     const ramp = absence !== "out";

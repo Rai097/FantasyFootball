@@ -56,6 +56,8 @@ export interface ReturnInput {
   gamesMissed: number | null;
   /** Week of his last game this season (undefined = none this season). */
   lastGameWeek?: number;
+  /** His current injury tag says Out (the player's status, whatever the practice rows say): never back next game. */
+  tagOut?: boolean;
 }
 
 export interface ReturnEstimate {
@@ -147,7 +149,7 @@ export function estimateReturn(x: ReturnInput): ReturnEstimate {
   // Index into gameWeeks of his first game back, and the confidence.
   let idx: number | null = null;
   let conf: ReturnConfidence = "unknown";
-  const ruledOut = thisWeek?.report === "Out" || x.absence === "out";
+  const ruledOut = thisWeek?.report === "Out" || x.absence === "out" || !!x.tagOut;
   if (lvl >= 2) {
     // Practising this week (any absence): full and not ruled out ⇒ next game (high); limited ⇒ medium.
     idx = ruledOut ? 1 : 0;
@@ -176,6 +178,9 @@ export function estimateReturn(x: ReturnInput): ReturnEstimate {
     return { ...unknown(why), ...(earliestWeek !== undefined ? { earliestWeek } : {}) };
   }
 
+  // Ruled out of his next game (this week's report or his tag) overrides any path that put him back in it (e.g. the
+  // designated-to-return window).
+  if (idx === 0 && ruledOut) idx = 1;
   if (idx !== null && idx < irLeft) {
     idx = irLeft;
     if (conf === "high") conf = "medium";
