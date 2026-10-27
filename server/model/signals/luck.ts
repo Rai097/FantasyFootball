@@ -5,7 +5,7 @@ import type { Scoring, StatLine } from "../types.js";
 import type { Luck } from "./types.js";
 
 export const tdPoints = (s: Scoring, l: StatLine): number => s.passTd * l.passTd + s.rushTd * l.rushTd + s.recTd * l.recTd;
-const tdCount = (l: StatLine): number => l.passTd + l.rushTd + l.recTd;
+export const tdCount = (l: StatLine): number => l.passTd + l.rushTd + l.recTd;
 
 export interface LuckGame {
   expPts: number;

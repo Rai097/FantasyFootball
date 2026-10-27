@@ -1160,3 +1160,15 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   received); for a starter's bye he moves over and the FLEX is refilled from the bench, so the bye cover is the best
   bench player eligible for that FLEX slot, as for a FLEX starter's own bye (giving a bench TE while a TE plays FLEX
   loses no bye cover; giving the best bench RB while an RB plays FLEX still does).
+* **Expected touchdowns regress**: TD rate is the noisiest part of fantasy scoring. Signals now carry each game's
+  expected TD points (league scoring) and expected TDs (`expTdPts`, `expTds`, recency-weighted like `expPts`) and last
+  season's actual TD points / TDs per game (`priorTdPts`, `priorTds`). In `valuePlayers` the TD part of the usage rate
+  is pulled toward a baseline with `V4.tdK` = 8 pseudo-games (calibration value) against the sample games (unflagged 1,
+  flagged 0.25): expected pts' = expected pts − xTD pts + (n × xTD pts + tdK × baseline) / (n + tdK); the non-TD part,
+  finishing, the prior blend and the ECR anchor are unchanged. Baseline = last season's actual TD rate when he played
+  ≥ `priorMinGames`, else the position's mean expected TD rate this season over every game of players with
+  ≥ `priorMinGames` games (a plain mean: a no-prior lead back is pulled toward an average back's TD rate; measured on
+  a real league as a 0.43 → 0.36 TDs/g, −0.3 pts/g effect for one rookie RB). Not applied on the actual-points fallback
+  (no expected TDs) or to K / DEF. Why-line: "Touchdowns: 1.20 expected/g regressed to 0.89 (last season 0.63)".
+  Tests: a high-xTD 7-game RB moves toward his prior; xTD rate = baseline → unchanged, no line; a no-prior player →
+  position mean; K / DEF untouched.

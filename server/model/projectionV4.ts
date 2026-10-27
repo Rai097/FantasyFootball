@@ -64,6 +64,9 @@ export const V4 = {
   priorK: 2,
   /** Small samples lean on last season more: prior weight = max(priorK, priorKSmall − sample games) (≥ 6 games: priorK). */
   priorKSmall: 8,
+  /** Expected touchdowns per game regress toward a baseline with this many pseudo-games (last season's actual TD rate
+   *  when he played ≥ priorMinGames, else the position's mean expected TD rate this season). */
+  tdK: 8,
   priorMinGames: 4,
   /** Points allowed: pseudo-games of league average, and the factor's clamp. */
   matchupK: 4,
@@ -183,6 +186,19 @@ interface WeekProj {
   pts: number;
 }
 
+/** Expected touchdowns per game: this season's (recency-weighted), regressed, and the baseline it was pulled toward. */
+export interface TdShrink {
+  raw: number;
+  regressed: number;
+  base: number;
+  source: "prior" | "position";
+  /** Expected points per game removed (negative = added) by the regression. */
+  ptsDelta: number;
+}
+
+/** n-game rate x pulled toward baseline b with k pseudo-games. */
+export const shrinkRate = (x: number, n: number, b: number, k: number): number => (n * x + k * b) / (n + k);
+
 interface Base {
   p: Player;
   sig: PlayerSignals | null;
@@ -200,6 +216,8 @@ interface Base {
   priorRate: number | null;
   /** Pseudo-games last season's rate counts as (priorWeight). */
   priorW: number;
+  /** Expected-TD regression (null = not applied: no expected TD data, actual-points fallback, K / DEF). */
+  td: TdShrink | null;
   games: number;
   ppg26: number;
   ppgExp26: number;
@@ -272,6 +290,30 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const input = signalInputFromPlayer(p);
     return input && input.games.length + (input.prior ? 1 : 0) > 0 ? computePlayerSignals(input, ctx) : null;
   };
+  const sigMemo = new Map<Player, PlayerSignals | null>();
+  const sigOf = (p: Player): PlayerSignals | null => {
+    if (!sigMemo.has(p)) sigMemo.set(p, p.pos === "K" || p.pos === "DEF" ? null : signalsOf(p));
+    return sigMemo.get(p)!;
+  };
+  // Position TD baseline: mean expected TD points / touchdowns per game over every game of the position's players with
+  // ≥ priorMinGames games this season (players without a usable prior regress toward it).
+  const tdBaseline = new Map<Position, { pts: number; n: number }>();
+  for (const pos of SKILL_POSITIONS) {
+    let pts = 0;
+    let n = 0;
+    let g = 0;
+    for (const p of all) {
+      if (p.pos !== pos) continue;
+      const sg = sigOf(p);
+      if (!sg || sg.weeks.length < V4.priorMinGames) continue;
+      for (const w of sg.weeks) {
+        pts += w.expTdPts;
+        n += w.expTds;
+        g++;
+      }
+    }
+    if (g) tdBaseline.set(pos, { pts: pts / g, n: n / g });
+  }
   const makeBase = (p: Player): Base => {
     const weeks = [...p.weeks].sort((a, b) => a.week - b.week);
     const act = weeks.map((w) => score(scoring, w.actual, p.pos));
@@ -286,8 +328,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       ppg25: hasPrior ? score(scoring, p.prior!.line, p.pos) / p.prior!.games : 0,
       trend: weeks.length >= 3 ? mean(exp.slice(-2)) - mean(exp) : 0,
     };
-    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorW: 0 };
-    const sig = signalsOf(p);
+    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorW: 0, td: null };
+    const sig = sigOf(p);
     // Missing expected data (ffopportunity has no usage for him while he scores): rate on recency-weighted actual
     // points, with the usual prior / ECR shrinkage, instead of ~0 usage.
     const ghost = sig ? sig.weeks.filter((w) => w.expPts === 0 && w.actPts > 0).length : 0;
@@ -301,12 +343,25 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const priorRate =
       t && t.priorGames >= V4.priorMinGames && t.priorExpPpg !== null && t.priorActPpg !== null ? (t.priorExpPpg + t.priorActPpg) / 2 : null;
     const priorW = priorRate !== null ? priorWeight(sampleGames) : 0;
+    // Touchdowns are the noisiest part of expected points: the TD part regresses toward a baseline (V4.tdK pseudo-games),
+    // the rest is unchanged. Not on the actual-points fallback (no expected TDs there).
+    let td: TdShrink | null = null;
+    const xTdPts = sig?.rates.expTdPts ?? null;
+    const xTds = sig?.rates.expTds ?? null;
+    if (!missingExp && expRate !== null && sampleGames > 0 && xTdPts !== null && xTds !== null) {
+      const usePrior = !!t && t.priorGames >= V4.priorMinGames && t.priorTdPts !== null && t.priorTds !== null;
+      const pb = usePrior ? { pts: t!.priorTdPts!, n: t!.priorTds! } : tdBaseline.get(p.pos);
+      if (pb) {
+        const ptsAfter = shrinkRate(xTdPts, sampleGames, pb.pts, V4.tdK);
+        td = { raw: xTds, regressed: shrinkRate(xTds, sampleGames, pb.n, V4.tdK), base: pb.n, source: usePrior ? "prior" : "position", ptsDelta: xTdPts - ptsAfter };
+      }
+    }
     let model: number | null = null;
     if (expRate !== null && sampleGames > 0) {
-      const cur = expRate * eff;
+      const cur = (expRate - (td?.ptsDelta ?? 0)) * eff;
       model = priorRate !== null ? (sampleGames * cur + priorW * priorRate) / (sampleGames + priorW) : cur;
     } else if (priorRate !== null) model = priorRate;
-    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorW };
+    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorW, td };
   };
   const bases = all.map(makeBase);
   const baseById = new Map(bases.map((b) => [b.p.id, b]));
@@ -685,6 +740,8 @@ function explainItems(
       add("Experts (ECR)", `${x.ecrUnranked ? "unranked" : `${p.pos}${Math.round(x.ecrRank! * 10) / 10}`}: ${f1(x.ecrPts)} pts/game, ${x.anchorSkipped ? "not used: the rank prices his absence" : `${pct(x.wAnchor)} weight`}`);
     if (x.missingExp) add("Usage data", `missing for ${x.missingExp} games: rate from actual points`, "warn");
     else if (x.expRate !== null) add("Usage", `${f1(x.expRate)} expected pts/game, latest games weigh most`);
+    if (x.td && Math.abs(x.td.raw - x.td.regressed) >= 0.005)
+      add("Touchdowns", `${x.td.raw.toFixed(2)} expected/g regressed to ${x.td.regressed.toFixed(2)} (${x.td.source === "prior" ? "last season" : `${p.pos} average`} ${x.td.base.toFixed(2)})`);
     if (x.effRaw !== null) add("Finishing", `×${x.eff.toFixed(2)} (actual ÷ expected ${x.effRaw.toFixed(2)}, pulled toward 1)`);
     if (x.flagged > 0) add("Odd games", `${x.flagged} count 25%: backup QB, left early or blowout`);
     if (x.priorRate !== null) add("2025", `${f1(x.priorRate)} pts/game, counts as ${Number.isInteger(x.priorW) ? x.priorW : x.priorW.toFixed(1)} games`);

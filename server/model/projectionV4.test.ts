@@ -396,3 +396,37 @@ test("small samples lean on last season more: prior weight = max(priorK, priorKS
   assert.match(why("full"), new RegExp(`counts as ${V4.priorK} games`));
   assert.ok(Math.abs(num("full", "Our model") - (7 * 10 + V4.priorK * priorRate) / (7 + V4.priorK)) <= 0.06, "7-game model unchanged");
 });
+
+test("expected touchdowns regress toward last season's TD rate (V4.tdK pseudo-games); the non-TD part is unchanged", () => {
+  // 7 games of 60 rush yards + 1.2 expected (and actual) rushing TDs = 13.2 PPR pts/game.
+  const wks = games(7, { rushYd: 60, rushTd: 1.2 }, { rushYd: 60, rushTd: 1.2 }, { targets: 0, carries: 15, airYards: 0 });
+  const prior = (tds: number) => ({ games: 16, line: line({ rushYd: 960, rushTd: tds }) });
+  const hi = rawPlayer("hiTd", "RB", { weeks: wks, prior: prior(10) }); // 0.625 TDs/game last season
+  const eq = rawPlayer("eqTd", "RB", { weeks: wks, prior: prior(19.2) }); // 1.2 TDs/game = this season's expected
+  const val = valuePlayers(L({ scoring: PPR }), [...POOL, hi, eq]);
+  const why = (id: string, label: string) => val.players.get(id)!.whyItems!.find((d) => d.label === label)?.value;
+  const model = (id: string) => Number(why(id, "Our model")!.match(/^[\d.]+/)![0]);
+  // High-xTD RB: 1.2 → (7 × 1.2 + 8 × 0.625) / 15 = 0.89 TDs/game; TD points 7.2 → 5.36, so his rate is
+  // (7 × (13.2 − 1.84) + 2 × 9.75) / 9 = 11.0 (12.4 without the regression).
+  assert.equal(why("hiTd", "Touchdowns"), "1.20 expected/g regressed to 0.89 (last season 0.63)");
+  const reg = (7 * 1.2 + V4.tdK * 0.625) / (7 + V4.tdK);
+  const cur = 13.2 - 6 * (1.2 - reg);
+  assert.ok(Math.abs(model("hiTd") - (7 * cur + 2 * 9.75) / 9) <= 0.06, `model ${model("hiTd")}`);
+  assert.ok(model("hiTd") < (7 * 13.2 + 2 * 9.75) / 9 - 1, "moves toward his prior");
+  // Expected TD rate = baseline: unchanged, no line.
+  assert.equal(why("eqTd", "Touchdowns"), undefined);
+  assert.equal(model("eqTd"), 13.2);
+});
+
+test("expected touchdowns without a usable prior regress toward the position's mean expected TD rate; K / DEF untouched", () => {
+  const wks = games(7, { rushYd: 60, rushTd: 1.2 }, { rushYd: 60, rushTd: 1.2 }, { targets: 0, carries: 15, airYards: 0 });
+  const rook = rawPlayer("rookTd", "RB", { weeks: wks, prior: null });
+  const k = rawPlayer("kk", "K", { ecrPos: 3 });
+  const d = rawPlayer("dd", "DEF", { ecrPos: 3 });
+  const val = valuePlayers(L({ scoring: PPR }), [...POOL, rook, k, d]);
+  const td = val.players.get("rookTd")!.whyItems!.find((x) => x.label === "Touchdowns")!.value;
+  // POOL RBs (40 × 6 games) expect no TDs: the RB mean over every game is (7 × 1.2) / (40 × 6 + 7) per game.
+  const mean = (7 * 1.2) / (40 * 6 + 7);
+  assert.equal(td, `1.20 expected/g regressed to ${((7 * 1.2 + V4.tdK * mean) / (7 + V4.tdK)).toFixed(2)} (RB average ${mean.toFixed(2)})`);
+  for (const id of ["kk", "dd"]) assert.equal(val.players.get(id)!.whyItems!.find((x) => x.label === "Touchdowns"), undefined, id);
+});

@@ -12,7 +12,7 @@ import type { PlayerSignalInput, PlayerSignals, RateKey, Rates, SkillPos, WeekSi
 
 export type * from "./types.js";
 
-const RATE_KEYS: RateKey[] = ["targetShare", "airShare", "wopr", "weightedOpp", "snapShare", "expPts", "actPts"];
+const RATE_KEYS: RateKey[] = ["targetShare", "airShare", "wopr", "weightedOpp", "snapShare", "expPts", "actPts", "expTdPts", "expTds"];
 const HALF_SNAPS = 0.5;
 
 export interface SignalContext {

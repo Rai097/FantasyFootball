@@ -87,6 +87,9 @@ export interface WeekOpportunity {
   snapShare?: number;
   expPts: number;
   actPts: number;
+  /** Expected touchdown points (league scoring) and expected touchdowns (count) in this game; part of expPts. */
+  expTdPts: number;
+  expTds: number;
 }
 
 export interface WeekSignal extends WeekOpportunity {
@@ -142,6 +145,9 @@ export interface TalentPrior {
   priorGames: number;
   priorExpPpg: number | null;
   priorActPpg: number | null;
+  /** Last season's actual touchdown points (league scoring) and touchdowns per game; null without games. */
+  priorTdPts: number | null;
+  priorTds: number | null;
   age: number | null;
   ageRising: boolean | null;
   rookie: boolean;
