@@ -1206,3 +1206,13 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   * Marginal near misses need the same mode gain > 0 and the same floor; smaller edges and the main list share the
     gate. The rank score is (mode gain + gap bonus) × acceptance (Playoffs: unchanged). Evaluate adds one bullet
     "<Mode> bar: clears / fails: …"; the Trade Finder's "How they're ranked" help names the mode's bar.
+* **Fix round 1 (tester f1a1571)**:
+  * Role change bar = max(`roleUpRatio` × last season's expected pts/game, last season's + `V4.roleUpMinGain` (3));
+    last season's must be > 0 (a zero-usage player never reads "role grew: 0.0 vs 0.0").
+  * The rate AND each of his last `roleUpMinGames` (2) unflagged games' expected points must clear the bar: the
+    recency-weighted rate alone let 3 backup games + one fill-in start read as a role change.
+  * The listing bar compares the 0.1-rounded gain, the number the card prints (a +0.96 team score no longer reads
+    "fails: team score +1.0 (needs +1.0)"); a marginal near miss needs a rounded gain > 0 (no "+0.0" near misses).
+  * Evaluate's "<Mode> bar" bullet is green only when the verdict is Accept, else neutral (it is one bar of several).
+  * Win now help: the "now" part is the lineup's average points per game from now on (missed games counted, the
+    availability-weighted rate), plus a little bench depth — not literally this week's points.
