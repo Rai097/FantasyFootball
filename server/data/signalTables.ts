@@ -5,9 +5,9 @@ import { fetchCached } from "./cache.js";
 import { sources } from "./sources.js";
 import { parseCsv, num, opt } from "./csv.js";
 import { normPos, normTeam } from "./names.js";
-import { addLines, emptyLine, lineFrom } from "./players.js";
+import { addLines, DB_STALE_MS, emptyLine, lineFrom } from "./players.js";
 import type { StatLine } from "../model/types.js";
-import { usualStarter } from "../model/signals/context.js";
+import { usualStarters } from "../model/signals/context.js";
 import { computeAllSignals, type PlayerSignals } from "../model/signals/index.js";
 import {
   SKILL_POS,
@@ -145,8 +145,8 @@ export function buildStarters(games: Map<string, GameInfo>, rows: EpRow[]): Map<
   return out;
 }
 
-/** Most frequent starter per team over the season. */
-export function buildUsualStarters(starters: Map<string, Starter>): Map<string, string> {
+/** Usual starters per team over the season (most frequent, current, returning: context.ts usualStarters). */
+export function buildUsualStarters(starters: Map<string, Starter>): Map<string, string[]> {
   const byTeam = new Map<string, { week: number; qbId: string }[]>();
   for (const [k, s] of starters) {
     const [team, week] = k.split("|");
@@ -154,10 +154,10 @@ export function buildUsualStarters(starters: Map<string, Starter>): Map<string, 
     arr.push({ week: Number(week), qbId: s.qbId });
     byTeam.set(team, arr);
   }
-  const out = new Map<string, string>();
+  const out = new Map<string, string[]>();
   for (const [team, starts] of byTeam) {
-    const u = usualStarter(starts);
-    if (u) out.set(team, u);
+    const u = usualStarters(starts);
+    if (u.length) out.set(team, u);
   }
   return out;
 }
@@ -301,7 +301,7 @@ export function buildSignalInputs(src: SignalSources): Map<string, PlayerSignalI
       teamTotals: totals.get(k),
       teamMargin: margins.get(k),
       starterQbId: starters.get(k)?.qbId,
-      usualQbId: usual.get(team),
+      usualQbIds: usual.get(team),
     };
   };
   const ensure = (id: string, name: string, pos: string, team: string): PlayerSignalInput | undefined => {
@@ -343,48 +343,58 @@ export function buildSignalInputs(src: SignalSources): Map<string, PlayerSignalI
   return out;
 }
 
-// ---- thin loader: lazily, once per process (inputs per season; signals per season + scoring) ----
+// ---- thin loader: lazily, refreshed on the player database's cadence (DB_STALE_MS, 6 h) ----
 
-const inputsMemo = new Map<number, Promise<Map<string, PlayerSignalInput>>>();
+/**
+ * Promise memo whose entries expire after `ttlMs` (and on rejection), bounded to `max` keys (oldest dropped).
+ * Exported for tests (fake clock).
+ */
+export function staleMemo<V>(ttlMs: number, max: number, now: () => number = Date.now) {
+  const m = new Map<string, { at: number; value: Promise<V> }>();
+  return {
+    get(key: string, make: () => Promise<V>): Promise<V> {
+      const hit = m.get(key);
+      if (hit && now() - hit.at <= ttlMs) return hit.value;
+      m.delete(key);
+      if (m.size >= max) m.delete(m.keys().next().value!);
+      const value = make();
+      const entry = { at: now(), value };
+      m.set(key, entry);
+      value.catch(() => {
+        if (m.get(key) === entry) m.delete(key);
+      });
+      return value;
+    },
+    size: () => m.size,
+  };
+}
 
-/** Signal inputs for `season` from the cached files (same URLs / TTLs as the player database). */
+const inputsMemo = staleMemo<Map<string, PlayerSignalInput>>(DB_STALE_MS, 4);
+
+/** Signal inputs for `season` from the cached files (same URLs / TTLs as the player database; rebuilt every 6 h). */
 export function getSignalInputs(season: number): Promise<Map<string, PlayerSignalInput>> {
-  let p = inputsMemo.get(season);
-  if (!p) {
-    p = Promise.all([
+  return inputsMemo.get(String(season), () =>
+    Promise.all([
       fetchCached(sources.epWeekly(season), 3).catch(() => ""),
       fetchCached(sources.epWeekly(season - 1), 24 * 7).catch(() => ""),
       fetchCached(sources.schedule, 6),
       fetchCached(sources.injuries(season), 3).catch(() => ""),
       fetchCached(sources.roster(season), 12),
       fetchCached(sources.snaps(season), 6).catch(() => ""),
-    ])
-      .then(([epCsv, epPriorCsv, gamesCsv, injuriesCsv, rosterCsv, snapsCsv]) =>
-        buildSignalInputs({ season, epCsv, epPriorCsv, gamesCsv, injuriesCsv, rosterCsv, snapsCsv }),
-      )
-      .catch((e) => {
-        inputsMemo.delete(season);
-        throw e;
-      });
-    inputsMemo.set(season, p);
-  }
-  return p;
+    ]).then(([epCsv, epPriorCsv, gamesCsv, injuriesCsv, rosterCsv, snapsCsv]) =>
+      buildSignalInputs({ season, epCsv, epPriorCsv, gamesCsv, injuriesCsv, rosterCsv, snapsCsv }),
+    ),
+  );
 }
 
 const SIGNALS_MEMO_MAX = 8;
-const signalsMemo = new Map<string, Promise<Map<string, PlayerSignals>>>();
+const signalsMemo = staleMemo<Map<string, PlayerSignals>>(DB_STALE_MS, SIGNALS_MEMO_MAX);
 
-/** All skill players' signals for a season under a league's scoring (memoized per process, bounded). */
+/** All skill players' signals for a season under a league's scoring (memoized per process, bounded, 6 h). */
 export function getAllSignals(season: number, scoring: Scoring): Promise<Map<string, PlayerSignals>> {
-  const key = `${season}|${JSON.stringify(scoring)}`;
-  let p = signalsMemo.get(key);
-  if (!p) {
-    if (signalsMemo.size >= SIGNALS_MEMO_MAX) signalsMemo.delete(signalsMemo.keys().next().value!);
-    p = getSignalInputs(season).then((inputs) => computeAllSignals(inputs.values(), { season, scoring, asOf: new Date() }));
-    p.catch(() => signalsMemo.delete(key));
-    signalsMemo.set(key, p);
-  }
-  return p;
+  return signalsMemo.get(`${season}|${JSON.stringify(scoring)}`, () =>
+    getSignalInputs(season).then((inputs) => computeAllSignals(inputs.values(), { season, scoring, asOf: new Date() })),
+  );
 }
 
 /** One player's signals (undefined when he has no game this season or is not a skill player). */

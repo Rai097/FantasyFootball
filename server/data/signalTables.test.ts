@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  staleMemo,
   buildStarters,
   buildTeamTotals,
   buildUsualStarters,
@@ -11,6 +12,7 @@ import {
   parseStatus,
 } from "./signalTables.js";
 import { EP_2026, GAMES, INJURIES, ROSTER, SNAPS, IDS, fixtureInputs } from "./fixtures/signals2026.js";
+import { DB_STALE_MS } from "./players.js";
 
 test("team totals: file *_team columns win; summing is the fallback", () => {
   const rows = parseEpRows(EP_2026);
@@ -23,14 +25,23 @@ test("team totals: file *_team columns win; summing is the fallback", () => {
   assert.equal(summed.targets, fixtureTargets);
 });
 
-test("starting QB per team-week from games.csv; usual starter = most frequent (CHI: Caleb Williams, backups weeks 3-5)", () => {
+test("starting QB per team-week from games.csv; usual starters (CHI: Caleb Williams only, backups weeks 3-5)", () => {
   const games = parseGames(GAMES, 2026);
   const starters = buildStarters(games, parseEpRows(EP_2026));
   const chi = [1, 2, 3, 4, 5, 6, 7].map((w) => starters.get(`CHI|${w}`)!.qbId);
   assert.deepEqual(chi.map((id) => id === IDS.caleb), [true, true, false, false, false, true, true]);
   assert.equal(starters.get("CHI|3")!.source, "games");
-  assert.equal(buildUsualStarters(starters).get("CHI"), IDS.caleb);
+  assert.deepEqual(buildUsualStarters(starters).get("CHI"), [IDS.caleb]);
   assert.equal(starters.get("CHI|8"), undefined, "unplayed week has no starter");
+});
+
+test("SEA 2026: returning starter (Darnold weeks 1 and 7, Lock weeks 2-6) → both usual, so no SEA game is qbOut", () => {
+  const starters = buildStarters(parseGames(GAMES, 2026), parseEpRows(EP_2026));
+  const sea = [1, 2, 3, 4, 5, 6, 7].map((w) => starters.get(`SEA|${w}`)!.qbId);
+  assert.deepEqual(sea, [IDS.darnold, IDS.lock, IDS.lock, IDS.lock, IDS.lock, IDS.lock, IDS.darnold]);
+  const usual = buildUsualStarters(starters).get("SEA")!;
+  assert.deepEqual(usual, [IDS.darnold, IDS.lock].sort());
+  assert.ok(sea.every((id) => usual.includes(id)));
 });
 
 test("starter fallback: QB names/ids missing in games.csv → most pass attempts in ep_weekly", () => {
@@ -70,9 +81,27 @@ test("signal inputs: one game per week with team totals, margin, starter and sna
   const w5 = lv.games[4];
   assert.equal(w5.teamTotals!.targets, 40);
   assert.equal(w5.teamMargin, -24); // 2026_05_CHI_GB result 24 = home GB won by 24
-  assert.equal(w5.usualQbId, IDS.caleb);
+  assert.deepEqual(w5.usualQbIds, [IDS.caleb]);
   assert.notEqual(w5.starterQbId, IDS.caleb);
   assert.equal(w5.snapShare, 0.8);
   assert.equal(lv.prior!.games, 3);
   assert.equal(inputs.get(IDS.monangai)!.games.length, 4);
+});
+
+test("signal memos refresh on the player database's cadence (6 h) and forget failures", async () => {
+  let t = 0;
+  let builds = 0;
+  const memo = staleMemo<number>(DB_STALE_MS, 2, () => t);
+  const make = () => Promise.resolve(++builds);
+  assert.equal(await memo.get("a", make), 1);
+  t = DB_STALE_MS;
+  assert.equal(await memo.get("a", make), 1, "still fresh at exactly 6 h");
+  t = DB_STALE_MS + 1;
+  assert.equal(await memo.get("a", make), 2, "rebuilt after 6 h");
+  await memo.get("b", make);
+  await memo.get("c", make);
+  assert.equal(memo.size(), 2, "bounded");
+  await assert.rejects(memo.get("d", () => Promise.reject(new Error("x"))));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(await memo.get("d", make), 5, "a failed build is not cached");
 });

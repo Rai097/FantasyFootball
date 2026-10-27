@@ -51,10 +51,11 @@ export const emptyLine = (): StatLine => ({ passYd: 0, passTd: 0, passInt: 0, ru
 
 let dbPromise: Promise<PlayerDb> | null = null;
 let dbBuiltAt = 0;
+/** The player database (and every table derived from the same files, e.g. Model v4 signals) rebuilds after this. */
+export const DB_STALE_MS = 6 * 36e5;
 
 export function getPlayerDb(): Promise<PlayerDb> {
-  const STALE_MS = 6 * 36e5;
-  if (!dbPromise || Date.now() - dbBuiltAt > STALE_MS) {
+  if (!dbPromise || Date.now() - dbBuiltAt > DB_STALE_MS) {
     dbBuiltAt = Date.now();
     dbPromise = buildPlayerDb().catch((e) => {
       dbPromise = null;

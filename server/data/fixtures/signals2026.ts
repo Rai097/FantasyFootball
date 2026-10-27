@@ -1,6 +1,6 @@
 // Real NFL rows cut from the local cache on 2026-10-26 for the Model v4 signal tests (NFL data only, no league data).
 // Players: Colston Loveland (CHI TE), Tre Tucker (LV WR), KC Concepcion (CLE WR), D'Andre Swift + Kyle Monangai (CHI RB);
-// plus CHI QB rows (starter fallback). Teams CHI / LV / CLE, weeks 1-7 played (week 8 unplayed in games.csv).
+// plus CHI QB rows (starter fallback). Teams CHI / LV / CLE (+ SEA games.csv rows: returning starter case), weeks 1-7 played (week 8 unplayed in games.csv).
 // Columns stripped to what server/data/signalTables.ts reads; values unchanged.
 
 import { buildSignalInputs } from "../signalTables.js";
@@ -83,6 +83,13 @@ export const GAMES = `game_id,season,game_type,week,away_team,home_team,result,a
 2026_07_LA_LV,2026,REG,7,LA,LV,-14,00-0026498,00-0029604,Matthew Stafford,Kirk Cousins
 2026_08_LV_NYJ,2026,REG,8,LV,NYJ,,00-0029604,00-0030565,Kirk Cousins,Geno Smith
 2026_08_CLE_PIT,2026,REG,8,CLE,PIT,,00-0033537,00-0023459,Deshaun Watson,Aaron Rodgers
+2026_01_NE_SEA,2026,REG,1,NE,SEA,3,00-0039851,00-0034869,Drake Maye,Sam Darnold
+2026_02_SEA_ARI,2026,REG,2,SEA,ARI,-24,00-0035704,00-0033119,Drew Lock,Jacoby Brissett
+2026_03_SEA_WAS,2026,REG,3,SEA,WAS,2,00-0035704,00-0039910,Drew Lock,Jayden Daniels
+2026_04_LAC_SEA,2026,REG,4,LAC,SEA,7,00-0036355,00-0035704,Justin Herbert,Drew Lock
+2026_05_SF_SEA,2026,REG,5,SF,SEA,-3,00-0037834,00-0035704,Brock Purdy,Drew Lock
+2026_06_SEA_DEN,2026,REG,6,SEA,DEN,3,00-0035704,00-0039732,Drew Lock,Bo Nix
+2026_07_KC_SEA,2026,REG,7,KC,SEA,17,00-0033873,00-0034869,Patrick Mahomes,Sam Darnold
 2026_08_CHI_SEA,2026,REG,8,CHI,SEA,,00-0039918,00-0034869,Caleb Williams,Sam Darnold
 `;
 
@@ -164,6 +171,8 @@ export const IDS = {
   swift: "00-0036275",
   monangai: "00-0040236",
   caleb: "00-0039918",
+  darnold: "00-0034869",
+  lock: "00-0035704",
 } as const;
 
 /** Full PPR (the format of the 2.8 target weight). */

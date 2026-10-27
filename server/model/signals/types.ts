@@ -31,8 +31,8 @@ export interface PlayerGame {
   teamMargin?: number;
   /** gsis id of the QB who started this game for his team (games.csv, fallback most pass attempts). */
   starterQbId?: string;
-  /** gsis id of the team's most frequent starting QB this season. */
-  usualQbId?: string;
+  /** gsis ids of the team's usual starting QBs this season (context.ts usualStarters); a game by any of them is not qbOut. */
+  usualQbIds?: string[];
 }
 
 /** Injury report / practice participation for one week. */
@@ -125,6 +125,13 @@ export interface Trend {
   metric: "wopr" | "weightedOpp";
   /** Least-squares slope per game over the last 3 unflagged games. */
   slope: number;
+  /** His weekly std-dev of the metric over all unflagged games. */
+  std: number;
+  /** The metric in the latest of those games. */
+  latest: number;
+  /** Position flex level the latest value is compared with (absent when the batch had none). */
+  flexLevel?: number;
+  /** Both steps up, slope ≥ 1.0 × std, latest ≥ flex level (trend.ts). */
   rising: boolean;
   weeks: number[];
 }

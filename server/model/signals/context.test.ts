@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { contextFlags, isFlagged, usualStarter } from "./context.js";
+import { contextFlags, isFlagged, usualStarter, usualStarters } from "./context.js";
 import { fixtureInputs, IDS } from "../../data/fixtures/signals2026.js";
 import type { PlayerGame } from "./types.js";
 
@@ -36,4 +36,27 @@ test("usual starter: most starts; a tie goes to the earlier starter", () => {
   assert.equal(usualStarter([{ week: 1, qbId: "a" }, { week: 2, qbId: "b" }, { week: 3, qbId: "b" }]), "b");
   assert.equal(usualStarter([{ week: 2, qbId: "b" }, { week: 1, qbId: "a" }, { week: 3, qbId: "b" }, { week: 4, qbId: "a" }]), "a");
   assert.equal(usualStarter([]), undefined);
+});
+
+const starts = (ids: string) => [...ids].map((qbId, i) => ({ week: i + 1, qbId }));
+
+test("usual starters: most frequent ∪ ≥ 3 of the last 4 ∪ opener-and-latest (returning starter)", () => {
+  // SEA 2026 shape: A, then five B starts, then A returns → both usual, nothing flagged.
+  assert.deepEqual(usualStarters(starts("ABBBBBA")), ["A", "B"]);
+  // CHI 2026 shape: A A B B C A A → only A; B and C starts (weeks 3-5) stay qbOut.
+  assert.deepEqual(usualStarters(starts("AABBCAA")), ["A"]);
+  // A change of starter: A A A A B B B → A (most) and B (3 of the last 4).
+  assert.deepEqual(usualStarters(starts("AAAABBB")), ["A", "B"]);
+  // A one-week fill-in mid-season is still flagged.
+  assert.deepEqual(usualStarters(starts("AAABAAA")), ["A"]);
+  assert.deepEqual(usualStarters([]), []);
+});
+
+test("SEA-shaped games: a returning starter's weeks 1 and 7 are not qbOut for a WR", () => {
+  const seq = "ABBBBBA";
+  const usualQbIds = usualStarters(starts(seq));
+  const games = [...seq].map((qb, i) => ({ ...g(i + 1, 0.8), starterQbId: qb, usualQbIds }));
+  assert.ok(contextFlags(games, "WR").every((f) => !f.qbOut));
+  const chi = [..."AABBCAA"].map((qb, i) => ({ ...g(i + 1, 0.8), starterQbId: qb, usualQbIds: usualStarters(starts("AABBCAA")) }));
+  assert.deepEqual(contextFlags(chi, "TE").map((f) => f.qbOut), [false, false, true, true, true, false, false]);
 });

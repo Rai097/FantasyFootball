@@ -7,8 +7,8 @@ import { luckOf } from "./luck.js";
 import { weekOpportunity } from "./opportunity.js";
 import { plainMean, recencyWeights, weightedRate } from "./recency.js";
 import { talentPrior } from "./talent.js";
-import { trendOf } from "./trend.js";
-import type { PlayerSignalInput, PlayerSignals, RateKey, Rates, WeekSignal } from "./types.js";
+import { flexLevels, metricOf, trendOf } from "./trend.js";
+import type { PlayerSignalInput, PlayerSignals, RateKey, Rates, SkillPos, WeekSignal } from "./types.js";
 
 export type * from "./types.js";
 
@@ -20,6 +20,8 @@ export interface SignalContext {
   scoring: Scoring;
   /** Reference date for ages (pass a fixed date in tests). */
   asOf: Date;
+  /** Flex level of the trend metric per position (trend.ts flexLevels; set by computeAllSignals). Absent → never rising. */
+  flexLevels?: Partial<Record<SkillPos, number>>;
 }
 
 export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): PlayerSignals {
@@ -62,16 +64,24 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
     halfSnaps: rates.snapShare === null ? null : rates.snapShare >= HALF_SNAPS,
     luck: luckOf(luckGames, ctx.scoring),
     efficiency: efficiencyOf(luckGames, p.pos),
-    trend: trendOf(weeks, p.pos),
+    trend: trendOf(weeks, p.pos, ctx.flexLevels?.[p.pos]),
     talent: talentPrior(p.pos, p.prior, p.roster, ctx.season, ctx.asOf, ctx.scoring),
     rosterStatus: p.roster?.status,
     status: [...p.status].sort((a, b) => a.week - b.week),
   };
 }
 
-/** Batch over every skill player in the inputs. */
+/** Batch over every skill player in the inputs; the trend's flex levels come from the batch itself (two passes). */
 export function computeAllSignals(inputs: Iterable<PlayerSignalInput>, ctx: SignalContext): Map<string, PlayerSignals> {
   const out = new Map<string, PlayerSignals>();
-  for (const p of inputs) out.set(p.id, computePlayerSignals(p, ctx));
+  const { flexLevels: _ignored, ...base } = ctx;
+  for (const p of inputs) out.set(p.id, computePlayerSignals(p, base));
+  const levels = flexLevels(
+    [...out.values()].map((s) => {
+      const m = metricOf(s.pos);
+      return { pos: s.pos, rate: m ? s.rates[m] : null, games: m ? s.weeks.filter((w) => w[m] !== undefined).length : 0 };
+    }),
+  );
+  for (const s of out.values()) s.trend = trendOf(s.weeks, s.pos, levels[s.pos]);
   return out;
 }
