@@ -188,3 +188,35 @@ test("standings use the source's own ranks when every recorded team has one", ()
 test("unknown team throws", () => {
   assert.throws(() => buildLeagueView(setup(), "zz"));
 });
+
+test("playoff mode: ranked by playoff strength only — records and points for change nothing", () => {
+  const withRec = buildLeagueView(setup(true), "m");
+  const noRec = buildLeagueView(setup(false), "m");
+  assert.deepEqual(withRec.playoffWeeks, [15, 16, 17]);
+  const ranks = (v: typeof withRec) => Object.fromEntries(v.teams.map((t) => [t.id, t.playoff?.rank]));
+  assert.deepEqual(ranks(withRec), ranks(noRec), "results / wins play no part");
+  const byRank = [...withRec.teams].sort((a, b) => a.playoff!.rank - b.playoff!.rank);
+  for (let i = 1; i < byRank.length; i++) assert.ok(byRank[i - 1].playoff!.total >= byRank[i].playoff!.total);
+  for (const t of withRec.teams) assert.ok(Math.abs(t.playoff!.lineup + withRec.depthWeight * t.playoff!.depth - t.playoff!.total) <= 0.1);
+  // b out-scored me (power above) but has the weaker starters: below me in playoff mode, and the line says so.
+  assert.ok(withRec.above.some((c) => c.teamId === "b"));
+  const b = withRec.playoffBelow.find((c) => c.teamId === "b")!;
+  assert.ok(b, "b is below me on playoff strength");
+  assert.match(b.summary, /above you on current power/);
+  const me = withRec.teams.find((t) => t.mine)!.playoff!;
+  assert.equal(withRec.playoffAbove.length, me.rank - 1);
+  assert.equal(withRec.playoffAbove.length + withRec.playoffBelow.length, withRec.numTeams - 1);
+  for (const c of [...withRec.playoffAbove, ...withRec.playoffBelow]) {
+    assert.ok(c.summary.length <= 255);
+    assert.match(c.summary, /wks 15–17/);
+    assert.equal(Math.sign(c.gap) >= 0, c.rank < me.rank || c.gap === 0);
+  }
+});
+
+test("playoff mode: no playoff weeks left → no playoff ranking, never a guessed 0", () => {
+  const teams = setup().map((t) => ({ ...t, playoffStrength: { lineup: 0, depth: 0, total: 0, weeks: [] } }));
+  const v = buildLeagueView(teams, "m");
+  assert.deepEqual(v.playoffWeeks, []);
+  assert.ok(v.teams.every((t) => t.playoff === null));
+  assert.deepEqual([v.playoffAbove, v.playoffBelow], [[], []]);
+});

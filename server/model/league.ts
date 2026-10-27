@@ -3,6 +3,7 @@
 // Pure: built from the TeamAnalysis rows analysis.ts already computes. See docs/DESIGN.md "League tab".
 import type { Position, TeamAnalysis, TeamRecord, ValuedPlayer } from "./types.js";
 import { GROUPS, POWER_WEIGHTS, groupOf } from "./analysis.js";
+import { DEPTH_WEIGHT } from "./teamStrength.js";
 
 export interface LeagueTeamRow {
   id: string;
@@ -26,6 +27,35 @@ export interface LeagueTeamRow {
   record: string;
   pointsFor: number | null;
   pointsAgainst: number | null;
+  /** Playoff mode: rank by playoff strength (teamStrength, weeks 15–17); null after the season or when unknown. */
+  playoff: PlayoffPart | null;
+}
+
+/** A team's playoff strength (teamStrength.ts) and its place by it. Results and record play no part. */
+export interface PlayoffPart {
+  rank: number;
+  /** lineup + DEPTH_WEIGHT × depth, points per week (= My Team's "Playoff strength"). */
+  total: number;
+  /** Optimal playoff lineup, points per week. */
+  lineup: number;
+  /** Bench cover for one injured starter, points per week. */
+  depth: number;
+}
+
+/** Playoff mode's "who is above me": gaps in playoff strength, theirs − mine. */
+export interface PlayoffComparison {
+  teamId: string;
+  name: string;
+  rank: number;
+  /** Their place on the current power score (for contrast). */
+  powerRank: number;
+  standingsRank: number | null;
+  record: string;
+  gap: number;
+  lineupGap: number;
+  depthGap: number;
+  /** One line, ≤ 255 chars. */
+  summary: string;
 }
 
 export interface GroupGap {
@@ -83,6 +113,12 @@ export interface LeagueView {
   below: TeamComparison[];
   /** Header line, ≤ 255 chars. */
   summary: string;
+  /** Playoff mode: the playoff weeks still ahead (empty after the season: no playoff ranking). */
+  playoffWeeks: number[];
+  depthWeight: number;
+  /** Teams with a better playoff rank than mine, best first (empty when playoff strength is unknown). */
+  playoffAbove: PlayoffComparison[];
+  playoffBelow: PlayoffComparison[];
 }
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
@@ -213,11 +249,41 @@ function compare(them: TeamAnalysis, me: TeamAnalysis, standing: number | null):
   };
 }
 
+/**
+ * Playoff place per team id: playoff strength total, then its lineup part, then team id. Pure projection: no results,
+ * no wins. Teams without playoff strength (or no playoff weeks left) are absent.
+ */
+export function playoffRanks(teams: TeamAnalysis[]): Map<string, PlayoffPart> {
+  const known = teams.filter((t) => t.playoffStrength?.weeks.length);
+  const sorted = [...known].sort(
+    (a, b) =>
+      b.playoffStrength!.total - a.playoffStrength!.total ||
+      b.playoffStrength!.lineup - a.playoffStrength!.lineup ||
+      a.team.id.localeCompare(b.team.id),
+  );
+  return new Map(sorted.map((t, i) => [t.team.id, { rank: i + 1, total: t.playoffStrength!.total, lineup: t.playoffStrength!.lineup, depth: t.playoffStrength!.depth }]));
+}
+
+const weeksText = (w: number[]) => (w.length > 1 ? `wks ${w[0]}–${w[w.length - 1]}` : `wk ${w[0]}`);
+
+/** One line for a team vs me in playoff mode, oriented from the stronger team's side (like comparisonSummary). */
+export function playoffSummary(c: Pick<PlayoffComparison, "gap" | "lineupGap" | "depthGap" | "powerRank">, above: boolean, myPowerRank: number, weeks: number[]): string {
+  const dir = above ? 1 : -1;
+  let s = `${sgn(dir * c.lineupGap)} playoff lineup pts/wk`;
+  if (Math.abs(c.depthGap) >= 0.05) s += `, ${sgn(dir * c.depthGap)} bench cover`;
+  s += ` ${above ? "" : "for you "}(${weeksText(weeks)})`;
+  if (above && c.powerRank > myPowerRank) s += "; below you on current power";
+  else if (!above && c.powerRank < myPowerRank) s += "; above you on current power";
+  s += ".";
+  return s.length > 255 ? `${s.slice(0, 254)}…` : s;
+}
+
 export function buildLeagueView(teams: TeamAnalysis[], myTeamId: string): LeagueView {
   const me = teams.find((t) => t.team.id === myTeamId);
   if (!me) throw new Error(`Team ${myTeamId} is not in this league`);
   const standing = standingsRanks(teams);
   const byPower = [...teams].sort((a, b) => a.powerRank - b.powerRank);
+  const playoff = playoffRanks(teams);
   const rows: LeagueTeamRow[] = byPower.map((t) => ({
     id: t.team.id,
     name: t.team.name,
@@ -234,6 +300,7 @@ export function buildLeagueView(teams: TeamAnalysis[], myTeamId: string): League
     record: recordText(t.team.record),
     pointsFor: t.team.record?.pointsFor ?? null,
     pointsAgainst: t.team.record?.pointsAgainst ?? null,
+    playoff: playoff.get(t.team.id) ?? null,
   }));
   const others = byPower.filter((t) => t.team.id !== myTeamId);
   const above = others.filter((t) => t.powerRank < me.powerRank).map((t) => compare(t, me, standing.get(t.team.id) ?? null));
@@ -245,6 +312,22 @@ export function buildLeagueView(teams: TeamAnalysis[], myTeamId: string): League
   const resultsUnknown = teams.filter((t) => t.resultsPpg == null).length;
   if (resultsUnknown === n) summary += " (ranked on projected starters only: results unknown)";
   summary += above.length ? `. ${above.length} team${above.length === 1 ? "" : "s"} rated above you.` : ". Nobody is rated above you.";
+  const playoffWeeks = me.playoffStrength?.weeks ?? [];
+  const mine = playoff.get(myTeamId);
+  const playoffCompare = (t: TeamAnalysis): PlayoffComparison => {
+    const p = playoff.get(t.team.id)!;
+    const base = { gap: r1(p.total - mine!.total), lineupGap: r1(p.lineup - mine!.lineup), depthGap: r1(p.depth - mine!.depth), powerRank: t.powerRank };
+    return {
+      teamId: t.team.id,
+      name: t.team.name,
+      rank: p.rank,
+      standingsRank: standing.get(t.team.id) ?? null,
+      record: recordText(t.team.record),
+      ...base,
+      summary: playoffSummary(base, p.rank < mine!.rank, me.powerRank, playoffWeeks),
+    };
+  };
+  const byPlayoff = mine ? others.filter((t) => playoff.has(t.team.id)).sort((a, b) => playoff.get(a.team.id)!.rank - playoff.get(b.team.id)!.rank) : [];
   return {
     myTeamId,
     numTeams: n,
@@ -255,5 +338,9 @@ export function buildLeagueView(teams: TeamAnalysis[], myTeamId: string): League
     above,
     below,
     summary,
+    playoffWeeks,
+    depthWeight: DEPTH_WEIGHT,
+    playoffAbove: byPlayoff.filter((t) => playoff.get(t.team.id)!.rank < mine!.rank).map(playoffCompare),
+    playoffBelow: byPlayoff.filter((t) => playoff.get(t.team.id)!.rank > mine!.rank).map(playoffCompare),
   };
 }

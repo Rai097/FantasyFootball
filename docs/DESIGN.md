@@ -701,6 +701,22 @@ in his IR slot was counted as a starter, and (2) results were ignored entirely.
   a "Results unknown for N teams … Re-import standings" notice); detail bullets Power gap (projected, results),
   Projected starters, Actual pts/game ("Results unknown — re-import standings"), "Bench depth: …, tie-breaker only".
 
+## League tab modes (2026-10-27) — Now / Playoffs
+
+Owner: power rankings should not be "done with record in mind"; keep the current view and add "one for pure playoff
+projection". A two-button toggle at the top of the League tab (default Now):
+
+* **Now**: unchanged (Power score v2: 0.7 projected starters + 0.3 actual pts/game; wins only as the last tie-break).
+* **Playoffs (wks 15–17)**: teams ranked by `TeamAnalysis.playoffStrength` (teamStrength.ts — the same number as My
+  Team's "Playoff strength": playoff lineup pts/wk + DEPTH_WEIGHT × bench cover, returns via the scenario mix). Ties:
+  lineup part, then team id. No results, no record. `league.ts` `playoffRanks` / `playoffSummary`; view fields
+  `LeagueTeamRow.playoff {rank,total,lineup,depth} | null`, `playoffWeeks`, `depthWeight`, `playoffAbove/Below`
+  (gap, lineupGap, depthGap, powerRank for contrast, one-line summary ≤ 255 chars). No playoff weeks left → the
+  Playoffs button is disabled and every `playoff` is null (never a guessed 0).
+* UI: stat row (Playoff rank, Standings, Playoff strength "lineup + bench cover", Teams above), stacked chart (lineup +
+  0.25 × bench cover), the standings table's rank column shows the active mode's rank ("Pwr" / "PO"), and "Stronger /
+  Weaker in the playoffs" collapsed rows with bullet details (gaps, power rank now, standings).
+
 ## Model v4: playoff value, perception gaps, returns (2026-10-26) — design, supersedes the value model for v4 consumers
 
 **Goal (owner):** the strongest possible starting lineup for the fantasy playoffs (weeks 15–17), built through trades,

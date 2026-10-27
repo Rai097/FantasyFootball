@@ -1,7 +1,9 @@
-// League tab (docs/DESIGN.md "League tab"): power-score chart, standings table, and "who is above me and why" as
-// collapsed rows (summary line → mini chart + bullets on tap).
+// League tab (docs/DESIGN.md "League tab", "League tab modes"): power-score chart, standings table, and "who is above me
+// and why" as collapsed rows (summary line → mini chart + bullets on tap). Two modes: Now (power score) and Playoffs
+// (playoff strength, weeks 15–17: pure projection, no results or record).
+import { useState } from "react";
 import { api, type Active, type Analysis } from "../api";
-import type { LeagueTeamRow, TeamComparison } from "../../../server/model/league";
+import type { LeagueTeamRow, LeagueView, PlayoffComparison, TeamComparison } from "../../../server/model/league";
 import { ErrorBox, Loading, Stat, Why } from "../components/common";
 import { ColumnHelp } from "../components/HelpTip";
 import { DetailList, ExpandableList, ExpandableRow, type DetailLine } from "../components/ExpandableRow";
@@ -20,18 +22,57 @@ const TIPS = {
   pa: "Points against: total points opponents scored against this team this season.",
   pwr: "Power rank: place by power score (1 = strongest roster).",
   gap: "Their power score minus yours: how far ahead (+) or behind (−) they are.",
+  playoff: "Playoff strength: projected points per week of the best lineup in the playoff weeks + 0.25 × bench cover. Results and record play no part.",
+  poLineup: "Points per week the best lineup is projected to score in the playoff weeks (byes, injuries and returns counted).",
+  poDepth: "Points per week the bench recovers when one starter is out in the playoffs.",
+  poRank: "Playoff rank: place by playoff strength (1 = strongest playoff roster).",
+  poGap: "Their playoff strength minus yours, points per week.",
 };
+
+type Mode = "now" | "playoffs";
 
 export function LeagueTab({ active }: { analysis: Analysis; active: Active & { team: string } }) {
   const res = useAsync(() => api.leagueView(active), [active.provider, active.id, active.team]);
   if (res.error) return <ErrorBox error={res.error} onRetry={res.reload} />;
   if (!res.data) return <Loading label="Ranking the league…" />;
-  const v = res.data;
-  const me = v.teams.find((t) => t.mine)!;
-  const n = v.numTeams;
+  return <LeagueBody v={res.data} />;
+}
 
+function LeagueBody({ v }: { v: LeagueView }) {
+  const playoffsOk = v.playoffWeeks.length > 0 && v.teams.some((t) => t.mine && t.playoff);
+  const [picked, setMode] = useState<Mode>("now");
+  const mode: Mode = playoffsOk ? picked : "now";
+  const weeks = playoffsOk ? `wks ${v.playoffWeeks[0]}–${v.playoffWeeks[v.playoffWeeks.length - 1]}` : "";
   return (
     <div className="stack">
+      <div className="row gap">
+        <div className="seg" role="radiogroup" aria-label="Rank teams by">
+          <button role="radio" aria-checked={mode === "now"} className={`seg-btn ${mode === "now" ? "active" : ""}`} onClick={() => setMode("now")} title={TIPS.power}>
+            Now
+          </button>
+          <button
+            role="radio"
+            aria-checked={mode === "playoffs"}
+            disabled={!playoffsOk}
+            className={`seg-btn ${mode === "playoffs" ? "active" : ""}`}
+            onClick={() => setMode("playoffs")}
+            title={playoffsOk ? TIPS.playoff : "No playoff weeks left to project."}
+          >
+            Playoffs{weeks && ` (${weeks})`}
+          </button>
+        </div>
+        <Why text={mode === "now" ? TIPS.power : TIPS.playoff} />
+      </div>
+      {mode === "now" ? <NowView v={v} /> : <PlayoffView v={v} />}
+    </div>
+  );
+}
+
+function NowView({ v }: { v: LeagueView }) {
+  const me = v.teams.find((t) => t.mine)!;
+  const n = v.numTeams;
+  return (
+    <>
       <section className="stat-row" title={v.summary}>
         <Stat label="Power rank" value={ordinal(me.powerRank)} sub={`of ${n}`} why={TIPS.pwr} />
         <Stat label="Standings" value={me.standingsRank != null ? ordinal(me.standingsRank) : "—"} sub={me.record !== "—" ? me.record : "not captured"} why={TIPS.rank} />
@@ -61,7 +102,7 @@ export function LeagueTab({ active }: { analysis: Analysis; active: Active & { t
         <section className="card">
           <h2>Standings</h2>
           {!v.standingsKnown && <div className="notice warn small">Standings not captured: re-import with the latest bookmarklet.</div>}
-          <StandingsTable teams={v.teams} />
+          <StandingsTable teams={v.teams} mode="now" />
         </section>
       </div>
 
@@ -80,7 +121,150 @@ export function LeagueTab({ active }: { analysis: Analysis; active: Active & { t
           <CompareList rows={v.below} label="Teams below you" />
         </section>
       )}
+    </>
+  );
+}
+
+function PlayoffView({ v }: { v: LeagueView }) {
+  const me = v.teams.find((t) => t.mine)!;
+  const po = me.playoff!;
+  const n = v.numTeams;
+  return (
+    <>
+      <section className="stat-row">
+        <Stat label="Playoff rank" value={ordinal(po.rank)} sub={`of ${n}`} why={TIPS.poRank} />
+        <Stat label="Standings" value={me.standingsRank != null ? ordinal(me.standingsRank) : "—"} sub={me.record !== "—" ? me.record : "not captured"} why={TIPS.rank} />
+        <Stat label="Playoff strength" value={f1(po.total)} sub={`lineup ${f1(po.lineup)} + bench cover ${f1(po.depth)}`} why={TIPS.playoff} />
+        <Stat label="Teams above" value={String(v.playoffAbove.length)} sub="in the playoffs" why="Teams with a higher playoff strength than yours; tap a row below for why." />
+      </section>
+
+      <div className="grid-league">
+        <section className="card">
+          <h2 className="row between">
+            <span>Playoff rankings</span>
+            <Why text={TIPS.playoff} />
+          </h2>
+          <PlayoffChart teams={v.teams} depthWeight={v.depthWeight} />
+        </section>
+
+        <section className="card">
+          <h2>Standings</h2>
+          {!v.standingsKnown && <div className="notice warn small">Standings not captured: re-import with the latest bookmarklet.</div>}
+          <StandingsTable teams={v.teams} mode="playoffs" />
+        </section>
+      </div>
+
+      <section className="card flush">
+        <h2 className="card-title">Stronger in the playoffs <span className="muted small">{v.playoffAbove.length}</span></h2>
+        {v.playoffAbove.length ? (
+          <PlayoffCompareList rows={v.playoffAbove} label="Teams stronger in the playoffs" />
+        ) : (
+          <p className="muted small card-title">Nobody: you have the strongest playoff roster.</p>
+        )}
+      </section>
+
+      {v.playoffBelow.length > 0 && (
+        <section className="card flush">
+          <h2 className="card-title">Weaker in the playoffs <span className="muted small">{v.playoffBelow.length}</span></h2>
+          <PlayoffCompareList rows={v.playoffBelow} label="Teams weaker in the playoffs" />
+        </section>
+      )}
+    </>
+  );
+}
+
+/** Stacked bars: playoff lineup + 0.25 × bench cover = playoff strength; axis starts below the lowest lineup (like PowerChart). */
+function PlayoffChart({ teams, depthWeight }: { teams: LeagueTeamRow[]; depthWeight: number }) {
+  const rows = teams.filter((t) => t.playoff).sort((a, b) => a.playoff!.rank - b.playoff!.rank);
+  const max = Math.max(...rows.map((t) => t.playoff!.total), 1);
+  const minLineup = Math.min(...rows.map((t) => t.playoff!.lineup));
+  const base = Math.max(0, Math.floor((minLineup - (max - minLineup) * 0.15) / 5) * 5);
+  const span = Math.max(max - base, 1);
+  return (
+    <div className="lg-chart" role="table" aria-label="Playoff strength by team">
+      <div className="lg-legend muted small">
+        <i className="sw projected" /> playoff lineup pts/wk <Why text={TIPS.poLineup} />
+        <i className="sw results" /> {depthWeight} × bench cover <Why text={TIPS.poDepth} />
+      </div>
+      <div className="lg-chart-row lg-chart-head" role="row">
+        <span>#</span>
+        <span>Team</span>
+        <span>Lineup + bench cover <span className="muted small">(axis from {base})</span></span>
+        <span className="num">Score</span>
+      </div>
+      {rows.map((t) => {
+        const p = t.playoff!;
+        const cover = Math.max(0, p.total - p.lineup);
+        return (
+          <div
+            key={t.id}
+            role="row"
+            className={`lg-chart-row${t.mine ? " mine" : ""}`}
+            title={`${t.name}: ${f1(p.total)} = ${f1(p.lineup)} lineup + ${f1(cover)} (${depthWeight} × ${f1(p.depth)} bench cover) pts/wk`}
+          >
+            <span className="muted">{p.rank}</span>
+            <span className={`lg-name${t.mine ? " strong" : ""}`}>{t.name}</span>
+            <span className="lg-bar" aria-hidden>
+              <span className="seg projected" style={{ width: `${(Math.max(0, p.lineup - base) / span) * 100}%` }} />
+              {cover > 0 && <span className="seg results" style={{ width: `${(cover / span) * 100}%` }} />}
+            </span>
+            <span className="num strong">{f1(p.total)}</span>
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+function PlayoffCompareList({ rows, label }: { rows: PlayoffComparison[]; label: string }) {
+  return (
+    <ExpandableList
+      label={label}
+      className="lg-list"
+      header={
+        <>
+          <span>Team</span>
+          <span>Why</span>
+          <span className="num" title={TIPS.poGap}>
+            Gap
+          </span>
+        </>
+      }
+    >
+      {rows.map((c) => (
+        <PlayoffCompareRow key={c.teamId} c={c} />
+      ))}
+    </ExpandableList>
+  );
+}
+
+function PlayoffCompareRow({ c }: { c: PlayoffComparison }) {
+  const details: DetailLine[] = [
+    { label: "Playoff strength gap", value: `${signed(c.gap)} pts/wk`, tone: tone(c.gap), title: TIPS.poGap },
+    { label: "Playoff lineup", value: `${signed(c.lineupGap)} pts/wk`, tone: tone(c.lineupGap), title: TIPS.poLineup },
+    { label: "Bench cover", value: `${signed(c.depthGap)} pts/wk`, tone: tone(c.depthGap), title: TIPS.poDepth },
+    { label: "Power rank now", value: ordinal(c.powerRank), title: TIPS.pwr },
+    { label: "Standings", value: c.standingsRank != null ? `${ordinal(c.standingsRank)} (${c.record})` : "—", title: TIPS.rank },
+  ];
+  return (
+    <ExpandableRow
+      className="lg-row"
+      label={c.name}
+      head={
+        <>
+          <span className="lg-team">
+            <span className="lg-rank">{c.rank}</span>
+            <span className="strong lg-name">{c.name}</span>
+          </span>
+          <span className="lg-summary">{c.summary}</span>
+          <span className={`num lg-gap delta ${deltaClass(c.gap)}`} title={TIPS.poGap}>
+            {signed(c.gap)}
+          </span>
+        </>
+      }
+    >
+      <DetailList items={details} />
+    </ExpandableRow>
   );
 }
 
@@ -130,7 +314,7 @@ function PowerChart({ teams }: { teams: LeagueTeamRow[] }) {
   );
 }
 
-function StandingsTable({ teams }: { teams: LeagueTeamRow[] }) {
+function StandingsTable({ teams, mode }: { teams: LeagueTeamRow[]; mode: Mode }) {
   const rows = [...teams].sort((a, b) => (a.standingsRank ?? 99) - (b.standingsRank ?? 99) || a.powerRank - b.powerRank);
   const H = ({ label, tip, cls = "" }: { label: string; tip: string; cls?: string }) => (
     <th className={`num ${cls}`.trim()}>
@@ -147,7 +331,7 @@ function StandingsTable({ teams }: { teams: LeagueTeamRow[] }) {
             <H label="W-L" tip={TIPS.record} />
             <H label="PF" tip={TIPS.pf} />
             <H label="PA" tip={TIPS.pa} cls="hide-sm" />
-            <H label="Pwr" tip={TIPS.pwr} />
+            {mode === "now" ? <H label="Pwr" tip={TIPS.pwr} /> : <H label="PO" tip={TIPS.poRank} />}
           </tr>
         </thead>
         <tbody>
@@ -158,7 +342,7 @@ function StandingsTable({ teams }: { teams: LeagueTeamRow[] }) {
               <td className="num">{t.record}</td>
               <td className="num">{t.pointsFor != null ? f1(t.pointsFor) : "—"}</td>
               <td className="num hide-sm">{t.pointsAgainst != null ? f1(t.pointsAgainst) : "—"}</td>
-              <td className="num">{t.powerRank}</td>
+              <td className="num">{mode === "now" ? t.powerRank : (t.playoff?.rank ?? "—")}</td>
             </tr>
           ))}
         </tbody>
