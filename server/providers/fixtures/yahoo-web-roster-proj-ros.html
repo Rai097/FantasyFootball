@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<!-- RECONSTRUCTED, NOT CAPTURED: hand-written approximation of a Yahoo Fantasy Football team roster page in the
+     projected rest-of-season stat view (football.fantasysports.yahoo.com/f1/<league>/<team>?stat1=P&stat2=PSR — the
+     query parameter itself is a guess from Yahoo's stat-view conventions). Yahoo is not reachable from this project,
+     so this is NOT Yahoo's real HTML. It imitates: a stat-view dropdown whose selected option reads
+     "Remaining Season (proj)", a two-row table header (a colspan group row, then the column names) and a "Fan Pts"
+     column that, in this view, holds the projected rest-of-season points. Verified on the owner's next import via the
+     bookmarklet's `projections` diagnostics (headers, column, viewIndicator per attempt). -->
+<html>
+<head><title>Gridiron Gurus | Sunday Funday | Fantasy Football | Yahoo! Sports</title></head>
+<body>
+<form class="statnav"><select name="stat2" id="statselect">
+  <option value="S_S_2026">Season (2026)</option>
+  <option value="S_L">Last Week</option>
+  <option value="P_PW">This Week (proj)</option>
+  <option value="P_PSR" selected="selected">Remaining Season (proj)</option>
+</select></form>
+<table id="statTable0" class="Table">
+<thead>
+<tr><th colspan="2">Offense</th><th colspan="2">Fantasy</th><th>Rankings</th></tr>
+<tr><th>Pos</th><th>Offense</th><th>Fan Pts</th><th>% Start</th><th>O-Rank</th></tr>
+</thead>
+<tbody>
+<tr><td class="pos"><span class="pos-label" data-pos="QB">QB</span></td>
+  <td><a class="Nowrap name" href="https://sports.yahoo.com/nfl/players/30123">Patrick Mahomes</a> <span class="Fz-xxs">KC - QB</span></td>
+  <td>201.45</td><td>97%</td><td>4</td></tr>
+<tr><td class="pos"><span class="pos-label" data-pos="WR">WR</span></td>
+  <td><a class="Nowrap name" href="https://sports.yahoo.com/nfl/players/34496/">Ja&#39;Marr Chase</a> <span class="Fz-xxs">Cin - WR</span> <span class="F-injury">Q</span></td>
+  <td>158.2</td><td>95%</td><td>2</td></tr>
+<tr><td class="pos"><span class="pos-label" data-pos="IR">IR</span></td>
+  <td><a class="Nowrap name" href="https://sports.yahoo.com/nfl/players/40002">Hurt Player</a> <span class="Fz-xxs">Dal - RB</span></td>
+  <td>-</td><td>0%</td><td>-</td></tr>
+<tr><td class="pos"><span class="pos-label" data-pos="DEF">DEF</span></td>
+  <td><a class="Nowrap name" href="https://sports.yahoo.com/nfl/teams/buf/">Buffalo</a> <span class="Fz-xxs">Buf - DEF</span></td>
+  <td>71.0</td><td>80%</td><td>3</td></tr>
+<tr><td class="pos"><span class="pos-label" data-pos="BN">BN</span></td>
+  <td><a class="Nowrap name" href="https://sports.yahoo.com/nfl/players/40001">Bench Guy</a> <span class="Fz-xxs">NYJ - WR,TE</span></td>
+  <td>9999</td><td>1%</td><td>-</td></tr>
+</tbody></table>
+</body></html>

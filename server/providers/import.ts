@@ -27,6 +27,9 @@ export interface ImportPlayerRaw {
   team?: string;
   status?: string;
   slot?: string;
+  /** Yahoo's projected fantasy points rest of season / this week (bookmarklet v3, release (d)). Absent = not captured. */
+  yahooProj?: number;
+  yahooProjWeekly?: number;
 }
 /** A free agent as imported. `onWaivers` absent = not captured (imports before 2026-10-26): unknown. */
 export type ImportFreeAgentRaw = Omit<ImportPlayerRaw, "slot"> & { onWaivers?: boolean };
@@ -154,8 +157,18 @@ function cleanPlayer(v: unknown, where: string): ImportPlayerRaw {
   if (status) p.status = status.toUpperCase();
   const slot = str(o.slot, 10);
   if (slot) p.slot = slot.toUpperCase();
+  // Projections: finite numbers in range or nothing (dropped silently: never a guessed 0).
+  const ros = projNum(o.yahooProj, PROJ_LIMITS.ros);
+  if (ros !== undefined) p.yahooProj = ros;
+  const wk = projNum(o.yahooProjWeekly, PROJ_LIMITS.week);
+  if (wk !== undefined) p.yahooProjWeekly = wk;
   return p;
 }
+
+/** Sanity bounds for captured Yahoo projections: rest of season ≤ 450 points, one week ≤ 60. */
+export const PROJ_LIMITS = { ros: 450, week: 60 } as const;
+const projNum = (v: unknown, hi: number): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= hi ? Math.round(v * 100) / 100 : undefined;
 
 /** Most games a team can have played in one season (wins + losses + ties). */
 const MAX_GAMES = 20;
@@ -469,8 +482,13 @@ export function buildImportLeague(db: Finder, s: StoredImport, ctx: { season: nu
       playerIds.push(p.id);
       const sel = raw.slot?.toUpperCase();
       if (sel === "IR" || sel === "IL") irPlayerIds.push(p.id);
-      // Copy with Yahoo's injury tag; the shared db entry is never mutated.
-      const copy = withYahooStatus(p, entryOf(raw), ctx.currentWeek);
+      // Copy with Yahoo's injury tag and projections; the shared db entry is never mutated.
+      let copy = withYahooStatus(p, entryOf(raw), ctx.currentWeek);
+      if (raw.yahooProj !== undefined || raw.yahooProjWeekly !== undefined) {
+        copy = { ...(copy ?? p) };
+        if (raw.yahooProj !== undefined) copy.yahooProj = raw.yahooProj;
+        if (raw.yahooProjWeekly !== undefined) copy.yahooProjWeekly = raw.yahooProjWeekly;
+      }
       if (copy) overrides[p.id] = copy;
     }
     return {

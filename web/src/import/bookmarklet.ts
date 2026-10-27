@@ -4,7 +4,7 @@
 // pages while the user is logged in, reads the league's own pages with
 // same-origin fetches, and shows the result for the user to copy/download.
 // It never sends data anywhere else.
-import { parseMyTeamId, parsePlayersHtml, parseSettingsHtml, parseStandingsHtml, playerKey, waiverGroupOf, waiverStatusOf, type ScrapedPlayer, type StandingsRecord, type WaiverGroup, type WaiverGroupList, type WaiverList } from "./yahooHtml";
+import { parseMyTeamId, parsePlayersHtml, parseProjectionHtml, parseSettingsHtml, parseStandingsHtml, playerKey, waiverGroupOf, waiverStatusOf, type ScrapedPlayer, type StandingsRecord, type WaiverGroup, type WaiverGroupList, type WaiverList } from "./yahooHtml";
 
 const DEFAULT_SLOTS = ["QB", "WR", "WR", "RB", "RB", "TE", "FLEX", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN", "IR"];
 const HALF_PPR = { passYd: 0.04, passTd: 4, passInt: -1, rushYd: 0.1, rushTd: 6, rec: 0.5, recYd: 0.1, recTd: 6, twoPt: 2, fumLost: -2, teRec: 0 };
@@ -14,6 +14,15 @@ const MAX_FA = 150;
 const MAX_KDEF = 25;
 /** Pages of players?status=W read per position group to tell waivers from free agents. */
 const MAX_W_PAGES = 6;
+/** Pages of a player list read for rest-of-season projections (25 players each; 12 teams × ~14 offense ≈ 7 pages). */
+const MAX_PROJ_PAGES = 12;
+/**
+ * Candidate URLs for Yahoo's projected rest-of-season stat view, tried in order until one shows that view as
+ * selected (RECONSTRUCTED from Yahoo's stat-view query conventions, not verified on a real page: the diagnostics
+ * record every attempt). Team pages first (already read once per team), then the taken-players list.
+ */
+const ROS_TEAM_PARAMS = ["stat1=P&stat2=PSR", "stat1=S_PSR"];
+const ROS_LIST_PARAMS = ["status=T&pos=O&stat1=S_PSR&sort=PTS", "status=ALL&pos=O&stat1=S_PSR&sort=PTS"];
 const OVERLAY_ID = "ftd-import-overlay";
 
 interface Diag {
@@ -88,8 +97,75 @@ async function run(): Promise<void> {
     myTeamId ??= parseMyTeamId(page.html, leagueId);
     diagnostics.push({ step: "team", url, status: page.status, players: r.players.length, noPos: r.noPos.slice(0, 5), ...r.diag });
     if (!r.players.length) break;
+    // This week's Yahoo projection: the roster page's "Proj" column (header-matched, never guessed).
+    const wk = parseProjectionHtml(page.html, "week");
+    for (const p of r.players) {
+      const v = p.yahooId ? wk.values.get(p.yahooId) : undefined;
+      if (v !== undefined) p.yahooProjWeekly = v;
+    }
+    if (n === 1 || !wk.diag.read) diagnostics.push({ step: "projections", url, ...wk.diag });
     teams.push({ id: String(n), name: r.teamName ?? `Team ${n}`, players: r.players });
   }
+
+  // Rest-of-season projections (what other managers see in Yahoo's trade evaluator). Only a page that shows the
+  // projected rest-of-season view as selected counts; every attempt is recorded.
+  say("reading Yahoo projections…");
+  const byYahooId = new Map<string, ScrapedPlayer>();
+  for (const t of teams) for (const p of t.players) if (p.yahooId) byYahooId.set(p.yahooId, p);
+  let projVia = "";
+  const tryRos = async (url: string) => {
+    try {
+      const page = await getPage(url);
+      const r = page.ok ? parseProjectionHtml(page.html, "ros") : undefined;
+      diagnostics.push({ step: "projections", url, status: page.status, ...(r?.diag ?? { note: "not ok" }) });
+      return r && r.values.size ? r.values : undefined;
+    } catch (e) {
+      diagnostics.push({ step: "projections", url, note: `fetch failed: ${(e as Error).message}` });
+      return undefined;
+    }
+  };
+  const setRos = (values: Map<string, number>) => {
+    let n = 0;
+    for (const [id, v] of values) {
+      const p = byYahooId.get(id);
+      if (p && p.yahooProj === undefined) (p.yahooProj = v), n++;
+    }
+    return n;
+  };
+  if (teams.length) {
+    for (const params of ROS_TEAM_PARAMS) {
+      const first = await tryRos(`${base}/${teams[0].id}?${params}`);
+      if (!first) continue;
+      projVia = `team pages (${params})`;
+      setRos(first);
+      for (const t of teams.slice(1)) {
+        say(`reading Yahoo projections (team ${t.id})…`);
+        const v = await tryRos(`${base}/${t.id}?${params}`);
+        if (v) setRos(v);
+      }
+      break;
+    }
+    if (!projVia) {
+      for (const params of ROS_LIST_PARAMS) {
+        let any = false;
+        for (let page = 0; page < MAX_PROJ_PAGES; page++) {
+          say(`reading Yahoo projections (list page ${page + 1})…`);
+          const v = await tryRos(`${base}/players?${params}&count=${page * 25}`);
+          if (!v) break;
+          any = true;
+          if (!setRos(v) && page > 0) break;
+        }
+        if (any) {
+          projVia = `player list (${params})`;
+          break;
+        }
+      }
+    }
+  }
+  const rostered = teams.reduce((a, t) => a + t.players.filter((p) => p.pos !== "K" && p.pos !== "DEF").length, 0);
+  const projRos = teams.reduce((a, t) => a + t.players.filter((p) => p.yahooProj !== undefined).length, 0);
+  const projWeek = teams.reduce((a, t) => a + t.players.filter((p) => p.yahooProjWeekly !== undefined).length, 0);
+  diagnostics.push({ step: "projections", note: projVia ? `rest of season via ${projVia}` : "no projected rest-of-season view found: yahooProj not captured", rostered, ros: projRos, week: projWeek });
 
   say("reading league settings…");
   let settingsSource: "page" | "partial" | "default" = "default";
@@ -241,12 +317,13 @@ async function run(): Promise<void> {
 
   // ---- summary
   box.textContent = "";
-  box.appendChild(el("div", "Trade Desk import v2", "font-weight:700;font-size:15px;margin-bottom:6px"));
+  box.appendChild(el("div", "Trade Desk import v3", "font-weight:700;font-size:15px;margin-bottom:6px"));
   const summary = el("div");
   const noPos = diagnostics.reduce((a, d) => a + (Array.isArray(d.noPos) ? d.noPos.length : 0), 0);
   summary.textContent =
     `${teams.length} team${teams.length === 1 ? "" : "s"} found · ${teams.reduce((a, t) => a + t.players.length, 0)} rostered players · ` +
     `standings: ${standingsTeams ? `${standingsTeams} of ${teams.length} teams` : "NOT found"} · waiver order: ${waiverRanks ? `${waiverRanks} of ${teams.length} teams` : "NOT found"} · ` +
+    `Yahoo projections: ${projRos ? `${projRos} of ${rostered} players rest of season` : "rest of season NOT found"}, ${projWeek} this week · ` +
     `${faOut.length} available players (${faOut.filter((f) => f.onWaivers === true).length} on waivers, ${faOut.filter((f) => f.onWaivers === undefined).length} unknown) · settings: ${settingsSource === "page" ? "read from Yahoo" : settingsSource === "partial" ? "partly read (check them after import)" : "NOT found, Yahoo defaults used (check them after import)"}` +
     (noPos ? ` · ${noPos} player link(s) without a position were skipped` : "");
   box.appendChild(summary);

@@ -23,6 +23,9 @@ export interface ScrapedPlayer {
   availability?: "FA" | "W";
   /** The "(Wed)" / "(10/29)" part of a waivers cell: when he clears. */
   waiverUntil?: string;
+  /** Yahoo's projected fantasy points for the rest of the season / this week (parseProjectionHtml). */
+  yahooProj?: number;
+  yahooProjWeekly?: number;
 }
 
 export interface RosterParse {
@@ -617,4 +620,117 @@ export function parseStandingsHtml(html: string, leagueId: string): StandingsPar
       ...(!tables ? { note: "no standings table (no header row naming W-L-T / Pts For / Waiver …)" } : !rows.length ? { note: "standings header found but no team rows" } : {}),
     },
   };
+}
+
+// ------------------------------------------------------------------ projections (release (d))
+/**
+ * What the projections parser read from one page. `values` maps a Yahoo player id to projected fantasy points.
+ * Never guessed: a rest-of-season value needs BOTH a points column and a page-level sign that the projected
+ * rest-of-season view is the selected one (a selected <option> / active tab reading "Remaining Season (proj)",
+ * "Rest of Season (Proj)" …); otherwise nothing is returned and `diag.note` says why.
+ */
+export interface ProjectionParse {
+  values: Map<string, number>;
+  diag: {
+    kind: "ros" | "week";
+    /** Header cells of the header row the column came from (or the first header row seen). */
+    headers: string[];
+    column?: string;
+    columnIndex?: number;
+    /** Text of the selected view control (rest of season only). */
+    viewIndicator?: string;
+    rows: number;
+    read: number;
+    note?: string;
+  };
+}
+
+/** Upper bounds (sanity): a rest-of-season projection ≤ 450 points, one week ≤ 60. */
+export const PROJ_MAX = { ros: 450, week: 60 } as const;
+
+const WEEK_PROJ_HEADER = /^proj(?:ected)?\.?(?:\s*(?:fan(?:tasy)?\s*)?(?:pts|points))?$/i;
+const PTS_HEADER = /^(?:fan(?:tasy)?\s*)?(?:pts|points)$/i;
+const ROS_TEXT = /(?:remaining|rest[\s-]+of[\s-]+(?:the\s+)?season|\bros\b)/i;
+
+/** Text of a selected / active view control that names the projected rest-of-season view (undefined = none). */
+export function rosViewIndicator(html: string): string | undefined {
+  const isRos = (t: string) => ROS_TEXT.test(t) && /proj/i.test(t);
+  for (const m of html.matchAll(/<option\b([^>]*)>([\s\S]{0,120}?)<\/option>/gi)) {
+    const t = oneLine(m[2]);
+    if (/\bselected\b/i.test(m[1]) && isRos(t)) return t;
+  }
+  // Tabs / pills / dropdown buttons: an element marked selected / active / current whose text names the view.
+  for (const m of html.matchAll(/<(a|li|span|button|div)\b([^>]*(?:class\s*=\s*["'][^"']*\b(?:selected|active|is-selected|current|Selected)\b[^"']*["']|aria-(?:selected|current)\s*=\s*["'](?:true|page)["'])[^>]*)>([\s\S]{0,200}?)<\/\1>/gi)) {
+    const t = oneLine(m[3]);
+    if (t.length <= 60 && isRos(t)) return t;
+  }
+  return undefined;
+}
+
+/** Cells of a row, each repeated by its colspan, so header and body indexes line up. */
+function spanCells(rowHtml: string): { text: string; th: boolean }[] {
+  const out: { text: string; th: boolean }[] = [];
+  for (const m of rowHtml.matchAll(/<t([dh])\b([^>]*)>([\s\S]*?)<\/t\1>/gi)) {
+    const span = Math.min(10, Math.max(1, Number(/colspan\s*=\s*["']?(\d+)/i.exec(m[2])?.[1] ?? 1)));
+    const text = oneLine(m[3]);
+    for (let i = 0; i < span; i++) out.push({ text, th: m[1].toLowerCase() === "h" });
+  }
+  return out;
+}
+
+/**
+ * Projected fantasy points per player from a Yahoo roster / player-list page.
+ *  - "week": a column headed "Proj" / "Proj Pts" / "Projected Points" (the roster page's weekly projection).
+ *  - "ros": the page must show the projected rest-of-season view as selected (rosViewIndicator); the points column is
+ *    then a "Proj…" column, else "Fan Pts" / "Pts" (which, in that view, holds the projection).
+ * Values outside 0..PROJ_MAX or not plain numbers ("-", "") are skipped. Defenses (no player id) are skipped.
+ */
+export function parseProjectionHtml(html: string, kind: "ros" | "week"): ProjectionParse {
+  const values = new Map<string, number>();
+  const diag: ProjectionParse["diag"] = { kind, headers: [], rows: 0, read: 0 };
+  if (kind === "ros") {
+    const vi = rosViewIndicator(html);
+    if (vi) diag.viewIndicator = vi;
+  }
+  const want = kind === "week" ? [WEEK_PROJ_HEADER] : [WEEK_PROJ_HEADER, PTS_HEADER];
+  const link = /\/nfl\/players\/(\d+)/;
+  for (const t of html.matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
+    let col: number | undefined;
+    for (const r of t[0].matchAll(/<tr\b[\s\S]*?<\/tr>/gi)) {
+      const cells = spanCells(r[0]);
+      const id = link.exec(r[0])?.[1];
+      if (!id) {
+        if (!cells.length) continue;
+        if (!diag.headers.length) diag.headers = cells.map((c) => c.text).slice(0, 16);
+        for (const re of want) {
+          const i = cells.findIndex((c) => re.test(c.text.trim()));
+          if (i >= 0) {
+            col = i;
+            diag.headers = cells.map((c) => c.text).slice(0, 16);
+            diag.column = cells[i].text;
+            diag.columnIndex = i;
+            break;
+          }
+        }
+        continue;
+      }
+      diag.rows++;
+      if (col === undefined) continue;
+      const raw = cells[col]?.text.replace(/,/g, "").trim() ?? "";
+      if (!/^\d{1,3}(?:\.\d{1,2})?$/.test(raw)) continue;
+      const v = Number(raw);
+      if (v > PROJ_MAX[kind]) continue;
+      if (!values.has(id)) {
+        values.set(id, v);
+        diag.read++;
+      }
+    }
+  }
+  if (diag.column === undefined) diag.note = `no ${kind === "week" ? "Proj" : "projected points"} column`;
+  else if (kind === "ros" && !diag.viewIndicator) {
+    diag.note = "projected rest-of-season view not shown as selected: values ignored";
+    values.clear();
+    diag.read = 0;
+  } else if (!diag.read) diag.note = "column found but no numeric values";
+  return { values, diag };
 }

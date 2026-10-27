@@ -386,3 +386,27 @@ test("read-path migration: a legacy league is cleaned once even when its stored 
   assert.equal(fresh.teamNamesClean, true);
   assert.deepEqual(cleanStoredTeamNames(cleanStoredTeamNames(fresh)).teams.map((t) => t.name), ["One", "Two"].map((n, i) => fresh.teams[i].name));
 });
+
+test("release (d): yahooProj / yahooProjWeekly are kept per player when valid, dropped alone when not; buildImportLeague copies them", () => {
+  const b = body();
+  b.teams[0].players[0] = { ...b.teams[0].players[0], yahooProj: 201.456, yahooProjWeekly: 22.4 } as never;
+  const bad = [-3, 9999, "12", NaN, null];
+  b.teams[1].players[2] = { ...b.teams[1].players[2], yahooProj: bad[0], yahooProjWeekly: 61 } as never;
+  b.teams[1].players[0] = { ...b.teams[1].players[0], yahooProj: "88" } as never;
+  const s = validateImport(b);
+  assert.equal(s.teams[0].players[0].yahooProj, 201.46);
+  assert.equal(s.teams[0].players[0].yahooProjWeekly, 22.4);
+  for (const p of [s.teams[1].players[2], s.teams[1].players[0]]) {
+    assert.equal(p.yahooProj, undefined, "out of range / not a number: dropped");
+    assert.equal(p.yahooProjWeekly, undefined);
+  }
+  for (const v of bad.slice(1)) assert.equal(validateImport({ ...body(), teams: [{ id: "1", name: "A", players: [{ name: "X", pos: "WR", yahooProj: v }] }] }).teams[0].players[0].yahooProj, undefined, String(v));
+  const l = buildImportLeague(db, s, { season: 2026, currentWeek: 8 });
+  assert.equal(l.playerOverrides.P1.yahooProj, 201.46);
+  assert.equal(l.playerOverrides.P1.yahooProjWeekly, 22.4);
+  assert.equal(PLAYERS[0].yahooProj, undefined, "db entry untouched");
+  assert.equal(l.playerOverrides.P2.yahooProj, undefined, "Chase keeps his injury copy, no projection");
+  // Old payloads (no projections) are unchanged.
+  const old = validateImport(body());
+  assert.ok(old.teams.every((t) => t.players.every((p) => p.yahooProj === undefined && p.yahooProjWeekly === undefined)));
+});

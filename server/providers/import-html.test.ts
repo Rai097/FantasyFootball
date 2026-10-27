@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { availabilityFrom, htmlToText, mapSlotToken, parseMyTeamId, parsePlayersHtml, parsePosTeam, parseSettingsHtml, parseStandingsHtml, playerKey, waiverStatusOf } from "../../web/src/import/yahooHtml.js";
+import { availabilityFrom, htmlToText, mapSlotToken, parseMyTeamId, parsePlayersHtml, parsePosTeam, parseProjectionHtml, parseSettingsHtml, parseStandingsHtml, playerKey, rosViewIndicator, waiverStatusOf } from "../../web/src/import/yahooHtml.js";
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const html = (n: string) => readFileSync(path.join(dir, n), "utf8");
@@ -198,4 +198,47 @@ test("standings: another league's links, separate W / L / T columns, and a page 
   assert.deepEqual(none.rows, []);
   assert.match(none.diag.note ?? "", /no standings table/);
   assert.equal(none.diag.missing.length, 7);
+});
+
+// ---------------------------------------------------------------- release (d): Yahoo projections
+
+test("projections (week): the roster page's 'Proj' column, matched by header; no column → a diagnostics note", () => {
+  const r = parseProjectionHtml(html("yahoo-web-roster.html"), "week");
+  assert.equal(r.diag.column, "Proj");
+  assert.equal(r.values.get("30123"), 21.3);
+  assert.equal(r.values.get("34496"), 17.9);
+  assert.equal(r.values.get("40002"), 0);
+  assert.equal(r.values.has("team:buf"), false, "defenses carry no player id");
+  const none = parseProjectionHtml(html("yahoo-web-players.html"), "week");
+  assert.equal(none.values.size, 0);
+  assert.match(none.diag.note!, /no Proj column/);
+  assert.ok(none.diag.headers.includes("Fan Pts"), JSON.stringify(none.diag.headers));
+});
+
+test("projections (rest of season): only with the projected rest-of-season view selected; colspan headers line up; bad cells skipped", () => {
+  // RECONSTRUCTED fixture (not Yahoo's real markup): verified on the owner's next import.
+  const page = html("yahoo-web-roster-proj-ros.html");
+  const r = parseProjectionHtml(page, "ros");
+  assert.equal(r.diag.viewIndicator, "Remaining Season (proj)");
+  assert.equal(r.diag.column, "Fan Pts");
+  assert.equal(r.diag.columnIndex, 2);
+  assert.deepEqual([...r.values], [["30123", 201.45], ["34496", 158.2]], "'-' and an out-of-range 9999 are skipped");
+  // The same page without the selected view (Yahoo ignored the parameter): Fan Pts is season-to-date, never used.
+  const ignored = parseProjectionHtml(page.replace(' selected="selected"', ""), "ros");
+  assert.equal(ignored.values.size, 0);
+  assert.equal(ignored.diag.viewIndicator, undefined);
+  assert.match(ignored.diag.note!, /not shown as selected/);
+  assert.equal(ignored.diag.column, "Fan Pts", "the headers seen are still recorded");
+  // A normal roster page has no rest-of-season view at all.
+  const roster = parseProjectionHtml(html("yahoo-web-roster.html"), "ros");
+  assert.equal(roster.values.size, 0);
+  assert.ok(roster.diag.note);
+});
+
+test("rosViewIndicator: a selected option or an active tab naming the projected rest of season; not the dropdown's other options", () => {
+  assert.equal(rosViewIndicator('<option value="x">Remaining Season (proj)</option><option selected>Season (2026)</option>'), undefined);
+  assert.equal(rosViewIndicator('<select><option selected value="P_PSR">Rest of Season (Proj)</option></select>'), "Rest of Season (Proj)");
+  assert.equal(rosViewIndicator('<ul><li class="Selected"><a href="?stat1=P">Remaining Season (Proj)</a></li></ul>'), "Remaining Season (Proj)");
+  assert.equal(rosViewIndicator('<a aria-current="page">ROS Proj</a>'), "ROS Proj");
+  assert.equal(rosViewIndicator("<h2>Remaining Season (proj)</h2>"), undefined, "a heading alone is not a selected view");
 });
