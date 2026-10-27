@@ -1062,5 +1062,6 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   unconfirmed, three back ~wk 9–10); bench upgrades still empty. trades2 first call ~0.73 s (was ~0.51 s).
 * Known gaps: an unconfirmed return scores 0 in my lineup model and 0 in the partner's perceived view, so his main
   effect is market value (FantasyCalc, 20% of acceptance) and true value; the finder now often adds one as a
-  sweetener on my side. Yahoo's IR-slot eligibility list is not verified (docs not checked); the set above is the
+  sweetener on my side. A player in MY IR slot counts 0 in my lineup baseline (IR slot = no lineup points), so giving
+  one who is back soon costs me no strength; only the true-value bar (≥ 3% of the deal) prices him. Yahoo's IR-slot eligibility list is not verified (docs not checked); the set above is the
   conservative one.

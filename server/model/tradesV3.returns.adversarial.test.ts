@@ -59,6 +59,7 @@ test("evaluate: an out player I GIVE is valued on his return estimate (true valu
   const ev = evaluateTradeV3(c, "me", "them", ["mIR"], ["tWR5"]);
   assert.ok(Math.abs(ev.packages!.trueGive - 70) < 1e-9, `trueGive ${ev.packages!.trueGive}`);
   assert.ok(ev.details!.some((d) => d.label === "Injured, you give" && /return unconfirmed, a bet on his recovery \(valued 70\.0/.test(d.value)), JSON.stringify(ev.details));
+  assert.ok(ev.summary!.startsWith("mIR (injured, return unconfirmed) for tWR5: "), ev.summary);
   // Selling him for a bench WR does not make my lineup worse now (he scores 0), but I hand over 70 of true value.
   assert.ok(!/^Accept/.test(ev.verdict), ev.verdict);
 });
@@ -69,6 +70,7 @@ test("finder (owner 2026-10-26): a return-unconfirmed piece with trade value may
   const r = findTradesV3(c, "me", { valueSource: "model", limit: 50 });
   const all = [...r.trades, ...r.smallerEdges, ...r.nearMisses];
   assert.ok(all.length > 0, "baseline finds trades");
+  assert.ok(all.some((t) => [...t.me.gives, ...t.them.gives].some((p) => p.id === "mIR" || p.id === "tIR")), "an unconfirmed piece with trade value is actually offered");
   for (const t of all) {
     assert.ok(!t.me.gives.some((p) => p.id === "mRB3"), `${t.key} sells the riser`);
     assert.ok(t.me.scoreDelta === undefined || t.me.scoreDelta >= 1.0 - 1e-9, `${t.key}: gain ${t.me.scoreDelta}`);
