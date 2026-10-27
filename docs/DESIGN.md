@@ -385,8 +385,8 @@ market ≥ 8; ≤ 2 per partner, ≤ 2 per player I give, one per (partner, my t
 
 ```
 GET  /api/league/:provider/:id/trades2 → TradeFinderResult & { valueSource: "fantasycalc"|"model",
-       partners: [{ teamId, complementarity, pitch }] }; Trade gains band, bandLabel, fairnessPct, pitch, notes, packages
-POST /api/league/:provider/:id/trade/evaluate → v3 Trade & { verdict } (band, acceptance; flags pieces outside the rules)
+       partners: [{ teamId, complementarity, pitch }] }; Trade gains lineupLabel, marketLabel, yahooView, pitch, packages (release (d): band / bandLabel / fairnessPct removed)
+POST /api/league/:provider/:id/trade/evaluate → v3 Trade & { verdict } (labels, acceptance; flags pieces outside the rules)
 GET  /api/league/:provider/:id/analysis → … + valueSource;  values rows carry market, marketRank, trueMarket, edge
 ```
 
@@ -957,3 +957,64 @@ Owner-specific worked cases live outside the repo (public).
   season-ending IR); games missed count weeks before `currentWeek`, so in the mid-week data state (week 7 with one
   game unplayed) a player who already missed week 7 shows one game fewer and the IR floor lands a game late until the
   next refresh; an unmatched roster line without a position hides every same-named player from Stash watch.
+
+**Release (d) implemented (2026-10-26) — Yahoo projections in the import + Trades v4** (overrides section 5 and
+"Trade finder v3" on acceptance, partner checks, ranking, pitch and labels)
+* **Import v3 (enabler)**: the bookmarklet (box and button "Trade Desk import v3": old bookmarks keep old code) reads
+  this week's Yahoo projection from the roster page's "Proj" column on the team pages it already fetches, and Yahoo's
+  rest-of-season projection from candidate stat-view URLs tried in order — team pages `?stat1=P&stat2=PSR`, then
+  `?stat1=S_PSR`, then the taken-players list `players?status=T&pos=O&stat1=S_PSR` (then `status=ALL`), ≤ 12 pages.
+  These parameters are GUESSES from Yahoo's stat-view conventions; a value counts only when the page shows the projected
+  rest-of-season view as selected (a selected `<option>` / active tab naming "remaining / rest of season" + "proj",
+  `rosViewIndicator`) AND a points column is found by header ("Proj…", else "Fan Pts" in that view). Every attempt is a
+  `step: "projections"` diagnostics entry (url, headers, column, viewIndicator, rows read, note); the overlay says
+  "Yahoo projections: N of M players rest of season, W this week". Free agents are not read (trades need rostered
+  players only). Fixture `yahoo-web-roster-proj-ros.html` is RECONSTRUCTED; verified on the owner's next import.
+* **Payload**: per player optional `yahooProj` (0–450) and `yahooProjWeekly` (0–60), finite numbers, dropped alone when
+  invalid (never a guessed 0); old imports unchanged. `buildImportLeague` copies them onto the player override, so
+  `Player.yahooProj` reaches every ValuedPlayer.
+* **Perceived value** (`server/model/perception.ts`, attached once per valued context in api.ts, cached per player
+  object, never serialised): base = yahooProj ÷ his scheduled games from the current week to the league's final week
+  (assumption: Yahoo's "remaining season" ends there; if it runs to NFL week 18 the per-game rate reads ~10% high —
+  check against yahooProjWeekly on the first real import), else `ValuedPlayer.ecrPts` (projection v4's ECR curve at
+  his FantasyPros rank, set even when the projection skipped the anchor), else our effPpg. Rate = 0.7 × base + 0.3 ×
+  mean actual points of his last ≤ 3 games inside the last 4 weeks. Weekly = rate in game weeks (estimate: only where our
+  model has him available — the rank does not price an absence); Yahoo's weekly number replaces the current week.
+  Gap = our playoff-weighted rate (value mode weights over his game weeks) − perceived rate. Spike = last game ≥ 5 pts
+  and ≥ 1.5 × perceived rate.
+* **Their view of a trade**: `perceivedLineupTotal` = Σ over remaining weeks of the optimal lineup on perceived weekly
+  points (team strength's greedy `weekLineup`, IR slot excluded, unscaled rosters), after − before, for both sides.
+  Card line "What Yahoo shows them: you +x, them −y pts" (source "yahoo" only when every player in the deal was
+  captured; else "What Yahoo likely shows them … (estimate)" and a "Their view from" bullet).
+* **Acceptance v4** = min(0.95, (0.8 × logistic(their perceived Δ per week; +1 → 0.70) + 0.2 × market curve (+5% → 0.65))
+  × 0.7 per player they give right after a spike × 0.85 per extra player × 0.8 for their most valued player × 1.1 when
+  it fixes their weakest slot); a perceived loss (rest-of-season Δ < 0 after rounding) caps it at 0.25 and fails the
+  partner check ("Yahoo shows them −y pts rest of season") — a near miss, never the main list. Deleted: the market-loss,
+  best-player-loss and our-projection lineup-floor partner checks and the overpay divisor (the consolidation premium
+  stays).
+* **Gem score** = acceptance × (my Δ team strength + 0.25 × min(4, perception gaps in my favour)), team strength = the
+  release (b) playoff lineup (+ 0.25 depth). Gate for any list: Δ team strength ≥ 1.0 pt/week (was the mode score);
+  the mode score still has to clear +0.5 / main list +1.0. Never sell a riser (unchanged).
+* **Cover lost** (`coverLost`): giving my best bench player at a starter's position for that starter's bye week ahead
+  (current → final week) with nothing kept or received covering it within 0.5 pts ⇒ "Bye cover lost" bullet; giving my
+  only usable QB / TE backup ⇒ "Playoff cover lost". Tag "loses bye cover". Flag only (no score change).
+* **Pitch** = reasons for them, ≤ 3: the slot it fills (their weakest), a backup I send who covers a starter's bye they
+  keep, their perceived lineup gain ("Yahoo projects your lineup +x pts over the rest of the season", estimate: "the
+  projections put …"), recent production of a player they get (≥ 10 pts and ≥ his perceived rate last game); the
+  unconfirmed-return bet first. Never a market-value claim (tested on every list and evaluate).
+* **Labels**: `bandLabel` / `band` / `fairnessPct` and `FairnessBand` deleted; `lineupLabel` = "Lineup impact: good
+  for you (+x/wk you, −y/wk them)" (our projections, rest of season per week), `marketLabel` = "Market value: they get
+  +z%" (help: FantasyCalc, matters only a little), `yahooView`. Row summary: "A for B: playoff lineup +x/wk, your team
+  +y. Yahoo shows them +z pts, ~P% accept." Finder headline bullets "Their view" (captured N of M / estimate) and
+  "Market values".
+* **IR in trades**: an unconfirmed return's `tradeValue` = 0.5 × the 0–100 value of his FULL healthy surplus from current
+  week + 4 (was the surplus of half his points, which fell below replacement for most players ⇒ 0); cards say "a bet on
+  his recovery". Finder eligibility unchanged (IR / out 4+ weeks are still not suggested; evaluate values them).
+* **Demo league (2026 cache, week 7, no Yahoo projections → estimate)**: finder 250–410 ms per team (was ~50 ms; the
+  perceived lineup runs ~10 greedy week lineups per side per candidate); first three teams 7 / 6 / 5 main-list trades.
+* Known gaps: the stat-view URLs and the real markup of the projected view are unverified (diagnostics on the next
+  import); Yahoo's projections exist only for rostered players read on import day (no refresh until re-import);
+  Yahoo's weekly evaluator may use per-week projections we approximate by an even split; K/DEF perceived = our rate
+  (never traded); calibration values (0.8 / 0.2, +1 pt/wk → 0.70, spike 1.5×, gap bonus 0.25) to revisit after the first
+  real-league run.
+

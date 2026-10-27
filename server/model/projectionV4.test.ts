@@ -347,4 +347,8 @@ test("release (d): an unconfirmed return is worth ½ of his full healthy surplus
   assert.equal(u.ret!.week, null);
   assert.ok(hr > repl && 0.5 * hr < repl, `fixture: healthy rate ${hr} above replacement ${repl}, half of it below`);
   assert.ok(u.ret!.tradeValue! > 0, `trade value ${u.ret!.tradeValue}`);
+  // Captured Yahoo projections ride along on the valued player (perception reads them there).
+  const y = valuePlayers(L(), [...POOL, { ...p, yahooProj: 88.5, yahooProjWeekly: 9.1 }], tables).players.get("mid")!;
+  assert.equal(y.yahooProj, 88.5);
+  assert.equal(y.yahooProjWeekly, 9.1);
 });

@@ -15,9 +15,12 @@ VERIFIED 2026-10-26 on the owner's v2 import (real Yahoo pages): standings 12/12
    edge-cached the old ".js" bookmarklet for 4 h).
 MODEL v4 (DESIGN "Model v4"): (a) signals, (b) projection v4 / labels / power score v2 / no riser sales, (c) returns +
    stash watch + IR "hold" values SHIPPED 2026-10-26 (acceptance cases checked on a data copy — see Claude's memory).
-   Residual from (c): IR players with an unconfirmed return have tradeValue 0 (trades ignore them) — fix in (d).
-   Next: (d) Yahoo projections in the import + trades v4 (acceptance from the partner's
-   view, bye/playoff cover flag), (e) playoff odds + Best moves.
+   (d) BUILT 2026-10-26 (DESIGN "Release (d) implemented"): import v3 captures Yahoo projections (URL params and
+   markup UNVERIFIED — check the `projections` diagnostics on the owner's next import), perception.ts, Trades v4
+   (acceptance from the partner's Yahoo-style lineup view, spike penalty, lost bye cover, pitch for them, lineup /
+   market labels), IR tradeValue fix. Next for (d): adversarial test → review → deploy → owner re-imports with v3.
+   Open question for the owner: should the finder suggest IR players (return unconfirmed) as pieces now that they
+   carry a value? (eligibility unchanged in (d)). Next release: (e) playoff odds + Best moves.
 NEXT (backlog, highest value first):
 - Right after it (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
