@@ -24,7 +24,10 @@ MODEL v4 (DESIGN "Model v4"): (a) signals, (b) projection v4 / labels / power sc
    league are empty for want of tradeable bench pieces (gate probe, fix round 1), not a mis-set gate.
    Injured trade pieces (owner 2026-10-26, DESIGN "Injured trade pieces"): BUILT, not deployed — injured players are
    pieces with ≥ 3 games left from their return (never out for the season), IR slots counted in roster cuts, every
-   partner searched. Residual to watch: return-unconfirmed players often ride along as market sweeteners.
+   partner searched. Fix round 1 BUILT (not deployed): returners count at expected availability in every lineup /
+   strength / partner view (unconfirmed ½ × healthy from wk +4, IR slot from his return; DESIGN "Fix round 1 — a
+   returner is never free"). Real import: suggestions unchanged — the unconfirmed pieces (~6–7 pts/wk at ½) sit below
+   the owner's starters, so their playoff cost is ~0. Owner question: price a returner's upside (option value)?
    Next release: (e) playoff odds + Best moves.
 NEXT (backlog, highest value first):
 - DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is

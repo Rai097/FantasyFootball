@@ -1060,8 +1060,27 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
 * **Owner import (week 8, team 4, after the change)**: 18 suggestions, 13 with an injured piece (4 of 6 main, 3 of 5
   smaller edges, 6 of 7 near misses); pieces: two return-unconfirmed players I give; four I get (one return
   unconfirmed, three back ~wk 9–10); bench upgrades still empty. trades2 first call ~0.73 s (was ~0.51 s).
-* Known gaps: an unconfirmed return scores 0 in my lineup model and 0 in the partner's perceived view, so his main
-  effect is market value (FantasyCalc, 20% of acceptance) and true value; the finder now often adds one as a
-  sweetener on my side. A player in MY IR slot counts 0 in my lineup baseline (IR slot = no lineup points), so giving
-  one who is back soon costs me no strength; only the true-value bar (≥ 3% of the deal) prices him. Yahoo's IR-slot eligibility list is not verified (docs not checked); the set above is the
-  conservative one.
+* **Fix round 1 — a returner is never free** (one rule in the shared lineup code, every list and side): a returning
+  player's expected weekly points = his healthy rate × availability. Back ~wk N: projection v4's own weekly points from
+  wk N (0 before, × 0.85 first game; no confidence factor — that one is stash ranking only). Return unconfirmed:
+  `ReturnInfo.expWeekly` = healthy × matchup × 0.5 from current week + 4 (0.1-rounded; `returnValue` / `playoffPts`
+  are its sums), added by `rosterScore.weeklyPoints` — so team strength, the roster score (judge3 / teamV3) and cover
+  checks count it; projection v4's `weekly` / value stay 0 for him (no double discount; `tradeValue` unchanged). Out for
+  the season → 0. IR slot (`activeRoster` → `irSlotView`, test `irSlotReturns`): never this week or bench depth
+  (effPpg 0), counts from his return week (he leaves the slot when healthy); no `ret` or out for the season → never.
+  Roster cuts (`rosterExcess`) unchanged. Partner's view (`perceive` / `perceivedLineupTotal`): an unconfirmed return
+  is our expected points on both sources (Yahoo projects an IR player ~0; the ECR rank does not price a recovery);
+  IR-slot players follow the same rule (week 1 always 0). A lineup model only loses the MARGINAL: a ½-rate returner
+  below my starters and bench cover costs ~0, by design. Side effect: League tab playoff strength (analysis.ts) counts
+  IR-slot returners too.
+* **Owner import after fix round 1 (snapshot, team 4)**: the 18 suggestions and every playoff gain are unchanged
+  (13 with an injured piece: 11 where I give one, 5 where I get one; distinct pieces still two unconfirmed I give, four
+  I get). The owner's example (a healthy RB + an injured RB with return unconfirmed for two RBs) stays +2.8/wk: his expected
+  5.9 / 7.2 / 6.6 pts in weeks 15–17 (healthy 12 × ½) sit below my FLEX starters (≥ 9.6) and my bench RB cover
+  (7.2–9.0), so he adds nothing to my playoff lineup — the rule prices him and the price is small (trade value 2.4).
+  17 detail lines moved (season, team score, Yahoo view "you", their weekly lineup). trades2 first call 0.80 s (old
+  code, same run: 0.74 s); analysis payload +0.2 KB. Open: pricing the upside (a 50% chance he is back at full rate and
+  starts) would be an option-value rule, not this one — owner's call.
+* Known gaps: the later roster crunch when an IR-slot player returns (someone must be cut) is not modelled; our rate
+  for the perception gap (`ourRate`) still excludes an unconfirmed return's expected weeks. Yahoo's IR-slot
+  eligibility list is not verified (docs not checked); the set above is the conservative one.
