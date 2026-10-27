@@ -1031,4 +1031,5 @@ Owner-specific worked cases live outside the repo (public).
   `importedAt`). `yahooCoverage` counts weekly-only captures. `lineupLabel` verdict follows the playoff number.
   Returns: a player ruled out of his next game (this week's report, or his own Out tag via `tagOut`) is never back for
   it on any path (the designated-to-return window could).
+  Perf: the finder's search skips the team-strength simulation for a candidate no list can take (`judge3` lazy).
 
