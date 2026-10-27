@@ -291,7 +291,7 @@ function analyse(): TeamAnalysis[] {
   return result;
 }
 
-// ---------- trades ----------
+// ---------- trades (mock Trade Finder: this week's lineup only) ----------
 function applyTrade(roster: VP[], out: VP[], inn: VP[], drops: VP[] = []): VP[] {
   let next = roster.filter((p) => !out.some((o) => o.id === p.id)).concat(inn);
   let extra = inn.length - out.length;
@@ -341,7 +341,6 @@ function buildTrade(myId: string, partnerId: string, give: VP[], get: VP[]): Tra
   if (get.length > give.length) tags.push(`${give.length}-for-${get.length} depth`);
   const myNeeds = analyse().find((a) => a.team.id === myId)!.needs;
   for (const p of get) if (myNeeds.includes(p.pos)) tags.push(`fills ${p.pos} need`);
-  for (const p of get) if (p.ppgExp26 - p.ppg26 >= 3) tags.push(`buy-low: ${p.name.split(" ").slice(-1)[0]} exp > act`);
   for (const p of get) if (p.injury) tags.push("injury-discount");
   const partner = TEAMS.find((t) => t.id === partnerId)!;
   return {
@@ -353,11 +352,10 @@ function buildTrade(myId: string, partnerId: string, give: VP[], get: VP[]): Tra
     score: me.lineupDelta * acceptance,
     summary: `Send ${give.map((p) => p.name).join(" + ")} to ${partner.name} for ${get.map((p) => p.name).join(" + ")}: your starters ${me.lineupDelta >= 0 ? "+" : ""}${me.lineupDelta.toFixed(1)} ppg, theirs ${them.lineupDelta >= 0 ? "+" : ""}${them.lineupDelta.toFixed(1)}.`,
     tags: [...new Set(tags)],
-    why: `Fairness ${fairness.toFixed(2)} = value they get ${valueGive.toFixed(1)} ÷ value they give ${valueGet.toFixed(1)}; acceptance blends fairness with their lineup change (${them.lineupDelta.toFixed(1)} ppg).`,
   };
 }
 
-function findTrades(myId: string, partner?: string, wantPos?: string, maxGive = 2, maxGet = 2): Trade[] {
+function mockTrades(myId: string, partner?: string, wantPos?: string, maxGive = 2, maxGet = 2): Trade[] {
   const tradeable = (p: VP) => p.pos !== "K" && p.pos !== "DEF" && p.remainingGames > 0;
   const packs = (ps: VP[], max: number) => {
     const out: VP[][] = ps.map((p) => [p]);
@@ -486,13 +484,9 @@ function route(method: string, url: URL, body: unknown): unknown {
     for (const x of PLAYERS) players[x.id] = x;
     return { league, players, teams: analyse(), replacement, myTeamId: team, notes: ["ECR ranks are PPR; points use league scoring."] } satisfies Analysis;
   }
-  if (sub === "trades") {
-    const n = (k: string) => Number(url.searchParams.get(k) ?? 2) || 2;
-    return findTrades(team, url.searchParams.get("partner") || undefined, url.searchParams.get("wantPos") || undefined, n("maxGive"), n("maxGet"));
-  }
   if (sub === "trades2") {
     const n = (k: string) => Number(url.searchParams.get(k) ?? 2) || 2;
-    const all = findTrades(team, url.searchParams.get("partner") || undefined, url.searchParams.get("wantPos") || undefined, n("maxGive"), n("maxGet"));
+    const all = mockTrades(team, url.searchParams.get("partner") || undefined, url.searchParams.get("wantPos") || undefined, n("maxGive"), n("maxGet"));
     const mode = (url.searchParams.get("mode") || "balanced") as TradeFinderResult["mode"];
     const trades = all.filter((t) => t.me.lineupDelta >= 1);
     const smallerEdges = all.filter((t) => t.me.lineupDelta < 1);

@@ -248,52 +248,32 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.equal((await get(`${L}/values?id=nope`)).status, 404);
   });
 
-  let trades: any[] = [];
-  test("GET trades (unfiltered)", async () => {
-    const { status, json } = await get(`${L}/trades`);
-    assert.equal(status, 200);
-    trades = json;
-    assert.ok(json.length >= 10, `only ${json.length} trades`);
-    assert.ok(json.length <= 40);
-    assertClean(json, "trades");
-    const keys = new Set<string>();
-    for (const t of json) {
-      assert.ok(t.me.lineupDelta >= 0.75, `${t.key}: me.lineupDelta ${t.me.lineupDelta}`);
-      assert.ok(t.acceptance >= 0 && t.acceptance <= 1);
-      assert.ok(t.fairness > 0);
-      assert.ok(t.me.gives.length >= 1 && t.me.gives.length <= 2);
-      assert.ok(t.them.gives.length >= 1 && t.them.gives.length <= 2);
-      for (const p of [...t.me.gives, ...t.them.gives]) assert.ok(p.pos !== "K" && p.pos !== "DEF", `${t.key}: K/DEF traded (${p.name})`);
-      assert.ok(t.summary && t.why && Array.isArray(t.tags));
-      assert.ok(!keys.has(t.key), `duplicate trade ${t.key}`);
-      keys.add(t.key);
-    }
-    for (let i = 1; i < json.length; i++) assert.ok(json[i - 1].score >= json[i].score, "trades not sorted by score");
+  test("GET trades (v1) is gone: one valuation, one Trade Finder (trades2)", async () => {
+    const r = await get(`${L}/trades`);
+    assert.equal(r.status, 404);
   });
 
-  test("GET trades with partner / wantPos filters", async () => {
-    const partner = trades[0].them.teamId;
-    const byPartner = await get(`${L}/trades?partner=${partner}`);
+  test("GET trades2 with partner / wantPos / maxGive filters", async () => {
+    const all = (await get(`${L}/trades2`)).json;
+    const first = [...all.trades, ...all.smallerEdges][0];
+    assert.ok(first, "the finder returns at least one trade");
+    const partner = first.them.teamId;
+    const byPartner = await get(`${L}/trades2?partner=${partner}`);
     assert.equal(byPartner.status, 200);
-    assert.ok(byPartner.json.length > 0);
-    for (const t of byPartner.json) assert.equal(t.them.teamId, partner);
-
+    for (const t of [...byPartner.json.trades, ...byPartner.json.smallerEdges, ...byPartner.json.nearMisses]) assert.equal(t.them.teamId, partner);
     for (const pos of ["RB", "WR"]) {
-      const r = await get(`${L}/trades?wantPos=${pos}`);
+      const r = await get(`${L}/trades2?wantPos=${pos}`);
       assert.equal(r.status, 200);
-      for (const t of r.json) assert.ok(t.them.gives.some((p: any) => p.pos === pos), `${t.key}: no ${pos} received`);
+      for (const t of [...r.json.trades, ...r.json.smallerEdges]) assert.ok(t.them.gives.some((p: any) => p.pos === pos), `${t.key}: no ${pos} received`);
     }
-    const lower = await get(`${L}/trades?wantPos=te&maxGive=1&maxGet=1`);
+    const lower = await get(`${L}/trades2?wantPos=te&maxGive=1&maxGet=1`);
     assert.equal(lower.status, 200);
-    for (const t of lower.json) {
+    for (const t of [...lower.json.trades, ...lower.json.smallerEdges]) {
       assert.ok(t.them.gives.some((p: any) => p.pos === "TE"));
       assert.equal(t.me.gives.length, 1);
       assert.equal(t.them.gives.length, 1);
     }
-    const bad = await get(`${L}/trades?partner=nope`);
-    assert.equal(bad.status, 400);
-    assert.equal(typeof bad.json.error, "string");
-    const self = await get(`${L}/trades?partner=${trades[0].me.teamId}`);
+    const self = await get(`${L}/trades2?partner=${first.me.teamId}`);
     assert.equal(self.status, 400, "partner == team must be rejected");
     assert.equal(typeof self.json.error, "string");
   });
@@ -685,9 +665,9 @@ describe("server integration (import provider)", { timeout: 300_000 }, () => {
     assert.equal(values.status, 200);
     assert.ok(values.json[0].value >= 99);
 
-    const trades = await get(`${base}/trades`);
+    const trades = await get(`${base}/trades2`);
     assert.equal(trades.status, 200);
-    assert.ok(Array.isArray(trades.json) && trades.json.length > 0, "no trades");
+    assert.ok([...trades.json.trades, ...trades.json.smallerEdges, ...trades.json.nearMisses].length > 0, "no trades");
     assert.equal(JSON.stringify(trades.json).includes("Imported Test League -"), false, "trade text repeats the league name");
     assertClean(trades.json, "import trades");
 

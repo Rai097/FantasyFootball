@@ -255,11 +255,6 @@ export const api = {
   league: (a: Pick<Active, "provider" | "id">, refresh = false) =>
     request<League>("GET", `${base(a)}${qs({ refresh: refresh ? 1 : undefined })}`),
   analysis: (a: Active) => request<Analysis>("GET", `${base(a)}/analysis${qs({ team: a.team })}`),
-  trades: (a: Active, q: TradeQuery = {}) =>
-    request<Trade[]>(
-      "GET",
-      `${base(a)}/trades${qs({ team: a.team, partner: q.partner, wantPos: q.wantPos, maxGive: q.maxGive ?? 2, maxGet: q.maxGet ?? 2 })}`,
-    ),
   /** Trade Finder v3: market-value packages, smaller edges, near misses, partners and a summary line. */
   trades2: (a: Active, q: TradeQuery = {}) =>
     request<TradeFinderResult>(

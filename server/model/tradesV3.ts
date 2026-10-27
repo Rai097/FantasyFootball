@@ -1,9 +1,9 @@
 // Trade Finder v3: market-value packages that another manager would actually send or accept.
 // Perceived value = FantasyCalc market (fallback: our value); true value = our model. See docs/DESIGN.md "Trade finder v3".
-import type { DetailItem, FairnessBand, LeagueSettings, Position, SlotKind, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
+import type { DetailItem, FairnessBand, LeagueSettings, Position, SlotKind, Team, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
 import { FLEX_SLOTS, effPpg, eligible, optimalLineup, slotLabels, usable, type LineupResult } from "./lineup.js";
-import { applyTrade, combos, fmtSigned, lineupChanges, names, tradeDeadlinePassed, type TradeContext } from "./trades.js";
-import { state2, type State2 } from "./tradesV2.js";
+import { applyTrade, combos, fmtSigned, lineupChanges, names, teamState, tradeDeadlinePassed, type TradeContext } from "./tradeKit.js";
+import { irSet } from "./analysis.js";
 import { MODE_WEIGHTS, activeRoster, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
 import { riskAdjusted } from "./injuryRisk.js";
 import { injuryKind } from "./projection.js";
@@ -183,7 +183,23 @@ interface Weakest {
   player: ValuedPlayer | null;
 }
 
-export interface TeamV3 extends State2 {
+/** A team's roster, lineup and roster score (IR-slotted players add no lineup or depth points; value total keeps them). */
+export interface TeamBase {
+  team: Team;
+  roster: ValuedPlayer[];
+  base: LineupResult;
+  parts: ScoreParts;
+  irIds: Set<string>;
+  total: number;
+}
+
+export function teamBase(ctx: TradeContext, teamId: string): TeamBase {
+  const s = teamState(ctx, teamId);
+  const irIds = irSet(s.team);
+  return { ...s, parts: rosterParts(ctx.league.settings, activeRoster(s.roster, irIds), ctx.replacement).parts, irIds, total: s.roster.reduce((a, p) => a + p.value, 0) };
+}
+
+export interface TeamV3 extends TeamBase {
   analysis?: TeamAnalysis;
   pieces: ValuedPlayer[];
   deficit: Record<Group, number>;
@@ -201,7 +217,7 @@ export interface TeamV3 extends State2 {
 
 export function teamV3(ctx: TradeContext, teamId: string): TeamV3 {
   const S = ctx.league.settings;
-  const s = state2(ctx, teamId);
+  const s = teamBase(ctx, teamId);
   const analysis = ctx.teams.find((t) => t.team.id === teamId);
   const pieces = s.roster.filter((p) => p.pos !== "QB" && !ineligibleReason(p, S, s.irIds));
   const deficit = { QB: 0, RB: 0, WR: 0, TE: 0, FLEX: 0 } as Record<Group, number>;
@@ -505,7 +521,7 @@ function tradePitch(j: Judged3, their: TeamV3): string {
 }
 
 /** "QB rule" items when a QB moves (null when none does); used for trade and bench-upgrade cards. */
-function qbItems(my: TeamV3, their: TeamV3, give: ValuedPlayer[], get: ValuedPlayer[]): DetailItem[] | null {
+export function qbItems(my: TeamV3, their: TeamV3, give: ValuedPlayer[], get: ValuedPlayer[]): DetailItem[] | null {
   const qbs = [...give, ...get].filter((p) => p.pos === "QB");
   if (!qbs.length) return null;
   return qbs.map((q) => {
@@ -515,7 +531,7 @@ function qbItems(my: TeamV3, their: TeamV3, give: ValuedPlayer[], get: ValuedPla
   });
 }
 
-function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, mode: TradeMode): Trade {
+export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, mode: TradeMode): Trade {
   const S = ctx.league.settings;
   const { give, get } = j;
   const meAfter = applyTrade(S.slots, my.roster, give, get.map(riskAdjusted), my.irIds);
@@ -808,13 +824,7 @@ export function evaluateTradeV3(
   return { ...trade, details: [...pre, ...(trade.details ?? [])], verdict };
 }
 
-// ---------------------------------------------------------------- QB rule note / bench upgrades
-
-/** "QB rule" items when a QB moves (null when none does); used for bench-upgrade cards. */
-export function qbRuleItems(ctx: TradeContext, myTeamId: string, partnerId: string, give: ValuedPlayer[], get: ValuedPlayer[]): DetailItem[] | null {
-  if (![...give, ...get].some((p) => p.pos === "QB")) return null;
-  return qbItems(teamV3(ctx, myTeamId), teamV3(ctx, partnerId), give, get);
-}
+// ---------------------------------------------------------------- bench-upgrade rule (benchUpgrades.ts)
 
 /**
  * v3 bench-upgrade filter: both players pass the finder's eligibility (no K/DEF, not hurt long-term,
@@ -830,7 +840,7 @@ export function benchUpgradeOk(mine: ValuedPlayer, theirs: ValuedPlayer, mySeaso
   return worth(mine) && worth(theirs) && asset && mySeasonDelta >= BENCH_MIN_SEASON;
 }
 
-/** Full bench-upgrade acceptance for findBenchUpgrades(…, { accept }): eligibility + QB rule + benchUpgradeOk. */
+/** Full bench-upgrade acceptance for findBenchUpgrades: eligibility + QB rule + benchUpgradeOk. */
 export function benchUpgradeFilter(ctx: TradeContext, myTeamId: string) {
   const S = ctx.league.settings;
   const my = teamV3(ctx, myTeamId);

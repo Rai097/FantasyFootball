@@ -2,7 +2,7 @@
 import type { Availability, DetailItem, Position, ValuedPlayer, WaiverBreakout, WaiverRow, WaiverTarget } from "./types.js";
 import { eligible, optimalLineup, slotLabels } from "./lineup.js";
 import { irSet, rosterOf } from "./analysis.js";
-import type { TradeContext } from "./trades.js";
+import type { TradeContext } from "./tradeKit.js";
 import { riskStatus } from "./injuryRisk.js";
 import { injuryKind } from "./projection.js";
 

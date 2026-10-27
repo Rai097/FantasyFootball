@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { cached, cacheKeys, importerName, invalidateLeague } from "./api.js";
 
 test("invalidateLeague drops every cache of that league only", async () => {
-  const keys = ["import:y1:ctx", "import:y1:trades:1::::2:2", "import:y1:trades2:1:balanced::::2:2", "import:y1:bench:1:balanced", "import:y1:waivers:1", "import:y1:breakouts:1:all:30:0", "import:y12:ctx", "demo:y1:ctx"];
+  const keys = ["import:y1:ctx", "import:y1:trades2:1:balanced::::2:2", "import:y1:bench:1:balanced", "import:y1:waivers:1", "import:y1:breakouts:1:all:30:0", "import:y12:ctx", "demo:y1:ctx"];
   for (const k of keys) await cached(k, false, async () => k);
   let calls = 0;
   await cached("import:y1:ctx", false, async () => (calls++, "x"));

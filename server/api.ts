@@ -35,9 +35,8 @@ import { analyzeLeague, analyzeTeams, type LeagueContext } from "./model/analysi
 import { buildLeagueView } from "./model/league.js";
 import { attachFloor, attachRisers } from "./model/signals.js";
 import { getPriorWeeks } from "./data/priorWeeks.js";
-import { findTrades } from "./model/trades.js";
-import { findBenchUpgrades } from "./model/tradesV2.js";
-import { benchUpgradeFilter, evaluateTradeV3, findTradesV3, qbRuleItems } from "./model/tradesV3.js";
+import { findBenchUpgrades } from "./model/benchUpgrades.js";
+import { evaluateTradeV3, findTradesV3 } from "./model/tradesV3.js";
 import { attachMarket, marketQuery, type ValueSource } from "./model/market.js";
 import { parseMode } from "./model/rosterScore.js";
 import { rankWaivers, toWaiversResponse, type FreeAgentInput } from "./model/waivers.js";
@@ -80,7 +79,7 @@ function invalidate(prefix: string) {
 }
 /**
  * Drop every cached result for one league. All league caches (ctx = league + analysis,
- * trades, trades2, bench, waivers, breakouts) are keyed `${provider}:${id}:…`.
+ * trades2, bench, waivers, breakouts) are keyed `${provider}:${id}:…`.
  */
 export function invalidateLeague(provider: string, id: string): void {
   invalidate(`${provider}:${id}:`);
@@ -421,24 +420,6 @@ apiRouter.get(
   }),
 );
 
-apiRouter.get(
-  "/api/league/:provider/:id/trades",
-  h(async (req, res) => {
-    const provider = parseProvider(req.params.provider);
-    const l = await loadContext(provider, req.params.id, isRefresh(req));
-    const team = teamParam(req, l.league, provider);
-    const partner = req.query.partner ? String(req.query.partner) : undefined;
-    if (partner && !l.league.teams.some((t) => t.id === partner)) throw new HttpError(400, `Unknown partner "${partner}"`);
-    if (partner === team) throw new HttpError(400, "Partner must be a different team");
-    const wantPos = req.query.wantPos ? String(req.query.wantPos).toUpperCase() : undefined;
-    const maxGive = Number(req.query.maxGive ?? 2) || 2;
-    const maxGet = Number(req.query.maxGet ?? 2) || 2;
-    const key = `${provider}:${req.params.id}:trades:${team}:${partner ?? ""}:${wantPos ?? ""}:${maxGive}:${maxGet}`;
-    const trades = await cached<Trade[]>(key, false, async () => findTrades(l.ctx, team, { partnerId: partner, wantPos, maxGive, maxGet }));
-    res.json(trades);
-  }),
-);
-
 // Trade Finder v3 (market-value packages; same shape as v2 plus valueSource / partners). UI uses this.
 apiRouter.get(
   "/api/league/:provider/:id/trades2",
@@ -470,16 +451,8 @@ apiRouter.get(
     const team = teamParam(req, l.league, provider);
     const mode = parseMode(req.query.mode);
     const key = `${provider}:${req.params.id}:bench:${team}:${mode}`;
-    // v3: same eligibility and QB rule as the finder; both players market ≥ 3 and value ≥ 3, the one I get market ≥ 8 or value ≥ 5; my season lineup +0.8 pts/week.
-    res.json(
-      await cached<Trade[]>(key, false, async () => {
-        const ok = benchUpgradeFilter(l.ctx, team);
-        return findBenchUpgrades(l.ctx, team, { mode, accept: (m, g, j, partnerId) => ok(m, g, j.sim.myParts.season, partnerId) }).map((t) => {
-          const qb = qbRuleItems(l.ctx, team, t.them.teamId, t.me.gives, t.them.gives);
-          return qb ? { ...t, details: [...(t.details ?? []), ...qb] } : t;
-        });
-      }),
-    );
+    // v3 engine: same eligibility and QB rule as the finder; both players market ≥ 3 and value ≥ 3, the one I get market ≥ 8 or value ≥ 5; my season lineup +0.8 pts/week.
+    res.json(await cached<Trade[]>(key, false, async () => findBenchUpgrades(l.ctx, team, { mode })));
   }),
 );
 

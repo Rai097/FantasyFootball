@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { capRows, claimThreshold, makeSummary, rankWaivers, snapTrendOf, thesisItems } from "./waivers.js";
 import { analyzeTeams } from "./analysis.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
-import type { TradeContext } from "./trades.js";
+import type { TradeContext } from "./tradeKit.js";
 import type { ValuedPlayer, WaiverTarget } from "./types.js";
 
 /** Everything the user can read for a row: the summary plus every details line. */

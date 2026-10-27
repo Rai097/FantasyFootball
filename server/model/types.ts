@@ -241,7 +241,7 @@ export interface TradeSide {
   /** Players this side must release to stay at roster size (lowest-value bench). */
   drops?: ValuedPlayer[];
   /**
-   * Trade Finder v2 roster-score deltas (1 decimal). scoreDelta is the mode-weighted
+   * Trade Finder roster-score deltas (1 decimal). scoreDelta is the mode-weighted
    * total for me and the "balanced" total for the partner. Set by trades2, bench-upgrades
    * and evaluate; optional so older clients / fixtures stay valid.
    */
@@ -268,13 +268,11 @@ export interface Trade {
   /** v3 / bench upgrades / evaluate: the full analysis, one short "label: value" item per fact (shown on tap). */
   details?: DetailItem[];
   tags: string[];
-  /** Legacy v1 / v2 prose explanation (the /trades endpoint and v2 evaluate); v3 responses use `details`. */
-  why?: string;
-  /** Trade Finder v2 mode the trade was scored under. */
+  /** Trade Finder mode the trade was scored under. */
   mode?: "now" | "balanced" | "playoffs";
   /** Near misses only: why the trade did not make the main list. */
   reason?: string;
-  // ---- Trade Finder v3 (market-value packages); optional so v1/v2 trades stay valid.
+  // ---- Trade Finder v3 (market-value packages); optional so hand-made fixtures stay valid.
   /** Fairness band from the partner's point of view (perceived market values). */
   band?: FairnessBand;
   /** "Fair", "Slightly favors them (+7%)", … */

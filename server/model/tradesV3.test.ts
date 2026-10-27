@@ -6,7 +6,7 @@ import {
   acceptanceV3,
   benchUpgradeFilter,
   benchUpgradeOk,
-  qbRuleItems,
+  qbItems,
   bestQbRank,
   dropCost,
   evaluateTradeV3,
@@ -19,7 +19,7 @@ import {
   spareQb,
   teamV3,
 } from "./tradesV3.js";
-import type { TradeContext } from "./trades.js";
+import type { TradeContext } from "./tradeKit.js";
 import { analyzeTeams } from "./analysis.js";
 import { attachMarket } from "./market.js";
 import { rosterParts } from "./rosterScore.js";
@@ -184,7 +184,7 @@ test("finder: no K/DEF/backup QBs/waiver-level pieces; pitch, band, summary, det
     assert.ok(t.details && t.details.length > 0, t.key);
     assert.deepEqual(detailProblems(t.details!), [], t.key);
     assert.ok(t.details!.some((d) => d.label === "Playoff byes" || /^Playoff bye/.test(d.label)), `${t.key}: playoff-bye fact`);
-    assert.equal(t.why, undefined, `${t.key}: no prose why on v3 trades`);
+    assert.equal((t as { why?: unknown }).why, undefined, `${t.key}: no prose why on v3 trades`);
   }
   assert.deepEqual(summaryProblems(r.summary), [], r.summary);
   assert.deepEqual(detailProblems(r.summaryDetails ?? []), []);
@@ -257,7 +257,7 @@ test("bench-upgrade filter applies eligibility and the QB rule", () => {
   assert.equal(ok(P("mK"), P("tWR4"), 2, "them"), false);
   assert.equal(ok(P("mRB4"), P("tWR4"), 2, "them"), true);
   assert.equal(ok(P("mQB"), P("tWR4"), 2, "them"), false, "my starting QB never moves");
-  const items = qbRuleItems(ctx, "me", "them", [P("mQB2")], [P("tWR5")]);
+  const items = qbItems(teamV3(ctx, "me"), teamV3(ctx, "them"), [P("mQB2")], [P("tWR5")]);
   assert.equal(items![0].label, "QB rule");
   assert.match(items![0].value, /^mQB2 allowed/);
 });

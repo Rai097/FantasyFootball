@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { rankWaivers, toWaiverRow, type FreeAgentInput } from "./waivers.js";
 import { analyzeTeams } from "./analysis.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
-import type { TradeContext } from "./trades.js";
+import type { TradeContext } from "./tradeKit.js";
 import type { ValuedPlayer, WaiverBreakout, WaiverTarget } from "./types.js";
 import { parsePlayersHtml } from "../../web/src/import/yahooHtml.js";
 
