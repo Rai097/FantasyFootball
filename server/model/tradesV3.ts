@@ -92,14 +92,15 @@ export const modeGain = (j: Pick<Judged3, "strengthDelta" | "myDelta">, mode: Tr
  */
 export function listsInMode(j: Pick<Judged3, "strengthDelta" | "myDelta">, mode: TradeMode, marginal = false): boolean {
   const g = modeGain(j, mode);
-  if (!(marginal ? g > 0 : g >= V3.minMyGain)) return false;
+  // The bar compares the gain as the card shows it (0.1-rounded), so the bullet and the gate never disagree.
+  if (!(marginal ? g > 0 : r1(g) >= V3.minMyGain)) return false;
   const floor = V3.playoffFloor[mode];
   return floor === undefined || j.strengthDelta >= floor;
 }
 
 /** Whether a deal clears this mode's listing bar (listsInMode), as one bullet value (evaluate). */
 export function modeBarText(j: Pick<Judged3, "strengthDelta" | "myDelta">, mode: TradeMode): string {
-  const g = modeGain(j, mode);
+  const g = r1(modeGain(j, mode));
   const what = mode === "playoffs" ? "playoff strength" : "team score";
   const floor = V3.playoffFloor[mode];
   if (g < V3.minMyGain) return `fails: ${what} ${fmtSigned(g)} (needs +${V3.minMyGain.toFixed(1)})`;

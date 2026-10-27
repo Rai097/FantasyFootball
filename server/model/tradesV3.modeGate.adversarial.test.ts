@@ -159,9 +159,14 @@ describe("mode gate units (adversarial)", () => {
   // DEFECT (low): the bar text rounds the gain to 0.1 but the gate compares the exact team score, so a team score of
   // +0.96 reads "fails: team score +1.0 (needs +1.0)" — a contradiction on the card (Win now / Balanced; playoff
   // strength is already rounded before the gate, so Playoffs cannot show it).
-  test.todo("DEFECT low: Win now team score +0.96 must not read 'fails: team score +1.0 (needs +1.0)'", () => {
+  test("DEFECT low (fixed): Win now team score +0.96 must not read 'fails: team score +1.0 (needs +1.0)'", () => {
     const txt = modeBarText({ myDelta: 0.96, strengthDelta: 0 }, "now");
     assert.ok(!/\+1\.0 \(needs \+1\.0\)/.test(txt), txt);
+    // Gate and text use the same 0.1-rounded gain: +0.96 shows +1.0 and clears; +0.94 shows +0.9 and fails.
+    assert.equal(txt, "clears: team score +1.0, playoff strength +0.0");
+    assert.equal(listsInMode({ myDelta: 0.96, strengthDelta: 0 }, "now"), true);
+    assert.equal(listsInMode({ myDelta: 0.94, strengthDelta: 0 }, "now"), false);
+    assert.equal(modeBarText({ myDelta: 0.94, strengthDelta: 0 }, "now"), "fails: team score +0.9 (needs +1.0)");
   });
 });
 
