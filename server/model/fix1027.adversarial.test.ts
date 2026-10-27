@@ -261,7 +261,7 @@ test("cover: K / DEF starters' byes and backups never produce cover items (strea
   assert.deepEqual(coverLost(S, my, roster.filter((p) => p.id === "k2" || p.id === "def2"), [Pl("x", "WR", 5)]), []);
 });
 
-test("FINDING cover: giving the FLEX TE who covers the TE starter's playoff bye is not flagged (only a 4-pt TE is left)", { todo: "finding: the FLEX mate given away is a lost bye cover" }, () => {
+test("cover: giving the FLEX TE who covers the TE starter's playoff bye is flagged (only a 4-pt TE is left)", () => {
   const roster = [...core(), Pl("te1", "TE", 13, 15), Pl("te2", "TE", 12.5), Pl("wr3", "WR", 12), Pl("wrB", "WR", 10), Pl("teB", "TE", 4), Pl("rbB", "RB", 6)];
   const my = myTeam(roster);
   const items = coverLost(S, my, [roster.find((p) => p.id === "te2")!], [Pl("x", "WR", 5)]);

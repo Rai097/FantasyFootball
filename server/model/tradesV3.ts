@@ -635,7 +635,7 @@ export function coverLost(S: LeagueSettings, my: TeamV3, give: ValuedPlayer[], g
   // A same-position starter in a FLEX-type slot covers a starter in his own slot (owner 2026-10-27: a TE at W/R/T
   // moves to TE when the TE is out). For a bye that opens the FLEX instead, so the cover is the best bench player
   // eligible for that FLEX slot; a FLEX starter's own bye is covered the same way; otherwise the best bench player at
-  // the position.
+  // the position. Giving the FLEX mate himself loses the cover when no same-position player as good is left.
   const flexSlot = new Map(my.base.lineup.filter((l) => l.player && FLEX_SLOTS.includes(l.slot)).map((l) => [l.player!.id, l.slot] as const));
   const bench = my.roster.filter((p) => !my.starters.has(p.id) && !my.irIds.has(p.id));
   const flex = my.roster.filter((p) => flexSlot.has(p.id) && !my.irIds.has(p.id));
@@ -653,9 +653,19 @@ export function coverLost(S: LeagueSettings, my: TeamV3, give: ValuedPlayer[], g
   for (const s of starters) {
     const w = s.bye;
     if (w === undefined || w < S.currentWeek || w > S.finalWeek) continue;
-    const before = byeCover(s, w, bench, flex);
-    if (!before.p || !giveIds.has(before.p.id)) continue;
-    if (byeCover(s, w, benchAfter, flexAfter).v >= before.v - 0.5) continue;
+    let before = byeCover(s, w, bench, flex);
+    let lost = !!before.p && giveIds.has(before.p.id) && byeCover(s, w, benchAfter, flexAfter).v < before.v - 0.5;
+    // The FLEX mate himself given away: compare the position's cover — him before, the best same-position player
+    // left after (another FLEX mate, a bench player or one I get).
+    const mate = flexSlot.has(s.id) ? undefined : flex.find((p) => p.pos === s.pos && p.id !== s.id && p.bye !== w);
+    if (!lost && mate && giveIds.has(mate.id)) {
+      const v = ptsIn(S, mate, w);
+      if (best(benchAfter.concat(flexAfter), (p) => p.pos === s.pos && p.id !== s.id, w).v < v - 0.5) {
+        before = { p: mate, v };
+        lost = true;
+      }
+    }
+    if (!lost || !before.p) continue;
     const key = `${before.p.id}:${w}`;
     if (seen.has(key)) continue;
     seen.add(key);

@@ -1160,7 +1160,8 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   Now a same-position starter in a FLEX-type slot counts as a backup (the claim needs every such player given and none
   received); for a starter's bye he moves over and the FLEX is refilled from the bench, so the bye cover is the best
   bench player eligible for that FLEX slot, as for a FLEX starter's own bye (giving a bench TE while a TE plays FLEX
-  loses no bye cover; giving the best bench RB while an RB plays FLEX still does).
+  loses no bye cover; giving the best bench RB while an RB plays FLEX still does). Giving the FLEX mate himself is a
+  lost bye cover when the best same-position player left is > 0.5 pts below him that week (fix round 2).
 * **Expected touchdowns regress**: TD rate is the noisiest part of fantasy scoring. Signals now carry each game's
   expected TD points (league scoring) and expected TDs (`expTdPts`, `expTds`, recency-weighted like `expPts`) and last
   season's actual TD points / TDs per game (`priorTdPts`, `priorTds`). In `valuePlayers` the TD part of the usage rate
