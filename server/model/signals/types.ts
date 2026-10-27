@@ -59,6 +59,15 @@ export interface PriorSeason {
   games: number;
   actual: StatLine;
   expected: StatLine;
+  /** Season opportunity totals (ep_weekly pass / rush / rec attempts); absent when the source has none (player DB). */
+  opps?: { passAtt: number; carries: number; targets: number };
+}
+
+/** Touchdowns or opportunities by kind: passing (per attempt), rushing (per carry), receiving (per target). */
+export interface ByTdKind {
+  pass: number;
+  rush: number;
+  rec: number;
 }
 
 export interface PlayerSignalInput {
@@ -87,9 +96,17 @@ export interface WeekOpportunity {
   snapShare?: number;
   expPts: number;
   actPts: number;
-  /** Expected touchdown points (league scoring) and expected touchdowns (count) in this game; part of expPts. */
-  expTdPts: number;
-  expTds: number;
+  /** Opportunities in this game: pass attempts, carries, targets (0 when the source has none). */
+  passAtt: number;
+  carries: number;
+  targets: number;
+  /** Expected and actual touchdowns by kind in this game (expected TD rate per opportunity, fix round 2). */
+  expPassTd: number;
+  expRushTd: number;
+  expRecTd: number;
+  actPassTd: number;
+  actRushTd: number;
+  actRecTd: number;
 }
 
 export interface WeekSignal extends WeekOpportunity {
@@ -145,9 +162,10 @@ export interface TalentPrior {
   priorGames: number;
   priorExpPpg: number | null;
   priorActPpg: number | null;
-  /** Last season's actual touchdown points (league scoring) and touchdowns per game; null without games. */
-  priorTdPts: number | null;
-  priorTds: number | null;
+  /** Last season's actual touchdowns per game by kind; null without games. */
+  priorTds: ByTdKind | null;
+  /** Last season's opportunities per game by kind; null when unknown (no games or no opportunity data). */
+  priorOpps: ByTdKind | null;
   age: number | null;
   ageRising: boolean | null;
   rookie: boolean;

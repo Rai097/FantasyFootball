@@ -260,10 +260,13 @@ export function parseSnaps(csv: string, pfrToGsis: Map<string, string>): Map<str
 export function buildPrior(rows: EpRow[]): Map<string, PriorSeason> {
   const out = new Map<string, PriorSeason>();
   for (const r of rows) {
-    const p = out.get(r.playerId) ?? { games: 0, actual: emptyLine(), expected: emptyLine() };
+    const p = out.get(r.playerId) ?? { games: 0, actual: emptyLine(), expected: emptyLine(), opps: { passAtt: 0, carries: 0, targets: 0 } };
     p.games += 1;
     p.actual = addLines(p.actual, r.actual);
     p.expected = addLines(p.expected, r.expected);
+    p.opps!.passAtt += r.passAttempts;
+    p.opps!.carries += r.carries;
+    p.opps!.targets += r.targets;
     out.set(r.playerId, p);
   }
   return out;

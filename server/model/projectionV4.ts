@@ -20,6 +20,7 @@ import type { PlayerSignalInput, PlayerSignals, SkillPos } from "./signals/types
 import { luckLabel, luckText } from "./labels.js";
 import { RETURNS, estimateReturn, returnText, type Absence, type ReturnEstimate } from "./returns.js";
 import { FLEX_RANK } from "./signals/trend.js";
+import { positionTdBaselines, regressTds, tdPointsOf, type TdShrink } from "./tdRegression.js";
 
 
 // ---------------------------------------------------------------- inputs
@@ -64,8 +65,8 @@ export const V4 = {
   priorK: 2,
   /** Small samples lean on last season more: prior weight = max(priorK, priorKSmall − sample games) (≥ 6 games: priorK). */
   priorKSmall: 8,
-  /** Expected touchdowns per game regress toward a baseline with this many pseudo-games (last season's actual TD rate
-   *  when he played ≥ priorMinGames, else the position's mean expected TD rate this season). */
+  /** Expected TDs per opportunity regress toward a baseline with this many games × his opportunity rate (last season's
+   *  actual TDs per opportunity when he played ≥ priorMinGames, else the position's mean actual rate this season). */
   tdK: 8,
   priorMinGames: 4,
   /** Points allowed: pseudo-games of league average, and the factor's clamp. */
@@ -186,19 +187,6 @@ interface WeekProj {
   pts: number;
 }
 
-/** Expected touchdowns per game: this season's (recency-weighted), regressed, and the baseline it was pulled toward. */
-export interface TdShrink {
-  raw: number;
-  regressed: number;
-  base: number;
-  source: "prior" | "position";
-  /** Expected points per game removed (negative = added) by the regression. */
-  ptsDelta: number;
-}
-
-/** n-game rate x pulled toward baseline b with k pseudo-games. */
-export const shrinkRate = (x: number, n: number, b: number, k: number): number => (n * x + k * b) / (n + k);
-
 interface Base {
   p: Player;
   sig: PlayerSignals | null;
@@ -295,25 +283,9 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     if (!sigMemo.has(p)) sigMemo.set(p, p.pos === "K" || p.pos === "DEF" ? null : signalsOf(p));
     return sigMemo.get(p)!;
   };
-  // Position TD baseline: mean expected TD points / touchdowns per game over every game of the position's players with
-  // ≥ priorMinGames games this season (players without a usable prior regress toward it).
-  const tdBaseline = new Map<Position, { pts: number; n: number }>();
-  for (const pos of SKILL_POSITIONS) {
-    let pts = 0;
-    let n = 0;
-    let g = 0;
-    for (const p of all) {
-      if (p.pos !== pos) continue;
-      const sg = sigOf(p);
-      if (!sg || sg.weeks.length < V4.priorMinGames) continue;
-      for (const w of sg.weeks) {
-        pts += w.expTdPts;
-        n += w.expTds;
-        g++;
-      }
-    }
-    if (g) tdBaseline.set(pos, { pts: pts / g, n: n / g });
-  }
+  // Position TD baselines: ACTUAL TDs per opportunity over every game of players with ≥ priorMinGames games
+  // (players without a usable prior regress toward them; tdRegression.ts).
+  const tdBaseline = positionTdBaselines(all.map((p) => ({ pos: p.pos, sig: sigOf(p) })), V4.priorMinGames);
   const makeBase = (p: Player): Base => {
     const weeks = [...p.weeks].sort((a, b) => a.week - b.week);
     const act = weeks.map((w) => score(scoring, w.actual, p.pos));
@@ -344,18 +316,22 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       t && t.priorGames >= V4.priorMinGames && t.priorExpPpg !== null && t.priorActPpg !== null ? (t.priorExpPpg + t.priorActPpg) / 2 : null;
     // Never more pseudo-games than the prior season actually had (a 4-game 2025 counts as ≤ 4 games).
     const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames), t!.priorGames) : 0;
-    // Touchdowns are the noisiest part of expected points: the TD part regresses toward a baseline (V4.tdK pseudo-games),
+    // Touchdowns are the noisiest part of expected points: the TD part regresses per opportunity (tdRegression.ts),
     // the rest is unchanged. Not on the actual-points fallback (no expected TDs there).
     let td: TdShrink | null = null;
-    const xTdPts = sig?.rates.expTdPts ?? null;
-    const xTds = sig?.rates.expTds ?? null;
-    if (!missingExp && expRate !== null && sampleGames > 0 && xTdPts !== null && xTds !== null) {
-      const usePrior = !!t && t.priorGames >= V4.priorMinGames && t.priorTdPts !== null && t.priorTds !== null;
-      const pb = usePrior ? { pts: t!.priorTdPts!, n: t!.priorTds! } : tdBaseline.get(p.pos);
-      if (pb) {
-        const ptsAfter = shrinkRate(xTdPts, sampleGames, pb.pts, V4.tdK);
-        td = { raw: xTds, regressed: shrinkRate(xTds, sampleGames, pb.n, V4.tdK), base: pb.n, source: usePrior ? "prior" : "position", ptsDelta: xTdPts - ptsAfter };
-      }
+    if (!missingExp && expRate !== null && sig) {
+      const r = sig.rates;
+      const usePrior = !!t && t.priorGames >= V4.priorMinGames && t.priorTds !== null;
+      td = regressTds({
+        xTd: { pass: r.expPassTd ?? 0, rush: r.expRushTd ?? 0, rec: r.expRecTd ?? 0 },
+        opp: { pass: r.passAtt ?? 0, rush: r.carries ?? 0, rec: r.targets ?? 0 },
+        n: sampleGames,
+        k: V4.tdK,
+        prior: usePrior ? { tds: t!.priorTds!, opps: t!.priorOpps } : null,
+        position: tdBaseline.of(p.pos, sig),
+        minGames: V4.priorMinGames,
+        points: tdPointsOf(scoring),
+      });
     }
     let model: number | null = null;
     if (expRate !== null && sampleGames > 0) {

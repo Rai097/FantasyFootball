@@ -1162,15 +1162,19 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   bench player eligible for that FLEX slot, as for a FLEX starter's own bye (giving a bench TE while a TE plays FLEX
   loses no bye cover; giving the best bench RB while an RB plays FLEX still does). Giving the FLEX mate himself is a
   lost bye cover when the best same-position player left is > 0.5 pts below him that week (fix round 2).
-* **Expected touchdowns regress**: TD rate is the noisiest part of fantasy scoring. Signals now carry each game's
-  expected TD points (league scoring) and expected TDs (`expTdPts`, `expTds`, recency-weighted like `expPts`) and last
-  season's actual TD points / TDs per game (`priorTdPts`, `priorTds`). In `valuePlayers` the TD part of the usage rate
-  is pulled toward a baseline with `V4.tdK` = 8 pseudo-games (calibration value) against the sample games (unflagged 1,
-  flagged 0.25): expected pts' = expected pts − xTD pts + (n × xTD pts + tdK × baseline) / (n + tdK); the non-TD part,
-  finishing, the prior blend and the ECR anchor are unchanged. Baseline = last season's actual TD rate when he played
-  ≥ `priorMinGames`, else the position's mean expected TD rate this season over every game of players with
-  ≥ `priorMinGames` games (a plain mean: a no-prior lead back is pulled toward an average back's TD rate; measured on
-  a real league as a 0.43 → 0.36 TDs/g, −0.3 pts/g effect for one rookie RB). Not applied on the actual-points fallback
-  (no expected TDs) or to K / DEF. Why-line: "Touchdowns: 1.20 expected/g regressed to 0.89 (last season 0.63)".
-  Tests: a high-xTD 7-game RB moves toward his prior; xTD rate = baseline → unchanged, no line; a no-prior player →
-  position mean; K / DEF untouched.
+* **Expected touchdowns regress (per opportunity, fix round 2)**: TD rate is the noisiest part of fantasy scoring.
+  Per kind — passing TDs per attempt (league pass-TD points, e.g. 4), rushing TDs per carry, receiving TDs per target
+  (`tdRegression.ts`, pure) — this season's expected TDs per opportunity (recency-weighted) are pulled toward a
+  baseline per opportunity with `V4.tdK` = 8 games × his own opportunity rate of weight, then multiplied by his current
+  opportunity rate: regressed/g = (n × xTD/g + tdK × baseline/opp × opp/g) / (n + tdK), n = sample games (unflagged 1,
+  flagged 0.25). Baseline = last season's ACTUAL TDs per opportunity when he played ≥ `priorMinGames` (prior
+  opportunities summed from ep_weekly), else the position's mean ACTUAL TDs per opportunity this season over the
+  games of players with ≥ `priorMinGames` games, his own games left out. Scaling the baseline to this year's volume
+  keeps a grown role from being dragged to last year's per-game TDs; a kind he has no opportunity at gets a 0
+  baseline. Unknown opportunities (player-DB priors, fixtures) fall back to per-game rates. Not applied: no prior and
+  fewer than `priorMinGames` sample games (a 1-game backup QB is no longer lifted to the QB average), the actual-points
+  fallback, K / DEF. The non-TD part, finishing, the prior blend and the ECR anchor are unchanged. Why-line
+  "Touchdowns: 0.97 expected/g regressed to 0.88 (last season 0.83)" — the baseline shown is per game at this year's
+  volume. Fix round 1 regressed per game toward the position's mean EXPECTED TDs (mismatched with the actual prior;
+  lifted 1-game backups ~+5 pts/g) — replaced. Tests: tdRegression.test.ts (role growth, per-kind points, skip rule,
+  leave-one-out baseline), projectionV4.test.ts, fix1027.adversarial.test.ts.

@@ -1,7 +1,6 @@
 // Per player-week opportunity: target share, air-yards share, WOPR, RB weighted opportunity, snap share,
 // expected / actual fantasy points under the LEAGUE's scoring (from the stat components, not the file's totals).
 import { score } from "../scoring.js";
-import { tdCount, tdPoints } from "./luck.js";
 import type { Scoring } from "../types.js";
 import type { PlayerGame, SkillPos, WeekOpportunity } from "./types.js";
 
@@ -33,7 +32,14 @@ export function weekOpportunity(g: PlayerGame, pos: SkillPos, s: Scoring): WeekO
     snapShare: g.snapShare,
     expPts: score(s, g.expected, pos),
     actPts: score(s, g.actual, pos),
-    expTdPts: tdPoints(s, g.expected),
-    expTds: tdCount(g.expected),
+    passAtt: g.passAttempts,
+    carries: g.carries,
+    targets: g.targets,
+    expPassTd: g.expected.passTd,
+    expRushTd: g.expected.rushTd,
+    expRecTd: g.expected.recTd,
+    actPassTd: g.actual.passTd,
+    actRushTd: g.actual.rushTd,
+    actRecTd: g.actual.recTd,
   };
 }

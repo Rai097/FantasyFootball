@@ -1,6 +1,5 @@
 // Talent prior inputs: last season expected / actual points per game (league scoring), age, rookie draft capital.
 import { score } from "../scoring.js";
-import { tdCount, tdPoints } from "./luck.js";
 import type { Scoring } from "../types.js";
 import type { PriorSeason, RosterInfo, SkillPos, TalentPrior } from "./types.js";
 
@@ -29,8 +28,8 @@ export function talentPrior(
     priorGames: g,
     priorExpPpg: g > 0 ? score(s, prior!.expected, pos) / g : null,
     priorActPpg: g > 0 ? score(s, prior!.actual, pos) / g : null,
-    priorTdPts: g > 0 ? tdPoints(s, prior!.actual) / g : null,
-    priorTds: g > 0 ? tdCount(prior!.actual) / g : null,
+    priorTds: g > 0 ? { pass: prior!.actual.passTd / g, rush: prior!.actual.rushTd / g, rec: prior!.actual.recTd / g } : null,
+    priorOpps: g > 0 && prior!.opps ? { pass: prior!.opps.passAtt / g, rush: prior!.opps.carries / g, rec: prior!.opps.targets / g } : null,
     age: age === null ? null : Math.round(age * 10) / 10,
     ageRising: age === null ? null : age <= AGE_RISING_MAX,
     rookie,

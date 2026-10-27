@@ -418,15 +418,16 @@ test("expected touchdowns regress toward last season's TD rate (V4.tdK pseudo-ga
   assert.equal(model("eqTd"), 13.2);
 });
 
-test("expected touchdowns without a usable prior regress toward the position's mean expected TD rate; K / DEF untouched", () => {
-  const wks = games(7, { rushYd: 60, rushTd: 1.2 }, { rushYd: 60, rushTd: 1.2 }, { targets: 0, carries: 15, airYards: 0 });
+test("expected touchdowns without a usable prior regress toward the position's ACTUAL TDs per carry at his volume; K / DEF untouched", () => {
+  const wks = games(7, { rushYd: 60, rushTd: 1.2 }, { rushYd: 60, rushTd: 1.2 }, { targets: 0, carries: 16, airYards: 0 });
   const rook = rawPlayer("rookTd", "RB", { weeks: wks, prior: null });
+  // Five other backs: 20 carries and 0.5 actual rushing TDs a game → 0.025 TDs per carry.
+  const backs = Array.from({ length: 5 }, (_, i) => rawPlayer(`bk${i}`, "RB", { weeks: games(6, { rushYd: 80, rushTd: 0.5 }, { rushYd: 80, rushTd: 0.5 }, { targets: 0, carries: 20, airYards: 0 }), prior: null }));
   const k = rawPlayer("kk", "K", { ecrPos: 3 });
   const d = rawPlayer("dd", "DEF", { ecrPos: 3 });
-  const val = valuePlayers(L({ scoring: PPR }), [...POOL, rook, k, d]);
+  const val = valuePlayers(L({ scoring: PPR }), [...POOL, ...backs, rook, k, d]);
   const td = val.players.get("rookTd")!.whyItems!.find((x) => x.label === "Touchdowns")!.value;
-  // POOL RBs (40 × 6 games) expect no TDs: the RB mean over every game is (7 × 1.2) / (40 × 6 + 7) per game.
-  const mean = (7 * 1.2) / (40 * 6 + 7);
-  assert.equal(td, `1.20 expected/g regressed to ${((7 * 1.2 + V4.tdK * mean) / (7 + V4.tdK)).toFixed(2)} (RB average ${mean.toFixed(2)})`);
+  const base = 0.025 * 16; // the position's rate per carry × his 16 carries a game (his own games left out)
+  assert.equal(td, `1.20 expected/g regressed to ${((7 * 1.2 + V4.tdK * base) / (7 + V4.tdK)).toFixed(2)} (RB average ${base.toFixed(2)})`);
   for (const id of ["kk", "dd"]) assert.equal(val.players.get(id)!.whyItems!.find((x) => x.label === "Touchdowns"), undefined, id);
 });

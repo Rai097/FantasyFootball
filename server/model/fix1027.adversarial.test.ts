@@ -212,7 +212,7 @@ test("prior weight never exceeds the prior's own games: a 4-game 2025 counts as 
   assert.ok(n <= 4, `a 4-game prior counts as ${n} pseudo-games`);
 });
 
-test("FINDING TD regression lifts a 1-game backup QB to a starter's TD rate while his non-TD part stays a backup's", { todo: "finding: regress TD per opportunity, or with the same shrink on the non-TD part" }, () => {
+test("TD regression no longer lifts a 1-game backup QB to a starter's TD rate (no prior, under priorMinGames: not regressed)", () => {
   const b = rawPlayer("bkQb", "QB", { weeks: games(1, { passYd: 90, passTd: 0 }, { passYd: 90, passTd: 0.1 }) });
   const on = valuePlayers(L(), [...POOL, b]);
   const off = withV4({ tdK: 0 }, () => valuePlayers(L(), [...POOL, b]));
