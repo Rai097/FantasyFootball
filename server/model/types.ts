@@ -76,6 +76,10 @@ export interface Player {
   weeks: WeekLine[]; // current season
   prior: { games: number; line: StatLine } | null; // previous season totals
   headshot?: string;
+  /** Yahoo's projected fantasy points for the rest of the season (league scoring), captured by the import bookmarklet. */
+  yahooProj?: number;
+  /** Yahoo's projected fantasy points for the current week, captured by the import bookmarklet. */
+  yahooProjWeekly?: number;
 }
 
 /** Player + league-specific numbers. */
@@ -151,6 +155,8 @@ export interface ValuedPlayer extends Player {
    * and for flex-level players with 0 snaps in their team's last 2 games. Unset for everyone else.
    */
   ret?: ReturnInfo;
+  /** Points per game the FantasyPros rest-of-season rank stands for (projection v4's ECR curve); unset = unranked. */
+  ecrPts?: number;
 }
 
 /** Return estimate + stash numbers (server/model/returns.ts, projectionV4.ts). */

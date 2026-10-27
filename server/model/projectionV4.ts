@@ -582,6 +582,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       out.luckTd = r1(luck.tdPart);
     }
     if (label) out.label = label;
+    // The experts' rank read as points (release (d) perceived value), even when the projection skipped the anchor.
+    if (x.ecrPts !== undefined && !x.ecrUnranked) out.ecrPts = r2(x.ecrPts);
     if (x.sig?.trend?.rising) out.riser = true;
     const now = x.weeks[0];
     if (now?.game && now.avail < 1 && (x.absence === "out" || x.availKind === "doubtful" || x.availKind === "questionable")) out.availThisWeek = now.avail;

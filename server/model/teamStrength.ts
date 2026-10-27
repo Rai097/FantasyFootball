@@ -24,7 +24,7 @@ export interface TeamStrength {
 const r1 = (x: number) => Math.round(x * 10) / 10;
 
 /** Greedy optimal lineup for one week (same fill order as optimalLineup): total points and the starters. */
-function weekLineup(order: ReturnType<typeof fillOrder>, roster: ValuedPlayer[], pts: (p: ValuedPlayer) => number): { total: number; starters: ValuedPlayer[] } {
+export function weekLineup(order: ReturnType<typeof fillOrder>, roster: ValuedPlayer[], pts: (p: ValuedPlayer) => number): { total: number; starters: ValuedPlayer[] } {
   const sorted = [...roster].sort((a, b) => pts(b) - pts(a) || (a.id < b.id ? -1 : 1));
   const used = new Set<string>();
   const starters: ValuedPlayer[] = [];

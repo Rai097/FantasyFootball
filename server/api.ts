@@ -40,6 +40,7 @@ import type { ProjectionTables } from "./model/projectionV4.js";
 import { getPriorWeeks } from "./data/priorWeeks.js";
 import { findBenchUpgrades } from "./model/benchUpgrades.js";
 import { evaluateTradeV3, findTradesV3 } from "./model/tradesV3.js";
+import { attachPerception } from "./model/perception.js";
 import { attachMarket, marketQuery, type ValueSource } from "./model/market.js";
 import { parseMode } from "./model/rosterScore.js";
 import { rankWaivers, toWaiversResponse, type FreeAgentInput } from "./model/waivers.js";
@@ -180,6 +181,8 @@ async function loadContext(provider: Provider, id: string, refresh: boolean, mod
     // v3.1 weekly floor (lineup contribution blends it in); then re-analyse teams.
     attachFloor(ctx.players, await getPriorWeeks(db.season - 1), league.settings.scoring);
     ctx.teams = analyzeTeams(league, ctx.players, ctx.replacement);
+    // Release (d): how other managers see each player (Yahoo projection / FantasyPros rank + recent games).
+    attachPerception(ctx.players.values(), league.settings, tables.schedule);
     return { db, league, ctx, valueSource };
   });
 }
