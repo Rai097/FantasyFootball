@@ -1178,3 +1178,31 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   volume. Fix round 1 regressed per game toward the position's mean EXPECTED TDs (mismatched with the actual prior;
   lifted 1-game backups ~+5 pts/g) — replaced. Tests: tdRegression.test.ts (role growth, per-kind points, skip rule,
   leave-one-out baseline), projectionV4.test.ts, fix1027.adversarial.test.ts.
+
+## Fix: role-change prior + mode-aware listing (2026-10-27)
+
+* **Role change exempts the small-sample prior boost** (`projectionV4.ts` `isRoleUp`, `priorWeight`): a backup who
+  became his team's lead back (≈ 19% snaps, then 56–84% with 17–25 carries) lost ~0.7 pts/g because his small 2026
+  sample gave his backup-role 2025 prior `priorKSmall` weight. Now, when this season's recency-weighted expected
+  pts/game, TD part regressed (a one-off goal-line spike is not a new role), is ≥ `V4.roleUpRatio` (1.5) × last
+  season's expected pts/game on ≥ `V4.roleUpMinGames` (2) unflagged games, the prior keeps only `V4.priorK` = 2
+  pseudo-games (still ≤ the prior's own games). Falling or steady usage with a tiny sample (an injury-shortened season)
+  and one fill-in start keep the boost; rookies have no prior; the actual-points fallback is not tested for a role
+  change. Why-line: "2025: 3.3 pts/game, counts as 2.8 games (role grew: 15.2 vs 3.5 expected/g)".
+* **TD regression checked, unchanged**: the baseline is per opportunity and is multiplied by this season's volume, so
+  a grown role is not dragged to last season's per-game TDs. For the lead-back case the remaining TD pull comes from
+  his very high expected TDs (1.47/g regressed to 1.15), not from the small role: his 2025 TD rate per carry is above
+  the RB average (position baseline 0.97 would pull harder), so swapping the baseline or capping its pseudo-carries
+  would not help him. Not changed.
+* **Mode-aware listing** (`tradesV3.ts` `modeGain`, `listsInMode`): the finder's lists used `strengthDelta ≥
+  V3.minMyGain` in every mode. Now each mode lists on its own measure (owner: a deal that helps now but not in the
+  playoffs — injured-now players who return before the playoffs, sold for one healthy player — may list in Win now /
+  Balanced, never in Playoffs):
+  * Playoffs: playoff strength (team strength, lineup + 0.25 × bench cover) ≥ `minMyGain`.
+  * Balanced: the mode's team score (`myDelta`: MODE_WEIGHTS of now / season / playoffs / depth, minus slot-loss
+    aversion) ≥ `minMyGain`, and playoff strength ≥ `V3.playoffFloor.balanced` (−0.5).
+  * Win now: the Win-now team score (`myDelta` under now weights: this week's lineup + 0.15 × depth − slot loss) ≥
+    `minMyGain`, and playoff strength ≥ `V3.playoffFloor.now` (−1.0): never a deal that wrecks the playoffs.
+  * Marginal near misses need the same mode gain > 0 and the same floor; smaller edges and the main list share the
+    gate. The rank score is (mode gain + gap bonus) × acceptance (Playoffs: unchanged). Evaluate adds one bullet
+    "<Mode> bar: clears / fails: …"; the Trade Finder's "How they're ranked" help names the mode's bar.
