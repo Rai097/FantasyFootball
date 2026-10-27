@@ -203,6 +203,8 @@ interface Proj extends Base {
   ecrPts?: number;
   ecrUnranked: boolean;
   wAnchor: number;
+  /** Absent with a sample: the ECR anchor is not used (the rank prices the absence). */
+  anchorSkipped: boolean;
   rate: number;
   availKind: Avail;
   absence?: Absence;
@@ -329,6 +331,12 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     let ecrUnranked = false;
     let rate = 0;
     let wAnchor = 0;
+    const { kind, absence } = availKind(p, b.sig);
+    // A sample behind his rate: ≥ 2 unflagged games with a model rate, or a ≥ 4-game last season.
+    const sampled = !b.kdef && b.model !== null && (b.unflagged >= 2 || (b.sig?.talent.priorExpPpg != null && b.sig.talent.priorGames >= V4.priorMinGames));
+    // Reserve list / designated to return / suspended with a sample: no ECR anchor — experts drop an absent player's
+    // rank, so anchoring would count the absence twice (it is already in avail). A one-game "Out" keeps the anchor.
+    const anchorSkipped = sampled && (absence === "reserve" || absence === "dtr" || absence === "suspended");
     if (b.kdef) {
       const c = KDEF_CURVE[p.pos as "K" | "DEF"];
       const rank = ecrRank ?? maxRank[p.pos] + 1;
@@ -347,14 +355,13 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       if (b.model === null) {
         wAnchor = ecrPts !== undefined ? 1 : 0;
         rate = ecrPts ?? 0;
-      } else if (ecrPts === undefined) rate = b.model;
+      } else if (ecrPts === undefined || anchorSkipped) rate = b.model;
       else {
         wAnchor = b.unflagged >= V4.lateGames ? V4.anchorLate : V4.anchor;
         rate = (1 - wAnchor) * b.model + wAnchor * ecrPts;
       }
     }
     rate = Math.max(0, Number.isFinite(rate) ? rate : 0);
-    const { kind, absence } = availKind(p, b.sig);
     const sched = tables.schedule.size ? tables.schedule.get(p.team) : undefined;
     // His team's remaining game weeks and the games he has missed since his last game.
     const gameWeeks: number[] = [];
@@ -366,9 +373,9 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       const last = own.length ? Math.max(...own) : 0;
       gamesMissed = played.filter((w) => w > last && w < S.currentWeek).length;
     }
-    // Healthy-role rate = THE projection rate (same ECR anchor), so a returning player projects like his healthy
-    // twin and My Team hold, Stash watch, Values and lineups show one number. Known only with ≥ 2 unflagged games
-    // or a ≥ 4-game last season behind it (else unknown: no stash candidate on an expert rank alone).
+    // Healthy-role rate = THE projection rate (one definition), so My Team hold, Stash watch, Values and lineups show
+    // one number for the same player and return week. Known only with a sample (else unknown: no stash candidate on
+    // an expert rank alone).
     let healthyRate: number | null = null;
     let healthySource: "season" | "prior" | undefined;
     if (!b.kdef && b.unflagged >= 2 && b.model !== null) [healthyRate, healthySource] = [rate, "season"];
@@ -430,6 +437,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       ecrPts,
       ecrUnranked,
       wAnchor,
+      anchorSkipped,
       rate,
       availKind: kind,
       ...(absence ? { absence } : {}),
@@ -646,7 +654,8 @@ function explainItems(
   } else {
     add("Rate", `${f1(x.rate)} pts/game before matchups`);
     if (x.model !== null) add("Our model", `${f1(x.model)} pts/game, ${pct(1 - x.wAnchor)} weight`);
-    if (x.ecrPts !== undefined) add("Experts (ECR)", `${x.ecrUnranked ? "unranked" : `${p.pos}${Math.round(x.ecrRank! * 10) / 10}`}: ${f1(x.ecrPts)} pts/game, ${pct(x.wAnchor)} weight`);
+    if (x.ecrPts !== undefined)
+      add("Experts (ECR)", `${x.ecrUnranked ? "unranked" : `${p.pos}${Math.round(x.ecrRank! * 10) / 10}`}: ${f1(x.ecrPts)} pts/game, ${x.anchorSkipped ? "not used: the rank prices his absence" : `${pct(x.wAnchor)} weight`}`);
     if (x.missingExp) add("Usage data", `missing for ${x.missingExp} games: rate from actual points`, "warn");
     else if (x.expRate !== null) add("Usage", `${f1(x.expRate)} expected pts/game, latest games weigh most`);
     if (x.effRaw !== null) add("Finishing", `×${x.eff.toFixed(2)} (actual ÷ expected ${x.effRaw.toFixed(2)}, pulled toward 1)`);

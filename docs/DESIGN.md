@@ -912,9 +912,10 @@ Owner-specific worked cases live outside the repo (public).
   (not after a one-game "Out"), then 1; unknown ⇒ 0 every week (lineups, value). Replaces "designated to return = 0
   for 4 games" and "RES = 0 for the rest of the season". `ValuedPlayer.ret` = { week | null, confidence, reasons,
   absent, practiceUp, earliestWeek?, healthyRate?, healthySource?, playoffPts?, stashScore?, returnValue?, tradeValue? }.
-  - Healthy-role rate = the projection rate (same ECR anchor) when he has ≥ 2 unflagged games or a ≥ 4-game last
-    season, else unknown (fix round 2 — supersedes "pre-anchor model rate": a returner must project like his healthy
-    twin, and hold / Stash watch / Values must show one number).
+  - Healthy-role rate = THE projection rate when he has a sample (≥ 2 unflagged games or a ≥ 4-game last season),
+    else unknown. A reserve-list / designated-to-return / suspended player with a sample skips the ECR anchor in the
+    projection itself (experts drop an absent player's rank, so anchoring would count the absence twice); a one-game
+    "Out" keeps it (fix round 2: hold / Stash watch / Values / lineups show one number).
   - Unknown return: `returnValue` = healthy rate × matchup over his games from current week + 4 × 0.5 (stash ranking
     and the IR "hold" line only); `tradeValue` = the same weekly points on the 0–100 value scale (trades only).
   - Stash score = Σ from the return week of healthy rate × matchup × ramp, playoff weeks × 1.0, earlier × 0.33, × the

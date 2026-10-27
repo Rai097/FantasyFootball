@@ -63,7 +63,10 @@ test("return in the playoffs (IR floor to week 17): 0 through week 16, × 0.85 i
   const h = val.players.get("twin")!;
   assert.equal(v.ret!.week, 17, JSON.stringify(v.ret));
   assert.deepEqual(v.weekly!.slice(0, 4), [0, 0, 0, 0]);
-  assert.ok(Math.abs(v.weekly![wkIdx(v, 17)] - 0.85 * h.weekly![wkIdx(h, 17)]) < 0.06, `wk 17 ${v.weekly![wkIdx(v, 17)]} vs 0.85 × ${h.weekly![wkIdx(h, 17)]}`);
+  // Fix round 2: an absent player with a sample skips the ECR anchor, so week 17 = 0.85 × his own healthy rate
+  // (the twin keeps the anchor); the twin stays as the sanity bound.
+  assert.ok(Math.abs(v.weekly![wkIdx(v, 17)] - 0.85 * v.ret!.healthyRate!) < 0.06, `wk 17 ${v.weekly![wkIdx(v, 17)]} vs 0.85 × ${v.ret!.healthyRate}`);
+  assert.ok(Math.abs(v.ret!.healthyRate! - h.weekly![wkIdx(h, 17)]) < 0.15 * h.weekly![wkIdx(h, 17)], "healthy rate near the healthy twin's");
   assert.ok(Math.abs((v.playoffPts ?? 0) - v.weekly![wkIdx(v, 17)]) < 0.051);
   assert.ok(v.ret!.week! <= 17 && v.ret!.week! >= 13);
 });

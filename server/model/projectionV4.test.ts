@@ -94,8 +94,9 @@ test("Out = 0 for his next game only; IR = 0 rest of season (return unconfirmed)
   assert.equal(ret.ret!.week, 8 + 3);
   assert.equal(ret.ret!.confidence, "medium");
   assert.deepEqual(ret.weekly!.slice(0, 3), [0, 0, 0]);
-  assert.ok(Math.abs(ret.weekly![3] - healthy[3] * 0.85) < 0.06, "first game back × 0.85");
-  assert.equal(ret.weekly![4], healthy[4]);
+  // Absent with a sample: no ECR anchor (the rank prices the absence), so compare with his own healthy rate, not a twin.
+  assert.ok(Math.abs(ret.weekly![3] - ret.ret!.healthyRate! * 0.85) < 0.06, "first game back × 0.85");
+  assert.ok(Math.abs(ret.weekly![4] - ret.ret!.healthyRate!) < 0.051, "full after the ramp game");
   assert.equal(g("out").ret!.week, 9, "ruled out once: back the game after");
   assert.equal(g("ir").ret!.week, null);
   assert.ok(g("ir").ret!.returnValue! > 0, "return unconfirmed: a stash value, not 0");
@@ -267,7 +268,7 @@ test("roster RES = 0 from now on even with a game last week (return unconfirmed)
   // Played through week 7 → the IR minimum (4 games) binds: back in his 5th remaining game.
   assert.equal(dtr.ret!.week, 12);
   assert.deepEqual(dtr.weekly!.slice(0, 4), [0, 0, 0, 0]);
-  assert.equal(dtr.weekly![5], act.weekly![5], "designated to return: full after the ramp game");
+  assert.ok(Math.abs(dtr.weekly![5] - dtr.ret!.healthyRate!) < 0.051, "designated to return: full (his healthy rate) after the ramp game");
 });
 
 test("missing expected data (expected 0, actual > 0 over ≥ 2 games): rate from actual points, flagged, noted", () => {
@@ -309,23 +310,25 @@ test("release (c): a reserve-list WR practising fully, IR minimum to week 10 →
   assert.equal(v.ret!.week, 10);
   assert.equal(v.ret!.confidence, "medium", "the IR minimum pushed it back: not high");
   assert.deepEqual(v.weekly!.slice(0, 2), [0, 0]);
-  assert.ok(Math.abs(v.weekly![2] - 0.85 * healthy.weekly![2]) < 0.06, `week 10 ${v.weekly![2]} vs 0.85 × ${healthy.weekly![2]}`);
-  assert.deepEqual(v.weekly!.slice(3), healthy.weekly!.slice(3));
-  assert.equal(v.playoffPts, healthy.playoffPts, "playoff weeks at full strength");
+  // Absent with a sample: no ECR anchor (the rank prices the absence), so compare with his own healthy rate, not a twin.
+  const hr = v.ret!.healthyRate!;
+  assert.ok(Math.abs(v.weekly![2] - 0.85 * hr) < 0.06, `week 10 ${v.weekly![2]} vs 0.85 × ${hr}`);
+  for (const x of v.weekly!.slice(3)) assert.ok(Math.abs(x - hr) < 0.051, `full after: ${x} vs ${hr}`);
+  assert.ok(Math.abs(v.playoffPts! - 3 * hr) < 0.16, "playoff weeks at full strength");
+  assert.ok(Math.abs(hr - healthy.ppg) < 0.15 * healthy.ppg, `healthy rate ${hr} near the healthy twin's anchored ${healthy.ppg}`);
   assert.ok(v.playoffPts! > 0 && v.value > 0, "a returner is not worth 0");
   assert.ok(v.whyItems!.some((d) => d.label === "Availability" && /back ~wk 10 \(medium\)/.test(d.value)), JSON.stringify(v.whyItems));
   assert.equal(v.ret!.returnValue, undefined, "returnValue only when the return is unconfirmed");
   // One playoff number: My Team hold / Stash watch read the same rate and weeks as Values / lineups.
   assert.equal(v.ret!.playoffPts, v.playoffPts, "hold / stash playoff pts = projection playoff pts");
-  assert.ok(Math.abs(v.ret!.healthyRate! - healthy.ppg) < 0.01, `healthy rate ${v.ret!.healthyRate} = his healthy twin's rate ${healthy.ppg} (no matchups here)`);
   // Not practising on the reserve list: unconfirmed, 0 every week, but a stash value (× 0.5 from week 12).
   const u = valuePlayers(L(), [...POOL, p], tables({ status: "RES", statusCode: "R01" }, [])).players.get("back")!;
   assert.equal(u.ret!.week, null);
   assert.ok(u.weekly!.every((x) => x === 0));
   assert.equal(u.value, 0, "lineups and value ignore returnValue");
-  const fromWk12 = healthy.weekly!.slice(12 - 8).reduce((a, x) => a + x, 0);
-  // Healthy-role rate = the projection rate (same ECR anchor): returnValue = ½ × his healthy twin's weeks from week 12.
-  assert.ok(Math.abs(u.ret!.returnValue! - 0.5 * fromWk12) < 0.01 * fromWk12, `returnValue ${u.ret!.returnValue} vs ½ × ${fromWk12.toFixed(1)}`);
+  // Healthy-role rate = his projection rate without the anchor: returnValue = ½ × healthy rate × his games from week 12.
+  const fromWk12 = (17 - 12 + 1) * u.ret!.healthyRate!;
+  assert.ok(Math.abs(u.ret!.returnValue! - 0.5 * fromWk12) < 0.1, `returnValue ${u.ret!.returnValue} vs ½ × ${fromWk12.toFixed(1)}`);
   assert.ok(u.ret!.tradeValue! > 0 && u.ret!.tradeValue! < healthy.value, `trade value ${u.ret!.tradeValue} (healthy ${healthy.value})`);
   for (const x of [v, u]) assert.ok(Object.values(x.ret!).every((n) => typeof n !== "number" || Number.isFinite(n)));
 });

@@ -219,8 +219,9 @@ describe("projection v4 synthetic edge cases (adversarial)", () => {
     const ret = run("IR-R");
     assert.equal(ret.ret!.week, 11);
     assert.deepEqual(ret.weekly!.slice(0, 3), [0, 0, 0]);
-    assert.ok(Math.abs(ret.weekly![3] - 0.85 * healthy.weekly![3]) <= 0.1);
-    assert.deepEqual(ret.weekly!.slice(4), healthy.weekly!.slice(4));
+    // Absent with a sample: no ECR anchor (fix round 2), so the return weeks follow his own healthy rate.
+    assert.ok(Math.abs(ret.weekly![3] - 0.85 * ret.ret!.healthyRate!) <= 0.1);
+    for (const x of ret.weekly!.slice(4)) assert.ok(Math.abs(x - ret.ret!.healthyRate!) <= 0.051 || x === 0, `${x}`);
   });
 
   test("nflverse roster RES with a game last week (freshly placed on IR, no Yahoo tag) is not projected at full strength", () => {

@@ -256,8 +256,11 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
       for (const p of withMarket) assert.ok(p.market >= 0 && p.market <= 100, `${p.name} market ${p.market}`);
       for (const p of withMarket) {
         if (p.marketEstimated || p.marketRank === undefined) assert.equal(p.edge, undefined, `${p.name}: no edge without a real market value`);
+        // Return unconfirmed (value 0, every week 0): his trade value is a placeholder, so no edge ("—").
+        else if (p.edge === undefined) assert.equal(p.value, 0, `${p.name}: edge missing on a player with value ${p.value}`);
         else assert.ok(Number.isFinite(p.edge), `${p.name}: edge`);
       }
+      assert.ok(withMarket.some((p: any) => Number.isFinite(p.edge)), "listed players carry an edge");
     }
     for (const p of json.slice(0, 300)) {
       for (const k of ["value", "ppg", "ppg26", "ppgExp26", "games", "posRank"]) assert.ok(Number.isFinite(p[k]), `${p.name}: ${k}=${p[k]}`);
