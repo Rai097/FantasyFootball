@@ -44,6 +44,8 @@ export interface StatusWeek {
 
 export interface RosterInfo {
   status?: string; // ACT, RES, INA, DEV, CUT, ...
+  /** NFL transaction code (`status_description_abbr`): R01 reserve/injured, R48 injured designated to return, R04 PUP. */
+  statusCode?: string;
   birthDate?: string; // YYYY-MM-DD
   draftNumber?: number; // overall pick; undefined = undrafted / unknown
   rookieYear?: number;
@@ -164,5 +166,7 @@ export interface PlayerSignals {
   trend: Trend | null;
   talent: TalentPrior;
   rosterStatus?: string;
+  /** Roster transaction code (RosterInfo.statusCode), e.g. R48 = designated to return. */
+  rosterCode?: string;
   status: StatusWeek[];
 }

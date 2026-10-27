@@ -37,6 +37,8 @@ export interface ProjectionTables {
   signals: Map<string, PlayerSignals>;
   /** Unplayed games per NFL team and week. Empty map = unknown schedule (tests): every week but the bye is a game. */
   schedule: Map<string, Map<number, ScheduledGame>>;
+  /** Weeks each team has played (games missed / 0-snap stashes). Absent = weeks 1..current−1 minus the bye (tests). */
+  playedWeeks?: Map<string, number[]>;
   allowed: Map<string, Partial<Record<SkillPos, Allowed>>>;
   leagueAllowed: Partial<Record<SkillPos, number>>;
 }

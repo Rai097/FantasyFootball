@@ -67,6 +67,7 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
     trend: trendOf(weeks, p.pos, ctx.flexLevels?.[p.pos]),
     talent: talentPrior(p.pos, p.prior, p.roster, ctx.season, ctx.asOf, ctx.scoring),
     rosterStatus: p.roster?.status,
+    ...(p.roster?.statusCode ? { rosterCode: p.roster.statusCode } : {}),
     status: [...p.status].sort((a, b) => a.week - b.week),
   };
 }

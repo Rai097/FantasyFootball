@@ -219,6 +219,7 @@ export function parseRoster(csv: string): RosterTable {
     info.set(id, {
       _week: week,
       status: opt(r.status),
+      statusCode: opt(r.status_description_abbr),
       birthDate: opt(r.birth_date),
       draftNumber: draft === undefined ? undefined : num(draft),
       rookieYear: rookie === undefined ? undefined : num(rookie),
@@ -360,7 +361,25 @@ export function buildTables(src: SignalSources): SeasonTables {
     }
   }
   for (const [id, m] of byWeek) out.get(id)!.games = [...m.values()].sort((a, b) => a.week - b.week);
+  // Release (c): skill players without a game this season but on a reserve list or the injury report (e.g. on
+  // PUP / IR since the preseason) still need their roster code and practice series for the return estimate.
+  for (const [id, r] of roster.info) {
+    if (out.has(id) || !r.pos || !SKILL_POS.includes(r.pos as SkillPos)) continue;
+    if (r.status !== "RES" && !status.has(id)) continue;
+    ensure(id, r.name ?? id, r.pos, r.team ?? "FA");
+  }
   return { inputs: out, ep, games };
+}
+
+/** Weeks in which each team played a game (scored), ascending: "games missed" and "0 snaps in the last 2 team games". */
+export function buildPlayedWeeks(games: Map<string, GameInfo>): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  for (const g of games.values()) {
+    if (g.result === undefined) continue;
+    for (const t of [g.home, g.away]) out.set(t, [...(out.get(t) ?? []), g.week]);
+  }
+  for (const arr of out.values()) arr.sort((a, b) => a - b);
+  return out;
 }
 
 // ---- projection v4 tables: remaining schedule, points allowed to each position, Vegas implied totals ----
@@ -480,6 +499,6 @@ export async function getProjectionTables(season: number, scoring: Scoring): Pro
   return projMemo.get(`${await generation()}|${season}|${JSON.stringify(scoring)}`, async () => {
     const [tables, signals] = await Promise.all([getSeasonTables(season), getAllSignals(season, scoring)]);
     const allowed = buildPointsAllowed(tables.ep, tables.games, scoring);
-    return { signals, schedule: buildSchedule(tables.games), allowed: allowed.byDefense, leagueAllowed: allowed.leagueAvg };
+    return { signals, schedule: buildSchedule(tables.games), playedWeeks: buildPlayedWeeks(tables.games), allowed: allowed.byDefense, leagueAllowed: allowed.leagueAvg };
   });
 }

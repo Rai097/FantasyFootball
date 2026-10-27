@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { staleMemo } from "./memo.js";
 import {
+  buildPlayedWeeks,
+  buildTables,
   buildPointsAllowed,
   buildSchedule,
   buildStarters,
@@ -133,4 +135,30 @@ test("points allowed: the opponents' league-scored points per position, per defe
   assert.ok(Math.abs(car.QB!.pts - score(PPR, caleb.actual, "QB")) < 1e-9);
   assert.ok(leagueAvg.QB! > 0 && leagueAvg.TE! > 0);
   assert.equal(byDefense.has("CHI"), false, "no fixture rows for CHI's opponents: unknown, not 0");
+});
+
+test("release (c): roster transaction code kept; reserve / injury-report players without a game get an input; played weeks per team", () => {
+  const roster = `season,team,position,status,status_description_abbr,full_name,gsis_id,week
+2026,AAA,RB,RES,R48,Generic Back,00-9000001,7
+2026,AAA,WR,RES,R01,Generic Wideout,00-9000002,7
+2026,AAA,TE,ACT,A01,Generic End,00-9000003,7
+2026,AAA,LB,RES,R01,Generic Linebacker,00-9000004,7`;
+  const injuries = `season,season_type,team,week,gsis_id,report_status,practice_status
+2026,REG,AAA,7,00-9000001,Out,Full Participation in Practice`;
+  const games = `game_id,season,game_type,week,home_team,away_team,result
+2026_01_AAA_BBB,2026,REG,1,BBB,AAA,3
+2026_02_AAA_CCC,2026,REG,2,AAA,CCC,-7
+2026_03_AAA_BBB,2026,REG,3,AAA,BBB,`;
+  assert.equal(parseRoster(roster).info.get("00-9000001")!.statusCode, "R48");
+  const t = buildTables({ season: 2026, epCsv: "", epPriorCsv: "", gamesCsv: games, injuriesCsv: injuries, rosterCsv: roster, snapsCsv: "" });
+  const back = t.inputs.get("00-9000001")!;
+  assert.equal(back.games.length, 0);
+  assert.equal(back.roster!.statusCode, "R48");
+  assert.equal(back.status[0].practice, "Full Participation in Practice");
+  assert.ok(t.inputs.has("00-9000002"), "reserve list, no report row: still an input");
+  assert.ok(!t.inputs.has("00-9000003"), "active, no game, no report: nothing to estimate");
+  assert.ok(!t.inputs.has("00-9000004"), "not a skill position");
+  const played = buildPlayedWeeks(parseGames(games, 2026));
+  assert.deepEqual(played.get("AAA"), [1, 2]);
+  assert.deepEqual(played.get("CCC"), [2]);
 });
