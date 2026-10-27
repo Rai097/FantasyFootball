@@ -61,27 +61,11 @@ export function scoreWeeks(S: LeagueSettings): { weeks: number[]; playoff: boole
 const weeklyCache = new WeakMap<LeagueSettings, WeakMap<ValuedPlayer, Float64Array>>();
 
 /**
- * Expected points in remaining week index i (weeks currentWeek..finalWeek) of a player whose return is unconfirmed
- * (owner 2026-10-26, injured trade pieces fix round 1): `ret.expWeekly` (projection v4: healthy rate × matchup × 0.5
- * from current week + 4 — the convention behind ret.returnValue / playoffPts). Fixtures without it: healthy rate × 0.5
- * outside the bye from current week + 4. undefined = not an unconfirmed return, out for the season, or no healthy rate.
- */
-export function unconfirmedWeek(p: ValuedPlayer, S: LeagueSettings, i: number): number | undefined {
-  const r = p.ret;
-  if (!r || r.week !== null || !r.absent || r.seasonOver || r.healthyRate === undefined) return undefined;
-  if (r.expWeekly) {
-    const v = r.expWeekly[i];
-    return v !== undefined && Number.isFinite(v) && v > 0 ? v : 0;
-  }
-  const w = S.currentWeek + i;
-  return w < S.currentWeek + RETURNS.unknownOffset || p.bye === w ? 0 : r.healthyRate * RETURNS.unknownWeight;
-}
-
-/**
  * Expected points per remaining week (weeks currentWeek..finalWeek): projection v4's `weekly` (bye / no game = 0,
  * availability and matchups applied). Hand-built players without a projection (test fixtures) derive it from ppg:
  * 0 on the bye, healthy ppg otherwise, with the games the injury model removed (weeksLeft − remainingGames) taken
- * from the earliest weeks.
+ * from the earliest weeks. A player whose return is unconfirmed is 0 here (his "not back" scenario): lineups add his
+ * return scenario through the scenario mix below, never as a per-week average.
  */
 export function weeklyPoints(p: ValuedPlayer, S: LeagueSettings): Float64Array {
   let byS = weeklyCache.get(S);
@@ -107,10 +91,119 @@ export function weeklyPoints(p: ValuedPlayer, S: LeagueSettings): Float64Array {
       out[i] = p.ppg * (1 - miss);
     }
   }
-  // Return unconfirmed: projection v4 has him at 0; lineups count his expected points (healthy × 0.5 from week + 4).
-  if (p.ret && p.ret.week === null) for (let i = 0; i < n; i++) if (!(out[i] > 0)) out[i] = unconfirmedWeek(p, S, i) ?? 0;
   byS.set(p, out);
   return out;
+}
+
+// ---------------------------------------------------------------- return scenarios (injured trade pieces fix round 2)
+//
+// A player whose return is unconfirmed (ret.week null, absent, not out for the season, healthy rate known) is either
+// back at his full healthy rate from current week + 4 (probability RETURN_BACK_P) or not back at all. A lineup is a
+// max over players, so the expected lineup is the SCENARIO MIX p × lineup(him back) + (1 − p) × lineup(without him) —
+// averaging his rate first (½ × healthy) would understate him (Jensen). Up to EXACT_RETURNS such players per roster
+// are mixed exactly (2^k lineups, only in weeks where one of them has points); any beyond count at their expected
+// points p × back (deterministic). That partial mix is bounded: never below the all-deterministic lineup, never above
+// the exact 2^k mix (lineup value is convex in the players' points). The beyond-2 players are the ones with the
+// fewest return-scenario points (ties by id). Confirmed returns stay deterministic (projection v4 weekly from wk N).
+
+/** Probability an unconfirmed return is back (the existing unconfirmed convention, RETURNS.unknownWeight = ½). */
+export const RETURN_BACK_P = RETURNS.unknownWeight;
+/** Unconfirmed returns per roster mixed exactly; the rest count at their expected points. */
+export const EXACT_RETURNS = 2;
+
+const backCache = new WeakMap<LeagueSettings, WeakMap<ValuedPlayer, Float64Array | null>>();
+
+/**
+ * His points per remaining week IF he is back: `ret.backWeekly` (projection v4: healthy rate × matchup from current
+ * week + 4), never below his base weekly points; fixtures without it: healthy rate outside the bye from current week
+ * + 4. undefined = not an unconfirmed return (no ret, confirmed week, not absent, out for the season, no healthy rate).
+ */
+export function returnBackPoints(p: ValuedPlayer, S: LeagueSettings): Float64Array | undefined {
+  const r = p.ret;
+  if (!r || r.week !== null || !r.absent || r.seasonOver || r.healthyRate === undefined) return undefined;
+  let byS = backCache.get(S);
+  if (!byS) backCache.set(S, (byS = new WeakMap()));
+  const hit = byS.get(p);
+  if (hit !== undefined) return hit ?? undefined;
+  const base = weeklyPoints(p, S);
+  const out = new Float64Array(base.length);
+  let any = false;
+  for (let i = 0; i < out.length; i++) {
+    const w = S.currentWeek + i;
+    let v: number;
+    if (r.backWeekly) {
+      const x = r.backWeekly[i];
+      v = x !== undefined && Number.isFinite(x) && x > 0 ? x : 0;
+    } else v = w < S.currentWeek + RETURNS.unknownOffset || p.bye === w ? 0 : r.healthyRate;
+    out[i] = Math.max(base[i], v);
+    if (out[i] > base[i]) any = true;
+  }
+  byS.set(p, any ? out : null);
+  return any ? out : undefined;
+}
+
+/**
+ * Expected points per remaining week for PER-PLAYER comparisons (bye cover): weekly + p × (back − weekly). Never use
+ * it inside a lineup max — lineups take the scenario mix (returnSplit / weekScenarios / scenarioPoints).
+ */
+const expCache = new WeakMap<Float64Array, Float64Array>();
+export function expectedWeeklyPoints(p: ValuedPlayer, S: LeagueSettings): Float64Array {
+  const back = returnBackPoints(p, S);
+  const base = weeklyPoints(p, S);
+  if (!back) return base;
+  let e = expCache.get(back);
+  if (!e) expCache.set(back, (e = base.map((b, i) => b + RETURN_BACK_P * (back[i] - b))));
+  return e;
+}
+
+export interface ReturnSplit {
+  /** Unconfirmed returns mixed exactly (≤ EXACT_RETURNS), with their return-scenario and base (not back) points. */
+  branch: { p: ValuedPlayer; back: Float64Array; base: Float64Array }[];
+  /** Unconfirmed returns beyond EXACT_RETURNS: counted at their expected points. */
+  fixed: Map<ValuedPlayer, Float64Array>;
+}
+
+const backTotal = (b: Float64Array) => b.reduce((a, x) => a + x, 0);
+
+/** The unconfirmed returns on a roster, split into the exactly mixed ones and the rest (see the section note). */
+export function returnSplit(S: LeagueSettings, roster: readonly ValuedPlayer[]): ReturnSplit {
+  const cands: { p: ValuedPlayer; back: Float64Array; t: number }[] = [];
+  for (const p of roster) {
+    const back = returnBackPoints(p, S);
+    if (back) cands.push({ p, back, t: backTotal(back) });
+  }
+  cands.sort((a, b) => b.t - a.t || (a.p.id < b.p.id ? -1 : a.p.id > b.p.id ? 1 : 0));
+  return { branch: cands.slice(0, EXACT_RETURNS).map(({ p, back }) => ({ p, back, base: weeklyPoints(p, S) })), fixed: new Map(cands.slice(EXACT_RETURNS).map(({ p, back }) => [p, back])) };
+}
+
+export interface WeekScenario {
+  prob: number;
+  /** Bitmask over split.branch: who is back in this scenario. */
+  on: number;
+}
+
+const ALL_OUT: WeekScenario[] = [{ prob: 1, on: 0 }];
+
+/** The scenarios of remaining week i: only branch players with return-scenario points that week vary. */
+export function weekScenarios(split: ReturnSplit, i: number): WeekScenario[] {
+  let vary = 0;
+  for (let b = 0; b < split.branch.length; b++) if (split.branch[b].back[i] > split.branch[b].base[i]) vary |= 1 << b;
+  if (!vary) return ALL_OUT;
+  const out: WeekScenario[] = [];
+  for (let on = 0; on < 1 << split.branch.length; on++) {
+    if (on & ~vary) continue;
+    let prob = 1;
+    for (let b = 0; b < split.branch.length; b++) if (vary & (1 << b)) prob *= on & (1 << b) ? RETURN_BACK_P : 1 - RETURN_BACK_P;
+    out.push({ prob, on });
+  }
+  return out;
+}
+
+/** Player p's points in remaining week i under scenario sc, given his base points (weeklyPoints or a perceived view). */
+export function scenarioPoints(split: ReturnSplit, i: number, sc: WeekScenario, p: ValuedPlayer, base: number): number {
+  for (let b = 0; b < split.branch.length; b++) if (split.branch[b].p === p) return sc.on & (1 << b) ? Math.max(base, split.branch[b].back[i]) : base;
+  const f = split.fixed.get(p);
+  return f ? base + RETURN_BACK_P * Math.max(0, f[i] - base) : base;
 }
 
 const FILL_ORDER: SlotKind[] = ["QB", "RB", "WR", "TE", "K", "DEF", "WRRB", "RFLEX", "FLEX", "SFLEX"];
@@ -195,7 +288,9 @@ function irregular(p: ValuedPlayer, pts: Float64Array): number {
 }
 
 /** Per-player row [effPpg, healthy ppg, ...weekly points], position bit and irregular-week mask. */
-const recCache = new WeakMap<LeagueSettings, WeakMap<ValuedPlayer, { row: Float64Array; bit: number; irr: number }>>();
+/** back = return-scenario weekly points × floor factor (unconfirmed returns only), backMask = weeks it differs. */
+interface Rec { row: Float64Array; bit: number; irr: number; back?: Float64Array; backT: number; backMask: number }
+const recCache = new WeakMap<LeagueSettings, WeakMap<ValuedPlayer, Rec>>();
 
 /** Scratch buffers reused across calls (single-threaded; no call retains them). */
 let scratch = { table: new Float64Array(1024), bits: new Int32Array(64), used: new Uint8Array(64), starters: new Uint8Array(64), removed: new Uint8Array(64), irr: new Int32Array(64) };
@@ -223,6 +318,7 @@ export function rosterParts(S: LeagueSettings, roster: ValuedPlayer[], replaceme
   if (scratch.irr.length < n) scratch.irr = new Int32Array(n * 2);
   let recs = recCache.get(S);
   if (!recs) recCache.set(S, (recs = new WeakMap()));
+  const recOf: Rec[] = new Array(n);
   for (let j = 0; j < n; j++) {
     const p = roster[j];
     let rec = recs.get(p);
@@ -235,12 +331,19 @@ export function rosterParts(S: LeagueSettings, roster: ValuedPlayer[], replaceme
       // v3.1: lineup contribution = 0.8·ppg + 0.2·floor when the weekly floor is known.
       const ff = floorFactor(p);
       if (ff !== 1) for (let c = 0; c < stride; c++) row[c] *= ff;
-      rec = { row, bit: POS_BIT[p.pos] ?? 0, irr: irregular(p, pts) };
+      rec = { row, bit: POS_BIT[p.pos] ?? 0, irr: irregular(p, pts), backT: 0, backMask: 0 };
+      const back = returnBackPoints(p, S);
+      if (back) {
+        rec.back = back.map((v) => v * ff);
+        rec.backT = backTotal(back);
+        for (let i = 0; i < back.length; i++) if (rec.back[i] > row[i + 2]) rec.backMask |= i < 31 ? 1 << i : 0;
+      }
       recs.set(p, rec);
     }
     bits[j] = rec.bit;
     table.set(rec.row, j * stride);
     scratch.irr[j] = rec.irr;
+    recOf[j] = rec;
   }
   used.fill(0);
   removed.fill(0);
@@ -263,13 +366,48 @@ export function rosterParts(S: LeagueSettings, roster: ValuedPlayer[], replaceme
   const healthy = greedy(P.masks, bits, table, stride, 1, n, used);
   let recompute = 0;
   for (let j = 0; j < n; j++) if (!removed[j]) recompute |= irrOf[j];
+  // Return scenarios (section note above): the top EXACT_RETURNS unconfirmed returns branch, the rest count at their
+  // expected points (written into the scratch table); their weeks always get their own lineups.
+  const ret: number[] = [];
+  for (let j = 0; j < n; j++) if (!removed[j] && recOf[j].back) ret.push(j);
+  ret.sort((a, b) => recOf[b].backT - recOf[a].backT || (roster[a].id < roster[b].id ? -1 : roster[a].id > roster[b].id ? 1 : 0));
+  const branch = ret.slice(0, EXACT_RETURNS);
+  for (const j of ret.slice(EXACT_RETURNS)) {
+    const back = recOf[j].back!;
+    for (let wi = 0; wi < P.nW; wi++) {
+      const c = j * stride + wi + 2;
+      table[c] += RETURN_BACK_P * Math.max(0, back[wi] - table[c]);
+    }
+  }
+  for (const j of ret) recompute |= recOf[j].backMask;
   let seasonSum = 0;
   let poSum = 0;
   for (let wi = 0; wi < P.nW; wi++) {
     let v = healthy;
     if (wi >= 31 || recompute & (1 << wi)) {
-      used.set(removed.subarray(0, n));
-      v = greedy(P.masks, bits, table, stride, wi + 2, n, used);
+      let vary = 0;
+      for (let b = 0; b < branch.length; b++) if (recOf[branch[b]].back![wi] > table[branch[b] * stride + wi + 2]) vary |= 1 << b;
+      if (!vary) {
+        used.set(removed.subarray(0, n));
+        v = greedy(P.masks, bits, table, stride, wi + 2, n, used);
+      } else {
+        // p × lineup(back) + (1 − p) × lineup(not back), per varying branch player.
+        const saved = branch.map((j) => table[j * stride + wi + 2]);
+        v = 0;
+        for (let on = 0; on < 1 << branch.length; on++) {
+          if (on & ~vary) continue;
+          let prob = 1;
+          for (let b = 0; b < branch.length; b++) {
+            if (!(vary & (1 << b))) continue;
+            const isOn = on & (1 << b);
+            prob *= isOn ? RETURN_BACK_P : 1 - RETURN_BACK_P;
+            table[branch[b] * stride + wi + 2] = isOn ? recOf[branch[b]].back![wi] : saved[b];
+          }
+          used.set(removed.subarray(0, n));
+          v += prob * greedy(P.masks, bits, table, stride, wi + 2, n, used);
+        }
+        branch.forEach((j, b) => (table[j * stride + wi + 2] = saved[b]));
+      }
     }
     seasonSum += v;
     if (P.playoff[wi]) poSum += v;
@@ -299,7 +437,7 @@ const NO_WEEKS: number[] = [];
 /**
  * A player in his team's IR slot as that team's lineups see him (owner 2026-10-26, injured trade pieces fix round 1):
  * never a starter or bench depth this week (effPpg 0); from his return week his weekly points count — he leaves the
- * IR slot when healthy (projection v4 has him at 0 before it; an unconfirmed return counts ret.expWeekly). Without a
+ * IR slot when healthy (projection v4 has him at 0 before it; an unconfirmed return enters the return-scenario mix). Without a
  * return estimate (no `ret`) or out for the season he never plays. Cached per player object (one view each).
  */
 export function irSlotView(p: ValuedPlayer): ValuedPlayer {

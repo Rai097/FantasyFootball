@@ -345,16 +345,15 @@ test("release (c): a reserve-list WR practising fully, IR minimum to week 10 →
   const fromWk12 = (17 - 12 + 1) * u.ret!.healthyRate!;
   assert.ok(Math.abs(u.ret!.returnValue! - 0.5 * fromWk12) < 0.1, `returnValue ${u.ret!.returnValue} vs ½ × ${fromWk12.toFixed(1)}`);
   assert.ok(u.ret!.tradeValue! > 0 && u.ret!.tradeValue! < healthy.value, `trade value ${u.ret!.tradeValue} (healthy ${healthy.value})`);
-  // Injured trade pieces fix round 1: the expected weeks lineups count — 0 before week 12, ½ × healthy after; they sum
-  // to returnValue / playoffPts (one number), and `weekly` / value stay 0 (no double discount).
-  const exp = u.ret!.expWeekly!;
-  assert.equal(exp.length, 17 - 8 + 1);
-  assert.deepEqual(exp.slice(0, 4), [0, 0, 0, 0]);
-  for (const x of exp.slice(4)) assert.ok(Math.abs(x - 0.5 * u.ret!.healthyRate!) < 0.051, `wk ≥ 12: ${x} vs ½ × ${u.ret!.healthyRate}`);
-  const r1 = (x: number) => Math.round(x * 10) / 10;
-  assert.equal(r1(exp.reduce((a, x) => a + x, 0)), u.ret!.returnValue);
-  assert.equal(r1(exp.slice(7).reduce((a, x) => a + x, 0)), u.ret!.playoffPts);
-  assert.equal(v.ret!.expWeekly, undefined, "a confirmed return's weeks are his projection's own weekly points");
+  // Injured trade pieces fix round 2: the return scenario lineups mix — 0 before week 12, his full healthy points
+  // after; returnValue / playoffPts stay the ½ expectation of those weeks; `weekly` / value stay 0 (no double discount).
+  const back = u.ret!.backWeekly!;
+  assert.equal(back.length, 17 - 8 + 1);
+  assert.deepEqual(back.slice(0, 4), [0, 0, 0, 0]);
+  for (const x of back.slice(4)) assert.ok(Math.abs(x - u.ret!.healthyRate!) < 0.051, `wk ≥ 12: ${x} vs healthy ${u.ret!.healthyRate}`);
+  assert.ok(Math.abs(back.reduce((a, x) => a + 0.5 * x, 0) - u.ret!.returnValue!) < 0.35, `½ × Σ back vs returnValue ${u.ret!.returnValue}`);
+  assert.ok(Math.abs(back.slice(7).reduce((a, x) => a + 0.5 * x, 0) - u.ret!.playoffPts!) < 0.2, `½ × Σ playoff back vs playoffPts ${u.ret!.playoffPts}`);
+  assert.equal(v.ret!.backWeekly, undefined, "a confirmed return's weeks are his projection's own weekly points");
   for (const x of [v, u]) assert.ok(Object.values(x.ret!).every((n) => typeof n !== "number" || Number.isFinite(n)));
 });
 

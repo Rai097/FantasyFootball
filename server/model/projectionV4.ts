@@ -7,7 +7,8 @@
 //  - avail: Q 0.85 / D 0.7 for his next game only; absent (Out / IR / reserve / designated to return / suspended) → 0
 //    before the estimated return week (returns.ts), × 0.85 for the first game back after a reserve-list absence, then 1;
 //    return unconfirmed → 0 in `weekly` / value (the player gets `ret.returnValue` / `ret.tradeValue`, and
-//    `ret.expWeekly` = healthy × 0.5 from current week + 4, which lineups and team strength count: rosterScore.weeklyPoints).
+//    `ret.backWeekly` = healthy × matchup from current week + 4 if he returns; lineups mix that scenario with ½ weight:
+//    rosterScore "return scenarios").
 // K / DEF keep the ECR-rank line (no stat model). Value = surplus over replacement of mode-weighted weekly points.
 import type { DetailItem, League, Player, Position, ReturnInfo, ValuedPlayer } from "./types.js";
 import { SKILL_POSITIONS } from "./types.js";
@@ -520,9 +521,10 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
         continue;
       }
       const full = week === null ? hr * w.matchup : r1(w.pts);
-      // Unknown return: the shown (0.1-rounded) expected weekly points, so expWeekly, returnValue and playoffPts agree.
+      // Unknown return: back = his full (0.1-rounded) points if he returns (the lineups' return scenario); the stash /
+      // hold sums count the shown expected points (× 0.5, 0.1-rounded), unchanged by fix round 2.
       const pts = week === null ? r1(full * RETURNS.unknownWeight) : full;
-      exp.push(pts);
+      exp.push(r1(full));
       const po = w.week >= playoffStart;
       total += pts;
       if (po) playoff += pts;
@@ -537,7 +539,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       info.returnValue = r1(total);
       if (absent) {
         info.tradeValue = r1(RETURNS.unknownWeight * scaled(raw));
-        info.expWeekly = exp;
+        info.backWeekly = exp;
       }
     }
     return info;

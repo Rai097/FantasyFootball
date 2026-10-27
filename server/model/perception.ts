@@ -7,16 +7,18 @@
 //   rate   = 0.7 × base + 0.3 × his last 3 games' actual points (recency bias; games in the last 4 weeks only);
 //            a Yahoo projection of 0 stays 0 (recency never resurrects a player Yahoo shows as done);
 //   weekly = rate in every remaining week he has a game, except weeks our model has him out (both sources: the
-//            captured view and the estimate agree on an out player); a return-unconfirmed player gets our expected
-//            points (healthy × 0.5 from current week + 4, rosterScore.unconfirmedWeek) on both sources; Yahoo's own
+//            captured view and the estimate agree on an out player); a return-unconfirmed player is 0 here (his "not
+//            back" scenario) on both sources and perceivedLineupTotal mixes in his return scenario (our healthy ×
+//            matchup from current week + 4, rosterScore "return scenarios") — Yahoo projects an IR player ~0 and the
+//            experts' rank does not price a recovery, so the partner is credited the same bet we are; Yahoo's own
 //            weekly projection, when captured this NFL week, replaces this week on either source.
 //   gap    = our playoff-weighted rate − perceived rate (+ = they underrate him).
 // Pure. The weekly arrays are cached per player object (never serialised: the Values payload stays small).
 import type { LeagueSettings, ValuedPlayer } from "./types.js";
 import { effPpg } from "./lineup.js";
 import { score } from "./scoring.js";
-import { fillOrder, irSlotReturns, unconfirmedWeek } from "./rosterScore.js";
-import { weekLineup } from "./teamStrength.js";
+import { fillOrder, irSlotReturns, returnBackPoints, returnSplit } from "./rosterScore.js";
+import { mixedWeekLineup } from "./teamStrength.js";
 
 export const PERCEPTION = {
   /** Weight of the last games' actual points in the perceived rate. */
@@ -133,13 +135,12 @@ export function perceive(p: ValuedPlayer, S: LeagueSettings, hasGame: GameCheck 
   const yahooZero = source === "yahoo" && base <= 0;
   const rate = yahooZero ? 0 : Math.max(0, recentMean !== undefined ? (1 - PERCEPTION.recencyWeight) * base + PERCEPTION.recencyWeight * recentMean : base);
 
+  const unconfirmed = returnBackPoints(p, S) !== undefined;
   const weekly: number[] = [];
   for (let i = 0; i < n; i++) {
     let v = 0;
-    const unconfirmed = unconfirmedWeek(p, S, i);
-    // Return unconfirmed (both sources): our expected points, healthy × 0.5 from week + 4 — Yahoo projects an IR
-    // player ~0 and the experts' rank does not price a recovery, so the partner is credited the same bet we are.
-    if (games[i]) v = unconfirmed !== undefined ? unconfirmed : (source === "yahoo" ? plays[i] : ourWeek(p, S, i) > 0) ? rate : 0;
+    // Return unconfirmed (both sources): 0 = his "not back" scenario; perceivedLineupTotal mixes in the return.
+    if (games[i]) v = unconfirmed ? 0 : (source === "yahoo" ? plays[i] : ourWeek(p, S, i) > 0) ? rate : 0;
     // Yahoo's own number for this week wins whenever captured (also when the rest-of-season view was not found).
     if (i === 0 && p.yahooProjWeekly !== undefined && Number.isFinite(p.yahooProjWeekly)) v = games[0] ? Math.max(0, p.yahooProjWeekly) : 0;
     weekly.push(r2(v));
@@ -189,14 +190,16 @@ export function isSpike(pc: Perception): boolean {
  * The lineup total Yahoo's evaluator would show a roster: Σ over remaining weeks of the optimal lineup by perceived
  * weekly points, the same greedy fill as team strength. IR-slot players follow team strength's rule (irSlotView):
  * never this week, from their return week on (perceived weekly is 0 while our model has them out); no return estimate
- * or out for the season → never.
+ * or out for the season → never. An unconfirmed return enters through the same scenario mix as team strength
+ * (mixedWeekLineup), his return scenario at our points on both sources.
  */
 export function perceivedLineupTotal(S: LeagueSettings, roster: ValuedPlayer[], irIds: ReadonlySet<string> = new Set()): number {
   const order = fillOrder(S.slots);
   const active = roster.filter((p) => !irIds.has(p.id) || irSlotReturns(p));
   const n = Math.max(0, S.finalWeek - S.currentWeek + 1);
+  const split = returnSplit(S, active);
   let total = 0;
-  for (let i = 0; i < n; i++) total += weekLineup(order, active, (p) => (i === 0 && irIds.has(p.id) ? 0 : (perceptionOf(p, S).weekly[i] ?? 0))).total;
+  for (let i = 0; i < n; i++) total += mixedWeekLineup(order, active, split, i, (p) => (i === 0 && irIds.has(p.id) ? 0 : (perceptionOf(p, S).weekly[i] ?? 0)));
   return total;
 }
 

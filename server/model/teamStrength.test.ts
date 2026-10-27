@@ -57,17 +57,66 @@ test("IR slot: a player back ~wk 12 counts in the playoff lineup from his return
   assert.equal(teamStrength(S, [...base, noRet], ir).lineup, 59, "no return estimate: never");
 });
 
-test("return unconfirmed: ½ × healthy rate from week current + 4 (ret.expWeekly), in or out of the IR slot", () => {
-  const base = [P("qb", "QB", 20), P("rb", "RB", 15), P("wr", "WR", 14), P("wr2", "WR", 10)];
-  const unk = vp("unk", "WR", 0, 0, {
+// Injured trade pieces fix round 2: an unconfirmed return is a scenario mix, p × lineup(back at full rate from week
+// current + 4) + (1 − p) × lineup(without him), p = ½ — never a ½-rate player inside one lineup.
+const UNK = (id: string, healthy: number, o: Partial<ValuedPlayer> = {}): ValuedPlayer =>
+  vp(id, "WR", 0, 0, {
     remainingGames: 0, weeklyFrom: 8, weekly: Array(10).fill(0),
-    ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false, healthyRate: 28, tradeValue: 30, expWeekly: [0, 0, 0, 0, 14, 14, 14, 14, 14, 14] },
+    ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false, healthyRate: healthy, tradeValue: 30, backWeekly: [0, 0, 0, 0, ...Array(6).fill(healthy)] },
+    ...o,
   });
-  // Playoffs: unk 14 beats wr2 10 at FLEX → +4 per week.
-  assert.equal(teamStrength(S, [...base, unk]).lineup, 63);
-  assert.equal(teamStrength(S, [...base, unk], new Set(["unk"])).lineup, 63);
-  // Fixture without expWeekly: the same convention from the healthy rate (byes 0).
-  const { expWeekly: _e, ...ret } = unk.ret!;
-  assert.equal(teamStrength(S, [...base, { ...unk, ret }]).lineup, 63);
-  assert.equal(teamStrength(S, [...base, { ...unk, ret: { ...ret, seasonOver: true as const } }]).lineup, 59);
+test("return unconfirmed: ½ × lineup with him back (ret.backWeekly from week current + 4) + ½ × lineup without him, in or out of the IR slot", () => {
+  const base = [P("qb", "QB", 20), P("rb", "RB", 15), P("wr", "WR", 14), P("wr2", "WR", 10)];
+  const unk = UNK("unk", 28);
+  // Back: unk 28 starts at WR, wr 14 FLEX, wr2 10 benched → 77; not back: 59 → ½ × 77 + ½ × 59 = 68.
+  assert.equal(teamStrength(S, [...base, unk]).lineup, 68);
+  assert.equal(teamStrength(S, [...base, unk], new Set(["unk"])).lineup, 68);
+  // Fixture without backWeekly: the same scenario from the healthy rate (byes 0).
+  const { backWeekly: _e, ...ret } = unk.ret!;
+  assert.equal(teamStrength(S, [...base, { ...unk, ret }]).lineup, 68);
+  assert.equal(teamStrength(S, [...base, { ...unk, ret: { ...ret, seasonOver: true as const } }]).lineup, 59, "out for the season: 0");
+});
+
+test("Jensen case: a 12-ppg returner over a 9.6 FLEX is worth ½ × (12 − 9.6) per playoff week, not 0 (½ × 12 = 6 never starts)", () => {
+  const base = [P("qb", "QB", 20), P("rb", "RB", 15), P("wr", "WR", 14), P("flex", "WR", 9.6)];
+  const without = teamStrength(S, base).lineup;
+  const withHim = teamStrength(S, [...base, UNK("u", 12)]).lineup;
+  assert.ok(Math.abs(withHim - without - 0.5 * (12 - 9.6)) < 0.051, `${withHim} − ${without}`);
+});
+
+test("a returner who would start at any rate is worth ½ × his rate per playoff week", () => {
+  const base = [P("qb", "QB", 20), P("rb", "RB", 15), P("wr", "WR", 14)]; // FLEX empty without him
+  assert.ok(Math.abs(teamStrength(S, [...base, UNK("u", 11)]).lineup - teamStrength(S, base).lineup - 5.5) < 0.051);
+});
+
+test("depth under the mix: bench cover is each scenario's cover weighted by its probability", () => {
+  const base = [P("qb", "QB", 20), P("rb", "RB", 15), P("wr", "WR", 14), P("wr2", "WR", 10)];
+  // Not back: no bench (depth 0). Back: unk 28 WR, wr 14 FLEX, wr2 10 bench; out QB 0, out RB 0 (no RB), out unk 10
+  // (wr to WR, wr2 FLEX), out wr 10 → 20 recovered over 4 starters. Mixed: (½ × 20) / (½ × 4 + ½ × 4) = 2.5.
+  assert.equal(teamStrength(S, [...base, UNK("unk", 28)]).depth, 2.5);
+});
+
+test("k > 2 unconfirmed returns: top 2 mixed exactly, the rest at expected points — between the all-½ lineup and the exact 2^k mix", () => {
+  // One WR + one FLEX open behind nobody: three 12-pt returners compete for two slots.
+  const base = [P("qb", "QB", 20), P("rb", "RB", 15)];
+  const three = [UNK("a", 12), UNK("b", 12), UNK("c", 12)];
+  const got = teamStrength(S, [...base, ...three]).lineup - teamStrength(S, base).lineup;
+  // Exact: P(0 back) = 1/8 → 0, P(1) = 3/8 → 12, P(≥ 2) = 4/8 → 24 → 4.5 + 12 = 16.5.
+  const exact = (3 / 8) * 12 + (4 / 8) * 24;
+  // All deterministic at ½: two 6-pt players start → 12.
+  const allHalf = 12;
+  assert.ok(got >= allHalf - 0.05 && got <= exact + 0.05, `k=3 gain ${got}: expected within [${allHalf}, ${exact}]`);
+  // Here: a, b mixed exactly, c at 6: 0 back → c 6; one back → 12 + 6; both → 24 → ¼ × 6 + ½ × 18 + ¼ × 24 = 16.5.
+  assert.ok(Math.abs(got - 16.5) < 0.051, `${got}`);
+  // Four returners for two slots: still bounded by the exact mix (1 − P(<2 back)) and never above two full starters.
+  const four = [...three, UNK("d", 12)];
+  const g4 = teamStrength(S, [...base, ...four]).lineup - teamStrength(S, base).lineup;
+  const exact4 = (4 / 16) * 12 + (11 / 16) * 24;
+  assert.ok(g4 >= allHalf - 0.05 && g4 <= exact4 + 0.05 && g4 <= 24, `k=4 gain ${g4} vs exact ${exact4}`);
+});
+
+test("a confirmed return stays deterministic: his projection's own weekly points from the return week", () => {
+  const base = [P("qb", "QB", 20), P("rb", "RB", 15), P("wr", "WR", 14), P("wr2", "WR", 10)];
+  const conf = { ...back("c", 28, 12), ret: { week: 12, confidence: "medium" as const, reasons: [], absent: true, practiceUp: false, healthyRate: 28 } };
+  assert.equal(teamStrength(S, [...base, conf]).lineup, 77);
 });

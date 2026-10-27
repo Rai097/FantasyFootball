@@ -104,7 +104,8 @@ test("market edge: a 'return unconfirmed' player is never pitched as 'market und
 });
 
 // Injured trade pieces fix round 1 (owner 2026-10-26): an injured piece is never free — giving him away costs my
-// playoff lineup his expected points (unconfirmed: ½ × healthy rate from week current + 4; back ~wk N: from wk N).
+// playoff lineup what he adds (back ~wk N: from wk N). Fix round 2: an unconfirmed return is the scenario mix
+// ½ × lineup(him back at full healthy rate from week current + 4) + ½ × lineup(without him).
 const playoffGain = (t: { details?: { label: string; value: string }[] }) => {
   const d = t.details!.find((x) => x.label === "Playoff lineup")!;
   return Number(d.value.replace("−", "-").match(/^[-+][\d.]+/)![0]);
@@ -112,15 +113,26 @@ const playoffGain = (t: { details?: { label: string; value: string }[] }) => {
 test("an unconfirmed-return sweetener is not free: adding him to my side lowers my playoff gain (in or out of my IR slot)", () => {
   for (const inIr of [false, true]) {
     const { mine, theirs } = rosters();
-    // Healthy 30 pts/g → 15/wk expected from week 12 (½ × healthy): he would start at WR in my playoff weeks.
+    // Healthy 30 pts/g from week 12 if back (probability ½): he would start at WR in my playoff weeks.
     mine.find((p) => p.id === "mIR")!.ret = UNK(70, 30);
     const c = ctxFor(league([team("me", mine, inIr ? { irPlayerIds: ["mIR"] } : {}), team("them", theirs)], undefined, { currentWeek: 8 }), [...mine, ...theirs]);
     const plain = evaluateTradeV3(c, "me", "them", ["mRB4"], ["tWR1"]);
     const sweet = evaluateTradeV3(c, "me", "them", ["mRB4", "mIR"], ["tWR1"]);
-    // After either deal tWR1 and he start at WR in the playoffs (15/wk); without him mWR1 (10) does: giving him costs
-    // ≈ 15 − 10 = 5 per week (+ a little depth) — before fix round 1 he counted 0 and rode along for free.
+    // After either deal tWR1 and he (if back, 30/wk) start at WR in the playoffs; without him mWR1 (10) does: giving him
+    // costs ≈ ½ × (30 − 10) = 10 per week (+ a little depth) — before fix round 1 he counted 0 and rode along for free.
     const cost = playoffGain(plain) - playoffGain(sweet);
-    assert.ok(cost >= 4.9 && cost <= 6, `IR slot ${inIr}: with the injured piece ${playoffGain(sweet)} vs without ${playoffGain(plain)}`);
+    assert.ok(cost >= 9.9 && cost <= 11, `IR slot ${inIr}: with the injured piece ${playoffGain(sweet)} vs without ${playoffGain(plain)}`);
+  }
+});
+
+test("fix round 2, Jensen case: a 12-pt returner over a 10-pt starter costs ½ × (12 − 10) per playoff week to give away, not 0", () => {
+  for (const inIr of [false, true]) {
+    const { mine, theirs } = rosters();
+    mine.find((p) => p.id === "mIR")!.ret = UNK(70, 12);
+    const c = ctxFor(league([team("me", mine, inIr ? { irPlayerIds: ["mIR"] } : {}), team("them", theirs)], undefined, { currentWeek: 8 }), [...mine, ...theirs]);
+    // ½ × 12 = 6 would sit behind mWR1 (10) and cost 0 (fix round 1); the mix prices the chance he is back and starts.
+    const cost = playoffGain(evaluateTradeV3(c, "me", "them", ["mRB4"], ["tWR1"])) - playoffGain(evaluateTradeV3(c, "me", "them", ["mRB4", "mIR"], ["tWR1"]));
+    assert.ok(cost >= 0.9 && cost <= 1.3, `IR slot ${inIr}: cost ${cost}`);
   }
 });
 
@@ -136,3 +148,4 @@ test("IR slot: a player back ~wk 12 that I give costs my playoff lineup his poin
   assert.ok(run(false) < 0, `back ~wk 12 given away: ${run(false)}`);
   assert.ok(run(true) > 0, `out for the season given away: ${run(true)}`);
 });
+

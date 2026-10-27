@@ -15,7 +15,7 @@ import { marketTag } from "./labels.js";
 import { RETURNS, returnText } from "./returns.js";
 import { isSpike, perceivedLineupTotal, perceptionOf, yahooCoverage } from "./perception.js";
 import { teamStrength } from "./teamStrength.js";
-import { weeklyPoints } from "./rosterScore.js";
+import { expectedWeeklyPoints } from "./rosterScore.js";
 
 /** Config for Trade Finder v3 (architect's design after user feedback on v2). */
 export const V3 = {
@@ -617,8 +617,8 @@ function byeItems(S: LeagueSettings, j: Judged3, myAfter: LineupResult): DetailI
   return out;
 }
 
-/** Points of player p in week w (projection v4 weekly; 0 = no game / out). */
-const ptsIn = (S: LeagueSettings, p: ValuedPlayer, w: number) => weeklyPoints(p, S)[w - S.currentWeek] ?? 0;
+/** Expected points of player p in week w (projection v4 weekly, an unconfirmed return's p × back; 0 = no game / out). */
+const ptsIn = (S: LeagueSettings, p: ValuedPlayer, w: number) => expectedWeeklyPoints(p, S)[w - S.currentWeek] ?? 0;
 
 /**
  * Bye / playoff cover I lose by giving `give` (one bullet each):

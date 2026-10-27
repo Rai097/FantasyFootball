@@ -115,15 +115,29 @@ test("coverage counts a this-week-only capture too (the headline never says 'not
   assert.deepEqual(yahooCoverage([wkOnly, vp("n", "RB", 8, 10)]), { captured: 1, total: 2 });
 });
 
-// Injured trade pieces fix round 1 (owner 2026-10-26).
-const UNC = { week: null, confidence: "unknown" as const, reasons: [], absent: true, practiceUp: false, healthyRate: 20, tradeValue: 25, expWeekly: [0, 0, 0, 0, 10, 10, 10, 10, 10, 10] };
-test("return unconfirmed: the partner sees our expected points (½ × healthy from week + 4) on both sources — estimate and captured Yahoo agree", () => {
+// Injured trade pieces fix round 2 (owner 2026-10-26): the partner's view takes the same scenario mix as ours.
+const UNC = { week: null, confidence: "unknown" as const, reasons: [], absent: true, practiceUp: false, healthyRate: 20, tradeValue: 25, backWeekly: [0, 0, 0, 0, 20, 20, 20, 20, 20, 20] };
+test("return unconfirmed: perceived weekly is his 'not back' scenario (0) on both sources; out for the season 0", () => {
   const est = perceive(vp("u1", "WR", 0, 0, { remainingGames: 0, ecrPts: 6, weekly: flat(0), weeklyFrom: 8, ret: UNC }), S);
   const yah = perceive(vp("u2", "WR", 0, 0, { remainingGames: 0, yahooProj: 0, weekly: flat(0), weeklyFrom: 8, ret: UNC }), S);
-  assert.deepEqual(est.weekly, UNC.expWeekly);
-  assert.deepEqual(yah.weekly, est.weekly, "Yahoo's ~0 for an IR player does not erase the bet on his recovery");
+  assert.deepEqual(est.weekly, flat(0));
+  assert.deepEqual(yah.weekly, est.weekly);
   const over = perceive(vp("u3", "WR", 0, 0, { remainingGames: 0, ecrPts: 6, weekly: flat(0), weeklyFrom: 8, ret: { ...UNC, seasonOver: true as const } }), S);
   assert.equal(over.total, 0, "out for the season: 0");
+});
+
+test("perceived lineup: an unconfirmed return is ½ × lineup with him back + ½ × without, Yahoo and estimate agree (Jensen case)", () => {
+  const S2 = league([], ["QB", "WR", "BN", "IR"], { currentWeek: 8 }).settings;
+  const qb = vp("qb", "QB", 18, 20, { weekly: flat(18), weeklyFrom: 8 });
+  const wr = vp("wr", "WR", 9.6, 5, { weekly: flat(9.6), weeklyFrom: 8, ecrPts: 9.6 });
+  const ret = { ...UNC, backWeekly: [0, 0, 0, 0, 12, 12, 12, 12, 12, 12] };
+  const est = vp("ue", "WR", 0, 0, { remainingGames: 0, ecrPts: 6, weekly: flat(0), weeklyFrom: 8, ret });
+  const yah = vp("uy", "WR", 0, 0, { remainingGames: 0, yahooProj: 0, weekly: flat(0), weeklyFrom: 8, ret });
+  const before = perceivedLineupTotal(S2, [qb, wr]);
+  // Weeks 12-17: back (12) beats wr (9.6) → ½ × 2.4 × 6 weeks = 7.2; a ½-rate player (6) would add 0.
+  for (const u of [est, yah]) assert.ok(Math.abs(perceivedLineupTotal(S2, [qb, wr, u]) - before - 7.2) < 0.051, u.id);
+  for (const u of [est, yah]) assert.ok(Math.abs(perceivedLineupTotal(S2, [qb, wr, u], new Set([u.id])) - before - 7.2) < 0.051, `${u.id} in the IR slot`);
+  assert.equal(perceivedLineupTotal(S2, [qb, wr, { ...est, ret: { ...ret, seasonOver: true as const } }]), before, "out for the season: nothing");
 });
 
 test("perceived lineup: an IR-slot player counts from his return week, never this week; without a return estimate never", () => {

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MODE_WEIGHTS, activeRoster, combine, depthCount, parseMode, rosterParts, rosterScore, weeklyPoints } from "./rosterScore.js";
+import { MODE_WEIGHTS, activeRoster, combine, depthCount, expectedWeeklyPoints, parseMode, returnBackPoints, rosterParts, rosterScore, weeklyPoints } from "./rosterScore.js";
+import { teamStrength } from "./teamStrength.js";
 import { league, vp, SMALL_SLOTS } from "./testkit.js";
 import type { ValuedPlayer } from "./types.js";
 
@@ -89,14 +90,17 @@ test("mode weights: one config object, parseMode defaults to balanced", () => {
   assert.equal(parseMode("bogus"), "balanced");
 });
 
-test("injured pieces fix round 1: weeklyPoints adds an unconfirmed return's expected weeks; an IR-slot returner never counts this week, counts from his return", () => {
-  // Week 4: 14 weeks 4..17. Unconfirmed, healthy 20: 0 for weeks 4-7, then 10 (byes 0).
+test("injured pieces fix round 2: an unconfirmed return is 0 in weeklyPoints (not back), his return scenario is healthy from week + 4; an IR-slot returner never counts this week, counts from his return", () => {
+  // Week 4: 14 weeks 4..17. Unconfirmed, healthy 20: back = 0 for weeks 4-7, then 20 (byes 0); expected (bye cover) ½.
   const unk = vp("U", "WR", 0, 0, { remainingGames: 0, bye: 10, ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false, healthyRate: 20 } });
-  const w = [...weeklyPoints(unk, S)];
-  assert.deepEqual(w.slice(0, 4), [0, 0, 0, 0]);
-  assert.equal(w[4], 10);
-  assert.equal(w[10 - 4], 0, "bye");
-  assert.equal(weeklyPoints({ ...unk, ret: { ...unk.ret!, seasonOver: true } }, S).every((x) => x === 0), true, "out for the season: 0");
+  assert.ok(weeklyPoints(unk, S).every((x) => x === 0), "not-back scenario: 0 every week");
+  const b = [...returnBackPoints(unk, S)!];
+  assert.deepEqual(b.slice(0, 4), [0, 0, 0, 0]);
+  assert.equal(b[4], 20);
+  assert.equal(b[10 - 4], 0, "bye");
+  assert.equal(expectedWeeklyPoints(unk, S)[4], 10, "per-player comparisons: ½ × back");
+  assert.equal(returnBackPoints({ ...unk, ret: { ...unk.ret!, seasonOver: true } }, S), undefined, "out for the season: no return scenario");
+  assert.equal(returnBackPoints({ ...unk, ret: { ...unk.ret!, week: 12 } }, S), undefined, "a confirmed return is deterministic (his projection)");
   // IR slot, back in week 15 at 18/wk: no "now" points, playoff points count.
   const star = vp("STAR", "WR", 18, 40, { weeklyFrom: 4, weekly: Array.from({ length: 14 }, (_, i) => (4 + i >= 15 ? 18 : 0)), ret: { week: 15, confidence: "high", reasons: [], absent: true, practiceUp: false } });
   const roster = [...base(), star];
@@ -106,4 +110,24 @@ test("injured pieces fix round 1: weeklyPoints adds an unconfirmed return's expe
   assert.equal(withIr.now, without.now, "never starts this week from the IR slot");
   assert.equal(withIr.depth, without.depth, "no bench depth credit while in the IR slot");
   assert.ok(withIr.playoffs > without.playoffs, `playoffs ${withIr.playoffs} vs ${without.playoffs}`);
+});
+
+// Injured trade pieces fix round 2: the roster score (judge3 / teamV3) takes the same scenario mix as team strength.
+const UNC = (id: string, healthy: number) =>
+  vp(id, "WR", 0, 0, { remainingGames: 0, ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false, healthyRate: healthy } });
+test("roster score, Jensen case: a 12-pt returner over a 10-pt FLEX adds ½ × (12 − 10) per week from week + 4 (½ × 12 = 6 would add 0)", () => {
+  const without = rosterParts(S, base(), repl).parts;
+  const withHim = rosterParts(S, [...base(), UNC("u", 12)], repl).parts;
+  assert.equal(withHim.now, without.now, "never this week");
+  assert.ok(Math.abs(withHim.playoffs - without.playoffs - 1) < 1e-9, `playoffs ${withHim.playoffs} vs ${without.playoffs}`);
+  assert.ok(Math.abs(withHim.season - without.season - (1 * 10) / 14) < 1e-9, "season: weeks 8..17 of 4..17");
+});
+
+test("roster score and team strength agree on the scenario mix (k = 1, 2, 3 returners)", () => {
+  const SP = { ...S, currentWeek: 12 };
+  for (const extra of [[UNC("a", 14)], [UNC("a", 14), UNC("b", 11)], [UNC("a", 14), UNC("b", 11), UNC("c", 17)]]) {
+    const r = [...base(), ...extra];
+    const po = rosterParts(SP, r, repl).parts.playoffs;
+    assert.ok(Math.abs(po - teamStrength(SP, r).lineup) < 0.051, `k=${extra.length}: roster score ${po} vs team strength ${teamStrength(SP, r).lineup}`);
+  }
 });
