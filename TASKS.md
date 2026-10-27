@@ -39,8 +39,10 @@ SHIPPED 2026-10-27 (live 5db1266): one playoff engine (floor factor out of seaso
    (priorKSmall 8, capped at the prior's games), FLEX-mate cover, per-opportunity TD regression; tester 736a5a6, 2 fix
    rounds. Residuals: a grown red-zone role still regresses (per-opportunity baseline can't tell it from noise); some
    0-game QBs moved +1.7–2.3 (ECR-curve drift, not investigated); the 3-for-1 acceptance case is off the list only via
-   the "lean decline" check (strength +1.2 > gate). IN PROGRESS: role-change exemption for the small-sample prior
-   (a backup-turned-starter fell 13.0 → 11.2) + mode-aware listing gate (developer running).
+   the "lean decline" check (strength +1.2 > gate). Built 2026-10-27 (94a93e1, daff093; DESIGN "Fix: role-change
+   prior + mode-aware listing"): role-change exemption for the small-sample prior (a backup-turned-starter 11.2 → 11.85;
+   rest of the drop is the TD regression) + Trade Finder lists/ranking follow the mode. Adversarial tester running; deploy
+   after. Residuals: a 0-usage week-1 game dilutes a riser's sample; Evaluate can show "bar: clears" beside "lean decline".
    NEXT BRIEF after it: "vacated role" — a usage jump that coincides
    with a same-team, same-position teammate's absence (e.g. lead RB out week-to-week) must revert in the weeks after that
    teammate's projected return (playoff weeks especially); and a single spike game must not lift our own rate much
