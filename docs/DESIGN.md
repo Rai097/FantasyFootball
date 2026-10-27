@@ -946,6 +946,8 @@ Owner-specific worked cases live outside the repo (public).
   return is unconfirmed (the pitch calls the deal a bet on his recovery); an IR tag only the league source gives
   (Yahoo / import "Out" in an IR slot, nflverse active) is absent, return unconfirmed, evidence "league lists him on
   IR"; Stash watch skips any player matching an unmatched roster line (normalized name + position when given).
+  Counts after fix round 2 (demo league 42, week 7): flex levels QB 19.2 / RB 10.3 / WR 8.6 / TE 8.2, 2 Stash watch
+  candidates (was 3), return confidences unchanged (2 high, 24 medium, 2 low, 100 unconfirmed).
   Real-cache check (week 7): all 238 top-60 skill players tagged "Out" in an IR slot get a `ret`; 14 have no
   healthy-rate source (rookies / backup QBs without a qualifying sample) and show "playoff pts —".
 * Known gaps: practice is one row per week (no Wednesday→Friday trend); suspension length is never known; the 0-snap
