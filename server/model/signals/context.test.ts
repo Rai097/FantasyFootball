@@ -50,6 +50,10 @@ test("usual starters: most frequent ∪ ≥ 3 of the last 4 ∪ opener-and-lates
   // A one-week fill-in mid-season is still flagged.
   assert.deepEqual(usualStarters(starts("AAABAAA")), ["A"]);
   assert.deepEqual(usualStarters([]), []);
+  // Platoon: a QB with ≥ 40% of the team's starts is usual.
+  assert.deepEqual(usualStarters(starts("ABABABAB")), ["A", "B"]);
+  assert.deepEqual(usualStarters(starts("AABABAAB")), ["A"], "3 of 8 = 37.5% is below the platoon share");
+  assert.deepEqual(usualStarters(starts("ABAABBAAAB")), ["A", "B"], "4 of 10 = 40% is a platoon");
 });
 
 test("SEA-shaped games: a returning starter's weeks 1 and 7 are not qbOut for a WR", () => {

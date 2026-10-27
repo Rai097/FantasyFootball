@@ -8,6 +8,8 @@ export { LEFT_EARLY };
 
 /** "Started ≥ RECENT_STARTS.min of the team's last RECENT_STARTS.of games" also makes a QB usual. */
 export const RECENT_STARTS = { min: 3, of: 4 } as const;
+/** A QB who started at least this share of the team's games is usual too (a two-QB platoon). */
+export const PLATOON_SHARE = 0.4;
 
 /**
  * The team's most frequent starting QB over the season. Ties go to the QB who started first
@@ -32,7 +34,8 @@ export function usualStarter(starts: { week: number; qbId: string }[]): string |
  *  - the most frequent starter (usualStarter);
  *  - a QB who started ≥ 3 of the team's last 4 games (the current starter after a change);
  *  - a QB who started both the opener and the latest game (a returning starter: SEA 2026, Darnold weeks 1 and 7
- *    around five backup starts, is never flagged).
+ *    around five backup starts, is never flagged);
+ *  - a QB who started ≥ 40% of the team's games (PLATOON_SHARE: both halves of a platoon).
  * Sorted for stable output.
  */
 export function usualStarters(starts: { week: number; qbId: string }[]): string[] {
@@ -46,6 +49,9 @@ export function usualStarters(starts: { week: number; qbId: string }[]): string[
   for (const s of recent) n.set(s.qbId, (n.get(s.qbId) ?? 0) + 1);
   for (const [id, c] of n) if (c >= RECENT_STARTS.min) out.add(id);
   if (sorted[0].qbId === sorted[sorted.length - 1].qbId) out.add(sorted[0].qbId);
+  const all = new Map<string, number>();
+  for (const s of sorted) all.set(s.qbId, (all.get(s.qbId) ?? 0) + 1);
+  for (const [id, c] of all) if (c / sorted.length >= PLATOON_SHARE) out.add(id);
   return [...out].sort();
 }
 
