@@ -622,15 +622,16 @@ export function parseStandingsHtml(html: string, leagueId: string): StandingsPar
   };
 }
 
-// ------------------------------------------------------------------ projections (release (d))
+// ------------------------------------------------------------------ projections (release (d), import v4)
 /**
- * What the projections parser read from one page. `values` maps a Yahoo player id to projected fantasy points.
- * Never guessed: a rest-of-season value needs BOTH a points column and a page-level sign that the projected
- * rest-of-season view is the selected one (a selected <option> / active tab reading "Remaining Season (proj)",
- * "Rest of Season (Proj)" …); otherwise nothing is returned and `diag.note` says why.
+ * What the projections parser read from one page. `values` maps a Yahoo player id to projected fantasy points,
+ * `defValues` a defense's team abbreviation (defenses carry no player id) to its points. Never guessed: a
+ * rest-of-season value needs BOTH a "Fan Pts" column and the "Remaining Games" view shown as selected
+ * (rosViewIndicator); otherwise nothing is returned and `diag.note` says why.
  */
 export interface ProjectionParse {
   values: Map<string, number>;
+  defValues: Map<string, number>;
   diag: {
     kind: "ros" | "week";
     /** Header cells of the header row the column came from (or the first header row seen). */
@@ -639,8 +640,12 @@ export interface ProjectionParse {
     columnIndex?: number;
     /** Text of the selected view control (rest of season only). */
     viewIndicator?: string;
+    /** Tables whose header row held the points column (rest of season: offense, K, DEF). */
+    tables?: number;
     rows: number;
     read: number;
+    /** Cells of the first player row read (to check the column lines up on the next real import). */
+    sample?: string[];
     note?: string;
   };
 }
@@ -650,19 +655,64 @@ export const PROJ_MAX = { ros: 450, week: 60 } as const;
 
 const WEEK_PROJ_HEADER = /^proj(?:ected)?\.?(?:\s*(?:fan(?:tasy)?\s*)?(?:pts|points))?$/i;
 const PTS_HEADER = /^(?:fan(?:tasy)?\s*)?(?:pts|points)$/i;
-const ROS_TEXT = /(?:remaining|rest[\s-]+of[\s-]+(?:the\s+)?season|\bros\b)/i;
 
-/** Text of a selected / active view control that names the projected rest-of-season view (undefined = none). */
-export function rosViewIndicator(html: string): string | undefined {
-  const isRos = (t: string) => ROS_TEXT.test(t) && /proj/i.test(t);
-  for (const m of html.matchAll(/<option\b([^>]*)>([\s\S]{0,120}?)<\/option>/gi)) {
-    const t = oneLine(m[2]);
-    if (/\bselected\b/i.test(m[1]) && isRos(t)) return t;
+/**
+ * Anchor texts of Yahoo's team-page stat views the bookmarklet follows (seen on the real site 2026-10-26): the roster
+ * stats nav has "Stats" / "Projected Stats" / …; the projected page's period nav has "Week N" / "Weeks N-M" /
+ * "Remaining Games" / "Season Total". Each is a real <a href> whose query string we never hard-code.
+ */
+export const NAV_TEXT = { projected: "Projected Stats", remaining: "Remaining Games" } as const;
+
+const ANCHOR = /<a\b([^>]*)>([\s\S]{0,400}?)<\/a>/gi;
+const anchorText = (inner: string) => oneLine(inner).toLowerCase();
+
+/**
+ * Absolute URL of the first <a href> whose whole text is `text` (exact, case-insensitive: "Stats" never matches
+ * "Projected Stats"). Only a same-origin link inside the same league (/f1/<league>/…) as `pageUrl` counts: the
+ * bookmarklet fetches it with the user's cookies. "#" / javascript: links (flyout triggers) are skipped.
+ */
+export function navLink(html: string, text: string, pageUrl: string): string | undefined {
+  const want = text.toLowerCase();
+  const page = new URL(pageUrl);
+  const league = /^\/f1\/\d+\//.exec(page.pathname.endsWith("/") ? page.pathname : `${page.pathname}/`)?.[0];
+  for (const m of html.matchAll(ANCHOR)) {
+    if (anchorText(m[2]) !== want) continue;
+    const h = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(m[1]);
+    const raw = decodeEntities((h?.[1] ?? h?.[2] ?? "").trim());
+    if (!raw || raw.startsWith("#") || /^javascript:/i.test(raw)) continue;
+    let u: URL;
+    try {
+      u = new URL(raw, page);
+    } catch {
+      continue;
+    }
+    if (u.origin !== page.origin || !league || !`${u.pathname}/`.startsWith(league)) continue;
+    return u.href;
   }
-  // Tabs / pills / dropdown buttons: an element marked selected / active / current whose text names the view.
-  for (const m of html.matchAll(/<(a|li|span|button|div)\b([^>]*(?:class\s*=\s*["'][^"']*\b(?:selected|active|is-selected|current|Selected)\b[^"']*["']|aria-(?:selected|current)\s*=\s*["'](?:true|page)["'])[^>]*)>([\s\S]{0,200}?)<\/\1>/gi)) {
-    const t = oneLine(m[3]);
-    if (t.length <= 60 && isRos(t)) return t;
+  return undefined;
+}
+
+/** True when an opening tag carries a whole class token "selected" (not "Default-selected") or aria-selected/current. */
+function tagSelected(tag: string | undefined): boolean {
+  if (!tag) return false;
+  const cls = /\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag);
+  if ((cls?.[1] ?? cls?.[2] ?? "").split(/\s+/).some((t) => t.toLowerCase() === "selected")) return true;
+  return /\baria-(?:selected|current)\s*=\s*["'](?:true|page)["']/i.test(tag);
+}
+
+/**
+ * "Remaining Games" when the page shows Yahoo's projected rest-of-season view as selected: the anchor with that text
+ * sits in an <li> whose class has the token "Selected" (real site: `li.Navitem.Selected`), or is itself marked
+ * selected. The period nav's "Week N" item stays `Default-selected` on every view and is ignored. Undefined = not shown.
+ */
+export function rosViewIndicator(html: string): string | undefined {
+  const want = NAV_TEXT.remaining.toLowerCase();
+  for (const m of html.matchAll(ANCHOR)) {
+    if (anchorText(m[2]) !== want) continue;
+    const at = m.index ?? 0;
+    const li = enclosing(html, at, "li", 4000);
+    const liTag = li ? /^<li\b[^>]*>/i.exec(html.slice(li[0], li[1]))?.[0] : undefined;
+    if (tagSelected(`<a ${m[1]}>`) || tagSelected(liTag)) return NAV_TEXT.remaining;
   }
   return undefined;
 }
@@ -678,39 +728,49 @@ function spanCells(rowHtml: string): { text: string; th: boolean }[] {
   return out;
 }
 
+const ONE_TEAM_LINK = new RegExp(TEAM_LINK.source, "i");
+
 /**
- * Projected fantasy points per player from a Yahoo roster / player-list page.
+ * Projected fantasy points per player from a Yahoo team page.
  *  - "week": a column headed "Proj" / "Proj Pts" / "Projected Points" (the roster page's weekly projection).
- *  - "ros": the page must show the projected rest-of-season view as selected (rosViewIndicator); the points column is
- *    then a "Proj…" column, else "Fan Pts" / "Pts" (which, in that view, holds the projection).
- * Values outside 0..PROJ_MAX or not plain numbers ("-", "") are skipped. Defenses (no player id) are skipped.
+ *  - "ros": the team page's Projected Stats → "Remaining Games" view, which must show as selected (rosViewIndicator).
+ *    Every table whose header row has "Fan Pts" is read (offense, kickers, defense; a legend table first on the page
+ *    has none and is skipped); in that view "Fan Pts" holds the projection.
+ * Values outside 0..PROJ_MAX or not plain numbers ("-", "") are skipped. Defense rows (a team link, row says DEF) go
+ * to `defValues` by team abbreviation.
  */
 export function parseProjectionHtml(html: string, kind: "ros" | "week"): ProjectionParse {
   const values = new Map<string, number>();
+  const defValues = new Map<string, number>();
   const diag: ProjectionParse["diag"] = { kind, headers: [], rows: 0, read: 0 };
   if (kind === "ros") {
     const vi = rosViewIndicator(html);
     if (vi) diag.viewIndicator = vi;
+    diag.tables = 0;
   }
-  const want = kind === "week" ? [WEEK_PROJ_HEADER] : [WEEK_PROJ_HEADER, PTS_HEADER];
+  const want = kind === "week" ? WEEK_PROJ_HEADER : PTS_HEADER;
   const link = /\/nfl\/players\/(\d+)/;
   for (const t of html.matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
     let col: number | undefined;
     for (const r of t[0].matchAll(/<tr\b[\s\S]*?<\/tr>/gi)) {
       const cells = spanCells(r[0]);
       const id = link.exec(r[0])?.[1];
+      let def: string | undefined;
       if (!id) {
+        const tm = ONE_TEAM_LINK.exec(r[0]);
+        const text = cells.map((c) => c.text).join(" ");
+        if (tm && /\bDEF\b/.test(text)) def = defenseTeam(tm[3], parsePosTeam(text)?.team, oneLine(tm[5]));
+      }
+      if (!id && !def) {
         if (!cells.length) continue;
         if (!diag.headers.length) diag.headers = cells.map((c) => c.text).slice(0, 16);
-        for (const re of want) {
-          const i = cells.findIndex((c) => re.test(c.text.trim()));
-          if (i >= 0) {
-            col = i;
-            diag.headers = cells.map((c) => c.text).slice(0, 16);
-            diag.column = cells[i].text;
-            diag.columnIndex = i;
-            break;
-          }
+        const i = cells.findIndex((c) => want.test(c.text.trim()));
+        if (i >= 0) {
+          col = i;
+          diag.headers = cells.map((c) => c.text).slice(0, 16);
+          diag.column = cells[i].text;
+          diag.columnIndex = i;
+          if (diag.tables !== undefined) diag.tables++;
         }
         continue;
       }
@@ -720,17 +780,22 @@ export function parseProjectionHtml(html: string, kind: "ros" | "week"): Project
       if (!/^\d{1,3}(?:\.\d{1,2})?$/.test(raw)) continue;
       const v = Number(raw);
       if (v > PROJ_MAX[kind]) continue;
-      if (!values.has(id)) {
-        values.set(id, v);
+      const into = id ? values : defValues;
+      const key = (id ?? def)!;
+      if (!into.has(key)) {
+        into.set(key, v);
         diag.read++;
+        diag.sample ??= cells.map((c) => c.text).slice(0, 12);
       }
     }
   }
-  if (diag.column === undefined) diag.note = `no ${kind === "week" ? "Proj" : "projected points"} column`;
+  if (diag.column === undefined) diag.note = `no ${kind === "week" ? "Proj" : "Fan Pts"} column`;
   else if (kind === "ros" && !diag.viewIndicator) {
-    diag.note = "projected rest-of-season view not shown as selected: values ignored";
+    diag.note = `${NAV_TEXT.remaining} view not shown as selected: values ignored`;
     values.clear();
+    defValues.clear();
     diag.read = 0;
+    delete diag.sample;
   } else if (!diag.read) diag.note = "column found but no numeric values";
-  return { values, diag };
+  return { values, defValues, diag };
 }

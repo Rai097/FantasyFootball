@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { availabilityFrom, htmlToText, mapSlotToken, parseMyTeamId, parsePlayersHtml, parsePosTeam, parseProjectionHtml, parseSettingsHtml, parseStandingsHtml, playerKey, rosViewIndicator, waiverStatusOf } from "../../web/src/import/yahooHtml.js";
+import { availabilityFrom, htmlToText, mapSlotToken, parseMyTeamId, parsePlayersHtml, parsePosTeam, parseProjectionHtml, parseSettingsHtml, parseStandingsHtml, playerKey, rosViewIndicator, navLink, NAV_TEXT, waiverStatusOf } from "../../web/src/import/yahooHtml.js";
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const html = (n: string) => readFileSync(path.join(dir, n), "utf8");
@@ -215,30 +215,54 @@ test("projections (week): the roster page's 'Proj' column, matched by header; no
   assert.ok(none.diag.headers.includes("Fan Pts"), JSON.stringify(none.diag.headers));
 });
 
-test("projections (rest of season): only with the projected rest-of-season view selected; colspan headers line up; bad cells skipped", () => {
-  // RECONSTRUCTED fixture (not Yahoo's real markup): verified on the owner's next import.
-  const page = html("yahoo-web-roster-proj-ros.html");
+test("projections (rest of season): Remaining Games view selected → every Fan Pts table (offense, K, DEF); legend table skipped; bad cells skipped", () => {
+  // RECONSTRUCTED fixture from the structure seen on Yahoo's real site 2026-10-26 (markup invented).
+  const page = html("yahoo-web-team-proj-remaining.html");
   const r = parseProjectionHtml(page, "ros");
-  assert.equal(r.diag.viewIndicator, "Remaining Season (proj)");
+  assert.equal(r.diag.viewIndicator, "Remaining Games");
   assert.equal(r.diag.column, "Fan Pts");
-  assert.equal(r.diag.columnIndex, 2);
-  assert.deepEqual([...r.values], [["30123", 201.45], ["34496", 158.2]], "'-' and an out-of-range 9999 are skipped");
-  // The same page without the selected view (Yahoo ignored the parameter): Fan Pts is season-to-date, never used.
-  const ignored = parseProjectionHtml(page.replace(' selected="selected"', ""), "ros");
-  assert.equal(ignored.values.size, 0);
-  assert.equal(ignored.diag.viewIndicator, undefined);
-  assert.match(ignored.diag.note!, /not shown as selected/);
-  assert.equal(ignored.diag.column, "Fan Pts", "the headers seen are still recorded");
-  // A normal roster page has no rest-of-season view at all.
+  assert.equal(r.diag.tables, 3, "offense + kickers + defense tables; the legend table has no Fan Pts");
+  assert.deepEqual([...r.values], [["30123", 235.91], ["34496", 158.2], ["31002", 98]], "'-' and an out-of-range 999.5 are skipped");
+  assert.deepEqual([...r.defValues], [["BUF", 81.5]], "defenses (no player id) by team abbreviation");
+  assert.equal(r.diag.note, undefined);
+  assert.equal(r.diag.sample?.[4], "235.91", "diagnostics carry the first row read");
+  // Same page, view not selected (only the Week item's Default-selected left): Fan Pts is not the ROS projection.
+  const notSel = parseProjectionHtml(page.replace('class="Navitem  Selected"', 'class="Navitem"'), "ros");
+  assert.equal(notSel.values.size, 0);
+  assert.equal(notSel.defValues.size, 0);
+  assert.equal(notSel.diag.viewIndicator, undefined);
+  assert.match(notSel.diag.note!, /Remaining Games view not shown as selected/);
+  assert.equal(notSel.diag.column, "Fan Pts", "the headers seen are still recorded");
+  // The projected page's this-week view and a normal roster page are never rest-of-season.
+  const week = parseProjectionHtml(html("yahoo-web-team-proj.html"), "ros");
+  assert.equal(week.values.size, 0);
+  assert.match(week.diag.note!, /no Fan Pts column/);
   const roster = parseProjectionHtml(html("yahoo-web-roster.html"), "ros");
   assert.equal(roster.values.size, 0);
   assert.ok(roster.diag.note);
 });
 
-test("rosViewIndicator: a selected option or an active tab naming the projected rest of season; not the dropdown's other options", () => {
-  assert.equal(rosViewIndicator('<option value="x">Remaining Season (proj)</option><option selected>Season (2026)</option>'), undefined);
-  assert.equal(rosViewIndicator('<select><option selected value="P_PSR">Rest of Season (Proj)</option></select>'), "Rest of Season (Proj)");
-  assert.equal(rosViewIndicator('<ul><li class="Selected"><a href="?stat1=P">Remaining Season (Proj)</a></li></ul>'), "Remaining Season (Proj)");
-  assert.equal(rosViewIndicator('<a aria-current="page">ROS Proj</a>'), "ROS Proj");
-  assert.equal(rosViewIndicator("<h2>Remaining Season (proj)</h2>"), undefined, "a heading alone is not a selected view");
+test("rosViewIndicator: Remaining Games in an li with class token Selected (or itself selected); Default-selected and other items are not", () => {
+  const nav = (cls: string, text = "Remaining Games") => `<ul><li class="Navitem Default-selected"><a href="?a=1">Week 7</a></li><li class="${cls}"><a href="?a=2">${text}</a></li></ul>`;
+  assert.equal(rosViewIndicator(nav("Navitem  Selected")), "Remaining Games");
+  assert.equal(rosViewIndicator(nav("Navitem selected")), "Remaining Games");
+  assert.equal(rosViewIndicator(nav("Navitem")), undefined, "only the Week item is Default-selected");
+  assert.equal(rosViewIndicator(nav("Navitem Default-selected")), undefined, "Default-selected is not the token Selected");
+  assert.equal(rosViewIndicator(nav("Navitem Selected", "Season Total")), undefined, "another period selected");
+  assert.equal(rosViewIndicator('<a aria-current="page" href="?a=2">Remaining Games</a>'), "Remaining Games");
+  assert.equal(rosViewIndicator("<h2>Remaining Games</h2>"), undefined, "a heading alone is not a selected view");
+});
+
+test("navLink: exact anchor text, entities decoded, resolved against the page; flyout '#' and off-site / other-league links skipped", () => {
+  const team = "https://football.fantasysports.yahoo.com/f1/1405188/3";
+  const nav = html("yahoo-web-team-nav.html");
+  assert.equal(navLink(nav, NAV_TEXT.projected, team), "https://football.fantasysports.yahoo.com/f1/1405188/3?zz1=P&zz2=W");
+  assert.equal(navLink(nav, "Stats", team), "https://football.fantasysports.yahoo.com/f1/1405188/3?zz1=S&zz2=W", "'Stats' never matches 'Projected Stats'");
+  assert.equal(navLink(nav, NAV_TEXT.remaining, team), undefined);
+  const proj = html("yahoo-web-team-proj.html");
+  assert.equal(navLink(proj, NAV_TEXT.remaining, navLink(nav, NAV_TEXT.projected, team)!), "https://football.fantasysports.yahoo.com/f1/1405188/3?zz1=P&zz2=RG");
+  assert.equal(navLink('<a href="https://evil.example/f1/1405188/3?x">Projected Stats</a>', NAV_TEXT.projected, team), undefined, "off-site");
+  assert.equal(navLink('<a href="/f1/999/3?x">Projected Stats</a>', NAV_TEXT.projected, team), undefined, "another league");
+  assert.equal(navLink('<a href="javascript:void(0)">Projected Stats</a>', NAV_TEXT.projected, team), undefined);
+  assert.equal(navLink("<a href='?x=1&amp;y=2'>Projected Stats</a>", NAV_TEXT.projected, team), "https://football.fantasysports.yahoo.com/f1/1405188/3?x=1&y=2");
 });
