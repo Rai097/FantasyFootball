@@ -28,8 +28,10 @@ function upgradeItems(ctx: TradeContext, j: Judged3, my: TeamV3, mine: ValuedPla
   const d = j.myParts;
   const { items, add } = detailBuilder();
   if (theirs.ppg > mine.ppg + 0.2) add("Projection", `${theirs.ppg.toFixed(1)} vs ${mine.ppg.toFixed(1)} ppg rest of season`, "pos");
-  if (theirs.trend >= 1) add("Usage", `${theirs.name} trending up (${fmtSigned(theirs.trend)} expected pts/g)`, "pos");
-  if (theirs.games >= 2 && theirs.ppgExp26 - theirs.ppg26 >= 2) add("Bounce-back", `${theirs.name}: ${theirs.ppgExp26.toFixed(1)} expected > ${theirs.ppg26.toFixed(1)} actual ppg`, "pos");
+  if (theirs.riser) add("Usage", `${theirs.name}: opportunity rising 3 straight games`, "pos");
+  else if (theirs.trend >= 1) add("Usage", `${theirs.name} trending up (${fmtSigned(theirs.trend)} expected pts/g)`, "pos");
+  if (theirs.label === "buy-low") add("Buy-low", `${theirs.name} due ${fmtSigned(theirs.luck ?? 0)} pts/g by his usage`, "pos");
+  if (mine.label === "sell-high") add("Sell-high", `${mine.name}: TD luck ${fmtSigned(mine.luck ?? 0)} pts/g`, "pos");
   if (mine.trend <= -1) add("Usage", `${mine.name} fading (${fmtSigned(mine.trend)} expected pts/g)`, "neg");
   if (inPlayoffs(ctx, mine) && !inPlayoffs(ctx, theirs)) add("Playoff bye", `${mine.name}: week ${mine.bye}`);
   if (d.season > 0.05) {

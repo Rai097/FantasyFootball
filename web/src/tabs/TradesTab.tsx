@@ -121,7 +121,7 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
           <>
             {data.valueSource === "model" && (
               <div className="notice warn one-line small">
-                Market values are unavailable: using our own values. <HelpTip text="FantasyCalc did not answer, so 'what the other manager thinks' uses our values: fairness and acceptance are rougher and buy-low / sell-high edges are not shown." />
+                Market values are unavailable: using our own values. <HelpTip text="FantasyCalc did not answer, so 'what the other manager thinks' uses our values: fairness and acceptance are rougher and 'market undervalues / overvalues' tags are not shown." />
               </div>
             )}
             <div className={`notice finder-summary${data.trades.length === 0 ? " warn" : ""}`}>

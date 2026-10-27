@@ -212,3 +212,12 @@ test("replacement level, vorp and the convex 0-100 value scale (one-team league:
   assert.ok(second.value < 50 && second.value > 30, `half the surplus is worth ~39 (convexity 1.35), got ${second.value}`);
   assert.equal(v.players.get("rb10")!.value, 0);
 });
+
+test("luck is unknown (absent) without real usage, never a 0", () => {
+  // Snap-only games: no expected points at all.
+  const idle = rawPlayer("idle", "WR", { ecrPos: 60, weeks: games(4, {}, {}) });
+  const v = valuePlayers(L(), [...POOL, idle]).players.get("idle")!;
+  assert.equal(v.luck, undefined);
+  assert.equal(v.label, undefined);
+  assert.ok(!v.whyItems!.some((d) => d.label === "Luck"));
+});

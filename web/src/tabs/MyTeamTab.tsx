@@ -45,6 +45,12 @@ export function MyTeamTab({ analysis, onOpenLeague }: { analysis: Analysis; onOp
           }
         />
         <Stat label="Starter ppg" value={f1(me.starterPpg)} why="Projected points per week from your best legal lineup (injured players discounted)." />
+        <Stat
+          label="Playoff lineup strength"
+          value={me.playoffStrength?.weeks.length ? f1(me.playoffStrength.total) : "—"}
+          sub={me.playoffStrength?.weeks.length ? `lineup ${f1(me.playoffStrength.lineup)} + bench cover ${f1(me.playoffStrength.depth)}` : undefined}
+          why="Projected points per week of your best lineup in weeks 15–17 (IR slot left out), plus a quarter of what your bench recovers if one starter is out."
+        />
         <Stat label="Bench value" value={f1(me.benchValue)} why="Sum of your bench players' 0–100 trade values: what you could deal without touching the lineup." />
         <Stat label="Total value" value={f1(me.totalValue)} why="Sum of every rostered player's 0–100 trade value (starters plus bench)." />
       </section>

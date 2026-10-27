@@ -264,3 +264,16 @@ test("IR slot: a healthy IR-slotted starter never counts in the base lineup, so 
   assert.equal(gainWith(["IRGUY"]), 7, "WR1 starts: the add replaces the 3-ppg WR2");
   assert.equal(gainWith(["IRGUY", "WR1"]), 8, "WR1 on IR: the add replaces the 2-ppg bench WR who filled in");
 });
+
+test("waiver details explain luck (+ = due for more) and rising usage", () => {
+  const ctx = ctxFor([...mine, ...other]);
+  const due = vp("FA_due", "WR", 10, 12, { luck: 2.4, label: "buy-low", riser: true });
+  const lucky = vp("FA_lucky", "WR", 9, 10, { luck: -2.8, label: "sell-high" });
+  const r = rankWaivers(ctx, "me", [due, lucky].map((p) => ({ player: p, onWaivers: true })), { myPriority: 3 });
+  const d = r.freeAgents.find((t) => t.id === "FA_due")!;
+  assert.ok(d.details.some((x) => x.label === "Luck" && /buy-low/.test(x.value) && x.tone === "pos"), txt(d));
+  assert.ok(d.details.some((x) => x.label === "Opportunity" && /Rising/.test(x.value)));
+  const l = r.freeAgents.find((t) => t.id === "FA_lucky")!;
+  assert.ok(l.details.some((x) => x.label === "Luck" && /sell-high/.test(x.value)), txt(l));
+  assert.deepEqual(detailProblems(d.details), []);
+});

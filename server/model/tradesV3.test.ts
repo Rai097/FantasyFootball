@@ -302,10 +302,28 @@ test("v3.1 D: giving a riser costs ×1.15 in my true value and he is never tagge
     assert.ok(j.items31.some((d) => d.label === "Riser you give" && /^mRB3/.test(d.value)));
     const ev = evaluateTradeV3(ctx, "me", "them", ["mRB3"], ["tWR3"]);
     assert.ok(ev.tags.includes("riser: mRB3"), ev.tags.join());
-    assert.ok(!ev.tags.some((t) => t.startsWith("sell-high")), ev.tags.join());
+    assert.ok(!ev.tags.some((t) => t.startsWith("sell-high") || t.startsWith("market overvalues")), ev.tags.join());
   } finally {
     delete P("mRB3").riser;
     delete P("mRB3").edge;
+  }
+});
+
+test("label tags: buy-low / sell-high come from luck, the market gap is 'market undervalues / overvalues'", () => {
+  const setP = (id: string, o: Partial<ValuedPlayer>) => Object.assign(P(id), o);
+  setP("tWR3", { label: "buy-low", luck: 2.6, edge: 9 });
+  setP("mRB3", { label: "sell-high", luck: -3.2, edge: -10 });
+  try {
+    const tags = evaluateTradeV3(ctx, "me", "them", ["mRB3"], ["tWR3"]).tags;
+    assert.ok(tags.includes("buy-low: tWR3 (due +2.6 pts/g)"), tags.join(" | "));
+    assert.ok(tags.includes("sell-high: mRB3 (TD luck −3.2 pts/g)"), tags.join(" | "));
+    assert.ok(tags.includes("market undervalues: tWR3 (+9.0)"), tags.join(" | "));
+    assert.ok(tags.includes("market overvalues: mRB3 (−10.0)"), tags.join(" | "));
+    // A big market gap alone is not a buy-low (that word now means luck).
+    setP("tWR3", { label: undefined });
+    assert.ok(!evaluateTradeV3(ctx, "me", "them", ["mRB3"], ["tWR3"]).tags.some((t) => t.startsWith("buy-low")));
+  } finally {
+    for (const id of ["tWR3", "mRB3"]) for (const k of ["label", "luck", "edge"] as const) delete P(id)[k];
   }
 });
 

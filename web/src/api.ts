@@ -50,6 +50,8 @@ export interface Analysis {
   notes?: string[];
   /** Where players' market values come from ("model" = FantasyCalc unavailable, no market columns). */
   valueSource?: "fantasycalc" | "model";
+  /** Value weighting for the request team: playoffs (in a playoff spot) or balanced. */
+  valueMode?: "playoffs" | "balanced";
 }
 
 export type TradeResult = Trade & { verdict?: string };

@@ -15,6 +15,7 @@ import type {
 } from "./types.js";
 import { score } from "./scoring.js";
 import { injuryKind } from "./projection.js";
+import { marketTag } from "./labels.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
 
 export const BREAKOUT_POS: Position[] = ["RB", "WR", "TE"];
@@ -438,7 +439,11 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
     const young = p.age !== undefined && p.age <= 26;
     const upside = r2(0.7 * clamp01((ecrEdge ?? 0) / 24) + (young ? 0.3 : 0));
     const tags = [...sit.tags];
-    if (m.gap >= 2) tags.push("usage > output");
+    // One label definition app-wide (labels.ts): luck-based buy-low / sell-high, market under/overvalues, rising usage.
+    if (p.label) tags.push(p.label);
+    const mt = p.marketRank !== undefined && !p.marketEstimated ? marketTag(p.edge) : null;
+    if (mt) tags.push(mt);
+    if (p.riser) tags.push("opportunity rising");
     if (ecrEdge !== undefined && ecrEdge >= 12) tags.push("experts higher");
     if (young) tags.push("young");
     if (cheap) tags.push("cheap");

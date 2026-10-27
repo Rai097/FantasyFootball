@@ -78,7 +78,7 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
       {trade.tags.length > 0 && (
         <div className="tags">
           {trade.tags.map((t) => (
-            <span key={t} className={`tag${/^buy-low/.test(t) ? " tag-good" : /^sell-high/.test(t) ? " tag-warn" : ""}`}>
+            <span key={t} className={`tag${/^(buy-low|market undervalues)/.test(t) ? " tag-good" : /^(sell-high|market overvalues)/.test(t) ? " tag-warn" : ""}`}>
               {t}
             </span>
           ))}

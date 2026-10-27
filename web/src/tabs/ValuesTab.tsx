@@ -7,15 +7,16 @@ import { deltaClass, f1, signed } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
 import { PosFilter } from "./WaiversTab";
 
-type SortKey = "value" | "market" | "marketRank" | "edge" | "ppg" | "ppg26" | "ppgExp26" | "posRank" | "ecrOverall" | "name" | "owner";
-// One-sentence meanings behind each column's tappable "?" (server/model/projection.ts and market.ts definitions).
+type SortKey = "value" | "market" | "marketRank" | "edge" | "ppg" | "luck" | "ppg26" | "ppgExp26" | "posRank" | "ecrOverall" | "name" | "owner";
+// One-sentence meanings behind each column's tappable "?" (server/model/projectionV4.ts, labels.ts and market.ts definitions).
 const COLS: { key: SortKey; label: string; num: boolean; tip?: string; hideSm?: boolean; market?: boolean }[] = [
   { key: "name", label: "Player", num: false },
-  { key: "value", label: "Value", num: true, tip: "Our 0–100 rest-of-season trade value: projected points above replacement × games left, blended 35% with the expert consensus rank." },
+  { key: "value", label: "Value", num: true, tip: "Our 0–100 trade value: projected weekly points above replacement, playoff weeks weighted most when you hold a playoff spot." },
   { key: "market", label: "Market", num: true, market: true, tip: "What managers trade him for: FantasyCalc value from real trades (#1 = 100); * = not in their list, our estimate." },
   { key: "marketRank", label: "Mkt rk", num: true, market: true, hideSm: true, tip: "His overall rank in the FantasyCalc market list (— = not listed)." },
-  { key: "edge", label: "Edge", num: true, market: true, hideSm: true, tip: "Our value mapped onto the market's scale minus his market value: + the market undervalues him (buy low), − overvalues him (sell high), — when the market has no real value for him." },
-  { key: "ppg", label: "PPG", num: true, tip: "Projected points per game for the rest of the season in your scoring: a weighted blend of expert ranks, this season and last season." },
+  { key: "edge", label: "Edge", num: true, market: true, hideSm: true, tip: "Our value on the market's scale minus his market value: + the market undervalues him, − overvalues him, — when the market has no real value for him." },
+  { key: "ppg", label: "PPG", num: true, tip: "Projected points per game when he plays, your scoring: his recent usage and finishing, the experts as a check, and his matchups." },
+  { key: "luck", label: "Luck", num: true, tip: "Expected minus actual points per game by his usage, recent games weigh most: + = due for more (buy-low at +2), − = above his usage (sell-high at −2 when TDs drive it)." },
   { key: "ppg26", label: "2026", num: true, hideSm: true, tip: "Actual points per game this season in your scoring (— = no games yet)." },
   { key: "ppgExp26", label: "Exp 26", num: true, hideSm: true, tip: "Expected points per game this season from his opportunities (targets, carries, air yards), your scoring." },
   { key: "posRank", label: "Pos rk", num: true, tip: "His rank at his position by projected points per game." },
@@ -67,6 +68,8 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
           return r.market ?? null;
         case "edge":
           return r.edge ?? null;
+        case "luck":
+          return r.luck ?? null;
         default:
           return r[sort.key];
       }
@@ -143,6 +146,9 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
                     </>
                   )}
                   <td className="num">{f1(r.ppg)}</td>
+                  <td className={`num delta ${Math.abs(r.luck ?? 0) >= 2 ? deltaClass(r.luck) : "neutral"}`} title={r.label ?? undefined}>
+                    {r.luck !== undefined ? signed(r.luck) : "—"}
+                  </td>
                   <td className="num hide-sm">{r.games ? f1(r.ppg26) : "—"}</td>
                   <td className="num hide-sm">{r.games ? f1(r.ppgExp26) : "—"}</td>
                   <td className="num">

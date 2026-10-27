@@ -407,7 +407,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const value = r1(valueOfProj(x));
     const posRank = posRankOf(p.pos, x.ppg);
     const backupQb = p.pos === "QB" && oneQb && posRank > S.numTeams && value < 3;
-    const luck = x.sig?.luck ?? null;
+    // Luck only means something with real usage (the efficiency ratio's threshold); otherwise unknown, not 0.
+    const luck = x.sig?.efficiency ? (x.sig.luck ?? null) : null;
     const label = luckLabel(luck, x.sampleGames);
     const out: ValuedPlayer = {
       ...p,
@@ -511,7 +512,7 @@ function explainItems(
   add("Playoffs", `${f1(x.playoffPts)} pts in weeks ${regEnd + 1}–${finalWeek}`);
   add("Lineup pts/game", `${f1(x.effPpg)} over ${x.gamesLeft} games left (availability applied)`);
   add("Above replacement", `+${f1(vorp)} pts/game over the ${p.pos} replacement (${f1(repl)})`);
-  if (x.sig?.luck && !x.kdef) add("Luck", luckText(x.sig.luck.points, label), label === "buy-low" ? "pos" : label === "sell-high" ? "warn" : undefined);
+  if (x.sig?.luck && x.sig.efficiency && !x.kdef) add("Luck", luckText(x.sig.luck.points, label), label === "buy-low" ? "pos" : label === "sell-high" ? "warn" : undefined);
   if (x.sig?.trend?.rising) add("Opportunity", `rising: ${x.sig.trend.metric === "wopr" ? "WOPR" : "weighted touches"} up 3 straight games`, "pos");
   add("Value", `${f1(value)} of 100 (${VALUE_MODE_TEXT[mode]})`);
   if (backupQb) add("Backup QB", "~0 trade value in a 1-QB league");

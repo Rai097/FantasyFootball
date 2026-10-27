@@ -205,6 +205,34 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     for (const pos of ["QB", "RB", "WR", "TE", "K", "DEF"]) assert.ok(Number.isFinite(json.replacement[pos]), `replacement.${pos}`);
   });
 
+  test("GET analysis: projection v4 shape (weekly points, season / playoff totals, luck, value mode, playoff strength)", async () => {
+    const { json } = await get(`${L}/analysis`);
+    const S = json.league.settings;
+    assert.ok(["playoffs", "balanced"].includes(json.valueMode), `valueMode ${json.valueMode}`);
+    const nW = S.finalWeek - S.currentWeek + 1;
+    let labelled = 0;
+    for (const p of Object.values<any>(json.players)) {
+      assert.equal(p.weeklyFrom, S.currentWeek, `${p.name}: weeklyFrom`);
+      assert.ok(Array.isArray(p.weekly) && p.weekly.length === nW && p.weekly.every((x: number) => Number.isFinite(x) && x >= 0), `${p.name}: weekly`);
+      if (p.bye >= S.currentWeek && p.bye <= S.finalWeek) assert.equal(p.weekly[p.bye - S.currentWeek], 0, `${p.name}: bye week ${p.bye} must be 0`);
+      for (const k of ["seasonPts", "playoffPts"]) assert.ok(Number.isFinite(p[k]) && p[k] >= 0, `${p.name}: ${k}=${p[k]}`);
+      assert.equal(p.valueMode, json.valueMode);
+      if (p.luck !== undefined) assert.ok(Number.isFinite(p.luck), `${p.name}: luck`);
+      if (p.label !== undefined) {
+        labelled++;
+        assert.ok(p.label === "buy-low" ? p.luck >= 2 : p.label === "sell-high" && p.luck <= -2, `${p.name}: ${p.label} at luck ${p.luck}`);
+      }
+      if (/^(IR|PUP|NA)$/i.test(p.injury?.status ?? "")) assert.ok(p.weekly.every((x: number) => x === 0), `${p.name} (${p.injury.status}) projects 0`);
+    }
+    assert.ok(labelled > 0, "some buy-low / sell-high labels on the demo league");
+    for (const t of json.teams) {
+      const ps = t.playoffStrength;
+      assert.ok(ps && Number.isFinite(ps.total) && Number.isFinite(ps.lineup) && Number.isFinite(ps.depth), `${t.team.name}: playoffStrength`);
+      assert.ok(ps.lineup > 50 && ps.total >= ps.lineup, `${t.team.name}: playoff lineup ${ps.lineup}, total ${ps.total}`);
+      assert.deepEqual(ps.weeks, [15, 16, 17].filter((w) => w >= S.currentWeek && w <= S.finalWeek));
+    }
+  });
+
   test("GET values: sorted, top ≈ 100, slim rows (< 250 KB), Edge only when the market lists him, bullets on ?id=", async () => {
     const { status, json } = await get(`${L}/values`);
     assert.equal(status, 200);
@@ -234,6 +262,12 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     }
     const rostered = json.filter((p: any) => p.rostered);
     assert.ok(rostered.length >= 12 * 15);
+    // Luck column: + = due for more by his usage; unknown (no games) is absent, never 0-filled.
+    assert.ok(json.some((p: any) => Number.isFinite(p.luck)), "luck on some rows");
+    for (const p of json) {
+      assert.equal(p.weekly, undefined, `${p.name}: weekly points stay out of the slim rows`);
+      if (p.games === 0) assert.equal(p.luck, undefined, `${p.name}: no games with usage → no luck number`);
+    }
     assert.ok(rostered.every((p: any) => typeof p.ownerTeamId === "string"));
     // The "?" bullets: one row with whyItems per tap; every item short and chain-free (all players of the demo league).
     const rows = await Promise.all(json.map((p: any) => get(`${L}/values?id=${encodeURIComponent(p.id)}`)));

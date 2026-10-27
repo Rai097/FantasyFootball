@@ -482,7 +482,7 @@ export type CardPlayer = Pick<ValuedPlayer, "id" | "name" | "pos" | "team" | "va
  */
 export type ValueRow = Pick<
   ValuedPlayer,
-  "id" | "name" | "pos" | "team" | "injury" | "value" | "market" | "marketRank" | "marketEstimated" | "edge" | "ppg" | "ppg26" | "ppgExp26" | "games" | "posRank" | "ecrOverall" | "whyItems"
+  "id" | "name" | "pos" | "team" | "injury" | "value" | "market" | "marketRank" | "marketEstimated" | "edge" | "ppg" | "ppg26" | "ppgExp26" | "games" | "posRank" | "ecrOverall" | "luck" | "label" | "whyItems"
 > & { ownerTeamId?: string; rostered: boolean };
 
 /** GET /breakouts row: no prose thesis, slim player. */

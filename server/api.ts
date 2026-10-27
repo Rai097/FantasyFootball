@@ -241,6 +241,8 @@ export function toValueRow(p: ValuedPlayer, ownerTeamId: string | undefined, wit
   if (ownerTeamId !== undefined) row.ownerTeamId = ownerTeamId;
   if (p.injury) row.injury = p.injury;
   if (p.ecrOverall !== undefined) row.ecrOverall = p.ecrOverall;
+  if (p.luck !== undefined) row.luck = p.luck;
+  if (p.label) row.label = p.label;
   if (p.market !== undefined) row.market = p.market;
   if (p.marketRank !== undefined) row.marketRank = p.marketRank;
   if (p.marketEstimated) row.marketEstimated = true;

@@ -5,6 +5,7 @@ import { irSet, rosterOf } from "./analysis.js";
 import type { TradeContext } from "./tradeKit.js";
 import { riskStatus } from "./injuryRisk.js";
 import { injuryKind } from "./projection.js";
+import { luckText } from "./labels.js";
 
 export interface FreeAgentInput {
   player: ValuedPlayer;
@@ -260,6 +261,8 @@ export function rankWaivers(
     item("Value change", fmtSigned(benchGain), toneOf(benchGain));
     if (fa.games >= 3) item("Expected points", `${fmtSigned(fa.trend)}/g lately vs his season`, toneOf(fa.trend));
     if (snapTrend !== 0) item("Snaps", `${fmtSigned(snapTrend * 100)}% last week vs earlier weeks`, toneOf(snapTrend));
+    if (fa.luck !== undefined) item("Luck", luckText(fa.luck, fa.label ?? null), fa.label === "buy-low" ? "pos" : fa.label === "sell-high" ? "warn" : undefined);
+    if (fa.riser) item("Opportunity", "Rising: usage up 3 straight games", "pos");
     if (fa.injury) item("Injury", `${fa.injury.status}${fa.injury.detail ? ` (${fa.injury.detail})` : ""}`, "warn");
     if (bo) {
       // Missing breakout numbers (NaN / undefined) are unknown: "—", never "NaN" or 0.

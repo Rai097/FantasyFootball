@@ -10,6 +10,7 @@ import { injuryKind } from "./projection.js";
 import { edgeOf, marketOf, trueOf, type ValueSource } from "./market.js";
 import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
+import { marketTag } from "./labels.js";
 
 /** Config for Trade Finder v3 (architect's design after user feedback on v2). */
 export const V3 = {
@@ -39,8 +40,6 @@ export const V3 = {
   /** Partner targeting. */
   topPartners: 8,
   minTrades: 6,
-  /** Edge tags. */
-  edgeTag: 8,
   /** Acceptance: logistic(k · edgePct), +5% → 0.65. */
   accK: Math.log(0.65 / 0.35) / 5,
   extraPlayerMult: 0.85,
@@ -482,10 +481,16 @@ function sideOf(teamId: string, gives: ValuedPlayer[], before: LineupResult, aft
   };
 }
 
+/**
+ * Label tags (labels.ts, one definition app-wide): buy-low / sell-high from luck (what I get under-produces his usage /
+ * what I give over-produces it on touchdowns), and the market gap (|edge| ≥ 8). Never "sell" a rising player.
+ */
 function edgeTags(j: Judged3): string[] {
   const tags: string[] = [];
-  for (const p of j.get) if (edgeOf(p) >= V3.edgeTag) tags.push(`buy-low: ${p.name} (+${edgeOf(p).toFixed(1)})`);
-  for (const p of j.give) if (!p.riser && edgeOf(p) <= -V3.edgeTag) tags.push(`sell-high: ${p.name} (${fmtSigned(edgeOf(p))})`);
+  for (const p of j.get) if (p.label === "buy-low") tags.push(`buy-low: ${p.name} (due ${fmtSigned(p.luck ?? 0)} pts/g)`);
+  for (const p of j.give) if (!p.riser && p.label === "sell-high") tags.push(`sell-high: ${p.name} (TD luck ${fmtSigned(p.luck ?? 0)} pts/g)`);
+  for (const p of j.get) if (marketTag(edgeOf(p)) === "market undervalues") tags.push(`market undervalues: ${p.name} (+${edgeOf(p).toFixed(1)})`);
+  for (const p of j.give) if (!p.riser && marketTag(edgeOf(p)) === "market overvalues") tags.push(`market overvalues: ${p.name} (${fmtSigned(edgeOf(p))})`);
   return tags;
 }
 

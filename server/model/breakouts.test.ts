@@ -216,3 +216,19 @@ test("how-it's-scored items: one rule each, cheap rule follows the price source"
   assert.ok(howItems(120, 20, null, false).some((d) => d.label === "Cheap" && /Our value/.test(d.value)));
   assert.ok(howItems(120, 20, null, true).some((d) => d.label === "Depth chart" && /Unavailable/.test(d.value)));
 });
+
+test("Targets tags use the app-wide labels: luck buy-low / sell-high, market gap, rising usage", () => {
+  const starters = [vp("s1", "QB", 20, 20), vp("s2", "RB", 15, 20), vp("s3", "RB", 14, 20), vp("s4", "WR", 15, 20), vp("s5", "WR", 14, 20), vp("s6", "TE", 10, 10), vp("s7", "WR", 13, 15)];
+  const back = rb("back", [0.2, 0.35, 0.55], [5, 8, 13], [3, 5, 7], { name: "Rising Back", label: "buy-low", luck: 2.4, riser: true, edge: 9, marketRank: 80 });
+  const flat = rb("flat", [0.5, 0.5, 0.5], [8, 8, 8], [8, 8, 8], { name: "Flat Guy", team: "BUF", label: "sell-high", luck: -2.6, edge: 9, marketRank: 90, marketEstimated: true });
+  const ps = [...starters, back, flat];
+  const players = new Map(ps.map((p) => [p.id, p]));
+  const L = league([team("me", starters), team("o", [back])], undefined, { numTeams: 12 });
+  const teams = analyzeTeams(L, players, { QB: 15, RB: 8, WR: 8, TE: 6, K: 7, DEF: 6 });
+  const r = findBreakouts({ league: L, players, teams, myTeamId: "me" });
+  const tags = (id: string) => r.targets.find((t) => t.player.id === id)!.tags;
+  assert.ok(tags("back").includes("buy-low") && tags("back").includes("market undervalues") && tags("back").includes("opportunity rising"), tags("back").join());
+  assert.ok(!tags("back").includes("usage > output"), "the old season-gap tag is gone");
+  assert.ok(tags("flat").includes("sell-high"));
+  assert.ok(!tags("flat").includes("market undervalues"), "an estimated market value has no real edge");
+});
