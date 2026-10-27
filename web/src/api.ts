@@ -1,6 +1,6 @@
 // Typed fetch wrappers for every endpoint in docs/DESIGN.md "HTTP API contract".
 // With `?mock=1` in the page URL all calls are answered by ./mock.ts instead.
-import type { BreakoutResponse, BreakoutTargetRow, CardPlayer, DetailItem, ValueRow, WaiverRow, League, Position, Scoring, SlotKind, TeamAnalysis, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "../../server/model/types";
+import type { BreakoutResponse, BreakoutTargetRow, CardPlayer, DetailItem, StashRow, ValueRow, WaiverRow, League, Position, Scoring, SlotKind, TeamAnalysis, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "../../server/model/types";
 
 export type TradeMode = "now" | "balanced" | "playoffs";
 export type { TradeFinderResult };
@@ -8,7 +8,7 @@ import type { LeagueView } from "../../server/model/league";
 import { ApiError } from "./lib/errors";
 
 export { ApiError };
-export type { WaiverTarget, WaiverRow, BreakoutTargetRow, BreakoutResponse, CardPlayer, DetailItem, LeagueView, ValueRow };
+export type { WaiverTarget, WaiverRow, StashRow, BreakoutTargetRow, BreakoutResponse, CardPlayer, DetailItem, LeagueView, ValueRow };
 
 /** ValuedPlayer as served by the API. */
 export type VP = ValuedPlayer;
@@ -69,6 +69,8 @@ export interface WaiversResponse {
   faStatusKnown: boolean;
   /** Data problems worth a line (e.g. imported free agents we could not match), when any. */
   notes?: string[];
+  /** Stash watch: unrostered players out now who matter on their return (≤ 10). */
+  stash: StashRow[];
 }
 
 

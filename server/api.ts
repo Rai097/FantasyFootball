@@ -43,6 +43,7 @@ import { evaluateTradeV3, findTradesV3 } from "./model/tradesV3.js";
 import { attachMarket, marketQuery, type ValueSource } from "./model/market.js";
 import { parseMode } from "./model/rosterScore.js";
 import { rankWaivers, toWaiversResponse, type FreeAgentInput } from "./model/waivers.js";
+import { stashWatch } from "./model/stash.js";
 import { findBreakouts, type MarketValue } from "./model/breakouts.js";
 import { getDepthChart } from "./data/depthCharts.js";
 import { getMarketData, pprBucket } from "./data/fantasycalc.js";
@@ -510,7 +511,16 @@ apiRouter.get(
         freeAgentInputs(l, provider, req.params.id, team, refresh),
         faBreakoutSignals(l, team),
       ]);
-      const r = toWaiversResponse(rankWaivers({ ...l.ctx, league }, team, input, { myPriority, breakouts }));
+      const stash = stashWatch({
+        players: l.ctx.players.values(),
+        rostered: new Set(league.teams.flatMap((t) => t.playerIds)),
+        availability: new Map(input.map((f) => [f.player.id, f.availability ?? (f.onWaivers ? "waivers" : "fa")])),
+        flexLevel: l.ctx.valuation.flexLevel,
+        regularSeasonEnd: league.settings.regularSeasonEnd,
+        finalWeek: league.settings.finalWeek,
+        usesFaab: league.settings.usesFaab,
+      });
+      const r = toWaiversResponse(rankWaivers({ ...l.ctx, league }, team, input, { myPriority, breakouts }), stash);
       return notes ? { ...r, notes } : r;
     });
     res.json(result);

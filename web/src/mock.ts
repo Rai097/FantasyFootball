@@ -423,6 +423,19 @@ function waivers(myId: string): WaiversResponse {
     numTeams: TEAMS.length,
     advice: "You hold waiver priority #3 of 4. Sample data.",
     rules: [{ label: "Claim", value: "He adds ≥ 2.0 ppg to your lineup" }],
+    stash: [
+      {
+        id: "mock-stash-1", name: "Sample Returner", pos: "RB", team: "KC", injury: { status: "IR", week: 8 },
+        summary: "Sample Returner · RB · KC · back ~wk 10 (medium) · playoff value 38.4",
+        call: "add", callText: "Add now while free", availability: "fa", flag: "practice upgrade: about to become a waiver fight",
+        backWeek: 10, confidence: "medium", playoffPts: 38.4, healthyRate: 13.1, stashScore: 52.0,
+        details: [
+          { label: "Role when healthy", value: "13.1 pts/game (his games before the absence), flex level 9.0" },
+          { label: "Return", value: "back ~wk 10 (medium)" },
+          { label: "Playoff value", value: "38.4 pts in weeks 15–17" },
+        ],
+      },
+    ],
     faStatusKnown: true,
   };
 }

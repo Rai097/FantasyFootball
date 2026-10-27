@@ -1,5 +1,5 @@
 // Free-agent ranking + waiver-priority advice. See docs/DESIGN.md "Waivers" (+ amendments).
-import type { Availability, DetailItem, Position, ValuedPlayer, WaiverBreakout, WaiverRow, WaiverTarget } from "./types.js";
+import type { Availability, DetailItem, Position, StashRow, ValuedPlayer, WaiverBreakout, WaiverRow, WaiverTarget } from "./types.js";
 import { eligible, optimalLineup, slotLabels } from "./lineup.js";
 import { irSet, rosterOf } from "./analysis.js";
 import type { TradeContext } from "./tradeKit.js";
@@ -351,7 +351,11 @@ export function capRows<T extends { pos: Position }>(sorted: T[], limit: number,
 }
 
 /** GET /waivers response: the result with slim rows (only what the Waivers tab renders). */
-export type WaiversResponse = Omit<WaiverResult, "freeAgents"> & { freeAgents: WaiverRow[] };
+export type WaiversResponse = Omit<WaiverResult, "freeAgents"> & {
+  freeAgents: WaiverRow[];
+  /** Stash watch (release (c)): unrostered players out now who matter on their return, ≤ 10 rows. */
+  stash: StashRow[];
+};
 
 export function toWaiverRow(t: WaiverTarget): WaiverRow {
   const row: WaiverRow = {
@@ -380,7 +384,7 @@ export function toWaiverRow(t: WaiverTarget): WaiverRow {
   return row;
 }
 
-export const toWaiversResponse = (r: WaiverResult): WaiversResponse => ({ ...r, freeAgents: r.freeAgents.map(toWaiverRow) });
+export const toWaiversResponse = (r: WaiverResult, stash: StashRow[] = []): WaiversResponse => ({ ...r, freeAgents: r.freeAgents.map(toWaiverRow), stash });
 
 const ACTIONABLE = new Set<WaiverTarget["recommendation"]>(["claim", "optional", "stash"]);
 

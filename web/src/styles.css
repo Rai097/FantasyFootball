@@ -322,6 +322,10 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 
 /* waivers: columns at desktop width; a card (name + call, then summary) on phones */
 .waiver-list .xlist-head, .waiver-row .xrow-head { grid-template-columns: minmax(170px, 230px) minmax(0, 1fr) 48px 48px 56px 84px 16px; }
+.stash-row .xrow-head { grid-template-columns: minmax(170px, 230px) minmax(0, 1fr) auto 16px; }
+.stash-tiles { display: flex; gap: 8px; flex-wrap: wrap; }
+.stash-flag { margin-left: 6px; color: var(--warn); border-color: var(--warn); }
+.card-pad { padding: 10px 12px 0; }
 .w-player { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
 .w-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .w-summary { font-size: 13px; color: var(--text); min-width: 0; }

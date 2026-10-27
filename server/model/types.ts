@@ -374,6 +374,33 @@ export interface DetailItem {
   tone?: "pos" | "neg" | "warn";
 }
 
+export type StashCall = "add" | "claim-cheap" | "check";
+
+/** One Stash watch row (GET /waivers `stash`): a ≤ 255-char summary + short bullets; numbers carry their own "why". */
+export interface StashRow {
+  id: string;
+  name: string;
+  pos: Position;
+  team: string;
+  injury?: ValuedPlayer["injury"];
+  /** "Name · POS · TEAM · back ~wk N (conf) · playoff value X". */
+  summary: string;
+  call: StashCall;
+  callText: string;
+  availability: Availability;
+  /** "practice upgrade: about to become a waiver fight" when his practice improved this week. */
+  flag?: string;
+  backWeek: number | null;
+  confidence: ReturnInfo["confidence"];
+  /** Points in weeks 15–17 on his return (unconfirmed return: × 0.5). */
+  playoffPts: number;
+  /** Healthy-role pts/game. */
+  healthyRate: number;
+  /** Rank score: playoff weeks 1.0, earlier weeks 0.33, × return confidence. */
+  stashScore: number;
+  details: DetailItem[];
+}
+
 /** Where a free agent sits on Yahoo: free to add now, on waivers (needs a claim), or not captured (old import). */
 export type Availability = "fa" | "waivers" | "unknown";
 

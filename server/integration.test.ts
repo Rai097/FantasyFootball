@@ -528,6 +528,18 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
       assert.ok(Number.isFinite(w.gain) && Number.isFinite(w.benchGain));
       assert.ok(!rostered.has(w.id), `${w.name} is rostered`);
     }
+    // Stash watch (release (c)): ≤ 10 unrostered returners, finite numbers, short rows and bullets.
+    assert.ok(Array.isArray(json.stash) && json.stash.length > 0 && json.stash.length <= 10, `stash rows ${json.stash?.length}`);
+    for (const s of json.stash) {
+      assert.ok(!rostered.has(s.id), `${s.name} is rostered`);
+      for (const k of ["playoffPts", "healthyRate", "stashScore"]) assert.ok(Number.isFinite(s[k]), `${s.name}: ${k}=${s[k]}`);
+      assert.ok(s.backWeek === null || Number.isInteger(s.backWeek));
+      assert.ok(["add", "claim-cheap", "check"].includes(s.call), s.call);
+      assert.ok(s.summary.length <= 255 && s.summary.startsWith(`${s.name} · ${s.pos} · ${s.team} · `), s.summary);
+      assert.deepEqual(detailProblems(s.details), [], s.name);
+      assert.equal(s.weekly, undefined);
+    }
+    for (let i = 1; i < json.stash.length; i++) assert.ok(json.stash[i - 1].stashScore >= json.stash[i].stashScore, "ranked by stash score");
   });
 
   test("GET league (League tab): standings, power parts, who is above me", async () => {
