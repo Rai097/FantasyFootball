@@ -68,7 +68,8 @@ export const V3 = {
   thinPenalty: 1.0,
   /** v3.1: giving a riser costs ×1.15 of his value (selling upside); same for the partner. */
   riserPremium: 1.15,
-  /** No suggestion (any list, near misses included) below this playoff-lineup (team strength) gain for me, pts/week. */
+  /** No suggestion below this playoff-lineup (team strength) gain for me, pts/week — except a "marginal" near miss
+   *  (my side fails its bar), which needs only a positive gain. */
   minMyGain: 1.0,
   /** Search bounds. */
   poolSize: 14,
@@ -103,10 +104,13 @@ export function marketLabel(ratio: number): string {
   return `Market value: they get ${pctSigned((ratio - 1) * 100)}`;
 }
 
-/** "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" — our projections, rest of season per week. */
-export function lineupLabel(mine: number, theirs: number): string {
-  const verdict = mine > 0.05 ? "good for you" : mine < -0.05 ? "bad for you" : "neutral for you";
-  return `Lineup impact: ${verdict} (${fmtSigned(mine)}/wk you, ${fmtSigned(theirs)}/wk them)`;
+/**
+ * "Lineup impact: good for you (playoffs +1.3/wk, season +0.0/wk; them −0.3/wk season)" — our projections. The verdict
+ * follows my playoff-lineup change (team strength: what the finder ranks on and the row summary leads with).
+ */
+export function lineupLabel(playoffs: number, season: number, theirs: number): string {
+  const verdict = playoffs > 0.05 ? "good for you" : playoffs < -0.05 ? "bad for you" : "neutral for you";
+  return `Lineup impact: ${verdict} (playoffs ${fmtSigned(playoffs)}/wk, season ${fmtSigned(season)}/wk; them ${fmtSigned(theirs)}/wk season)`;
 }
 
 /** Market term of acceptance: logistic in the partner's market edge (percent), +5% → 0.65. */
@@ -519,8 +523,9 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
       losesTheirTop,
       fixesWorst,
     });
-    // My playoff-lineup gain (team strength, release (b)) — only when my side can pass (it is the costly part).
-    const strengthDelta = myFail ? 0 : teamStrength(S, myAfter.filter((p) => !me.drops.includes(p)), my.irIds).total - my.strength;
+    // My playoff-lineup gain (team strength, release (b)): always the real number — evaluate shows it and marginal near
+    // misses (my side fails) are ranked on it.
+    const strengthDelta = teamStrength(S, myAfter.filter((p) => !me.drops.includes(p)), my.irIds).total - my.strength;
     // Gem: playoff gain × acceptance, plus a bonus when the perception gaps favour me.
     const score = acceptance * (strengthDelta + V3.gapBonus * Math.min(V3.gapCap, Math.max(0, gapFavor)));
     const edgeSum = get.reduce((a, p) => a + edgeOf(p), 0) - give.reduce((a, p) => a + edgeOf(p), 0);
@@ -703,7 +708,7 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   if (j.coverItems.length) tags.push("loses bye cover");
   for (const p of j.spikes) tags.push(`just spiked: ${p.name}`);
   const yahoo = yahooViewOf(j);
-  const lineup = lineupLabel(j.myParts.season, j.theirLineup);
+  const lineup = lineupLabel(j.strengthDelta, j.myParts.season, j.theirLineup);
   const market = marketLabel(j.fairness);
   const summary = makeSummary(
     `${names(give)} for ${names(get)}: playoff lineup ${fmtSigned(j.strengthDelta)}/wk, your team ${fmtSigned(j.myDelta)}.`,
@@ -891,10 +896,11 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
       for (const [give, get] of packagesFor(my, their, { maxGive, maxGet, wantPos })) {
         const j = J(give, get);
         simulated++;
-        // Never sell a player whose role is rising, and never suggest a noise-level playoff gain (owner, Model v4).
-        if (give.some((p) => p.riser) || j.strengthDelta < V3.minMyGain) continue;
+        // Never sell a player whose role is rising, and never suggest a noise-level playoff gain (owner, Model v4);
+        // a "marginal" near miss (my side fails its bar) only needs a real playoff gain (> 0).
+        if (give.some((p) => p.riser)) continue;
         const cls = classify(j);
-        if (cls) cands.push({ j, their, cls });
+        if (cls && (cls === "marginal" ? j.strengthDelta > 0 : j.strengthDelta >= V3.minMyGain)) cands.push({ j, their, cls });
       }
     }
   };

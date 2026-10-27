@@ -339,7 +339,8 @@ export interface Trade {
   /** Near misses only: why the trade did not make the main list. */
   reason?: string;
   // ---- Trade Finder v3 (market-value packages); optional so hand-made fixtures stay valid.
-  /** "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" — our projections, rest of season per week. */
+  /** "Lineup impact: good for you (playoffs +1.3/wk, season +0.0/wk; them −0.3/wk season)" — our projections; the
+   *  verdict follows my playoff-lineup change. */
   lineupLabel?: string;
   /** "Market value: they get +16%" — FantasyCalc package values (a minor part of acceptance). */
   marketLabel?: string;

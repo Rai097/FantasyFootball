@@ -52,9 +52,13 @@ test("drop cost: each cut player's value, at least 3", () => {
 });
 
 test("labels split: lineup impact (our projections, per week) and market value (FantasyCalc) replace the fairness band", () => {
-  assert.equal(lineupLabel(0.3, -0.2), "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)");
-  assert.equal(lineupLabel(-1, 2), "Lineup impact: bad for you (−1.0/wk you, +2.0/wk them)");
-  assert.equal(lineupLabel(0.02, 0), "Lineup impact: neutral for you (+0.0/wk you, +0.0/wk them)");
+  assert.equal(lineupLabel(0.3, 0.1, -0.2), "Lineup impact: good for you (playoffs +0.3/wk, season +0.1/wk; them −0.2/wk season)");
+  assert.equal(lineupLabel(-1, 0.5, 2), "Lineup impact: bad for you (playoffs −1.0/wk, season +0.5/wk; them +2.0/wk season)");
+  assert.equal(lineupLabel(0.02, 0, 0), "Lineup impact: neutral for you (playoffs +0.0/wk, season +0.0/wk; them +0.0/wk season)");
+  // The verdict follows the playoff number (what the finder ranks on), not the rest-of-season one.
+  assert.match(lineupLabel(1.3, 0, -0.3), /^Lineup impact: good for you \(playoffs \+1\.3\/wk, season \+0\.0\/wk; them −0\.3\/wk season\)$/);
+  assert.match(lineupLabel(-0.8, 1.2, 0), /^Lineup impact: bad for you/);
+  assert.ok(lineupLabel(-12.3, -10.4, 11.5).length < 120);
   assert.equal(marketLabel(1.16), "Market value: they get +16%");
   assert.equal(marketLabel(0.92), "Market value: they get −8%");
 });
@@ -184,6 +188,9 @@ test("finder: no K/DEF/backup QBs/waiver-level pieces; pitch, band, summary, det
     }
     assert.ok(t.pitch && t.pitch.length > 20, t.key);
     assert.match(t.lineupLabel!, /^Lineup impact: (good|bad|neutral) for you \(/, t.key);
+    // Card label and row summary quote the same playoff-lineup number (the verdict follows it).
+    const playoff = t.summary.match(/playoff lineup ([+−]\d+\.\d)\/wk/)?.[1];
+    assert.ok(playoff && t.lineupLabel!.includes(`(playoffs ${playoff}/wk`), `${t.key}: "${t.summary}" vs "${t.lineupLabel}"`);
     assert.match(t.marketLabel!, /^Market value: they get [+−]\d+%$/, t.key);
     assert.match(t.yahooView!.label, /^What Yahoo (likely )?shows them: you [+−]\d+\.\d, them [+−]\d+\.\d pts/, t.key);
     assert.doesNotMatch(t.pitch!, /market/i, `${t.key}: pitch never argues market value`);

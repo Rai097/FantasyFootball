@@ -21,7 +21,7 @@ export const TRADE_TIPS = {
   accept: "Chance the other manager accepts, judged from his side: mostly what Yahoo's evaluator shows his lineup, lower if he gives a player right after a big game.",
   yourLineup: "Your weekly lineup points over the rest of the season, byes and injuries included.",
   theirLineup: "Their weekly lineup points over the rest of the season, by our projections.",
-  lineup: "Lineup change per week over the rest of the season by our projections (usage, matchups, injuries), for you and for them.",
+  lineup: "Your playoff-lineup change per week (weeks 15–17, decides the verdict), your rest-of-season change, and theirs, by our projections.",
   marketValue: "FantasyCalc trade-market value they get vs give. It matters only a little: managers judge by Yahoo's lineup numbers.",
   yahoo: "Rest-of-season lineup change Yahoo's trade evaluator would show (Yahoo projections). 'Estimate' = not captured yet: FantasyPros rank + last 3 games.",
   market: "Market value (FantasyCalc, from real trades; #1 = 100): what the other manager thinks he is worth.",

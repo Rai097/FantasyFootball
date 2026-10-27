@@ -69,6 +69,19 @@ describe("Trades v4 on demo/42", { timeout: 600_000 }, () => {
     assert.deepEqual(bad, []);
   });
 
+  test("marginal near misses come back (my side fails its bar) and each still has a real playoff gain (> 0)", () => {
+    // Fix round 1: strengthDelta was forced to 0 when my side failed, so no "marginal" near miss could pass the gate.
+    let marginal = 0;
+    for (const [team, l] of lists)
+      for (const t of l.near)
+        if (t.tags.includes("marginal")) {
+          marginal++;
+          const playoff = Number(t.summary.match(/playoff lineup ([+−]\d+\.\d)\/wk/)?.[1].replace("−", "-"));
+          assert.ok(playoff > 0, `team ${team}: ${t.key} marginal with playoff lineup ${playoff}`);
+        }
+    assert.ok(marginal > 0, "some marginal near misses on demo/42");
+  });
+
   test("evaluate: a trade that fails my side still reports my real playoff-lineup change, never a fabricated +0.0", () => {
     // judge3 skips team strength when my side fails (strengthDelta = 0). The evaluate card then says "playoff lineup
     // +0.0/wk" for a lopsided loss — and the finder's near-miss class "marginal" (my side fails) can never pass the
