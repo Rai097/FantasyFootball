@@ -1149,3 +1149,9 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
 * **Trade card labels**: summary, "Lineup impact" label and the "Playoff lineup" bullet all show the lineup delta
   (`myParts.playoffs`); the team-strength total the finder ranks and gates on (`strengthDelta` ≥ `V3.minMyGain`) is
   its own bullet "Playoff strength: +x pts/wk (lineup + 0.25 × bench cover)"; the duplicate "Playoffs" bullet is gone.
+* **Small-sample prior**: last season's rate (≥ `priorMinGames` games) entered the model rate as `V4.priorK` = 2
+  pseudo-games whatever this season's sample. A 3-game player (one flagged) was then ~75% this season. Now the prior
+  weighs `max(V4.priorK, V4.priorKSmall − sample games)` pseudo-games, `priorKSmall` = 8 (calibration value): 2.25
+  sample games → 5.75, ≥ 6 games → 2 (unchanged, so risers and breakouts with full samples keep their rate; rookies
+  have no prior). The why-line "2025: x pts/game, counts as N games" shows the actual weight. Test: a 3-game 10-ppg
+  player with an 18-ppg prior moves ≥ 1 pt toward it; a 7-game player is unchanged.

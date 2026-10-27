@@ -48,6 +48,9 @@ export interface ProjectionTables {
   leagueAllowed: Partial<Record<SkillPos, number>>;
 }
 
+/** Pseudo-games last season's rate counts as next to `sampleGames` of this season (small samples lean on it more). */
+export const priorWeight = (sampleGames: number): number => Math.max(V4.priorK, V4.priorKSmall - sampleGames);
+
 export const emptyTables = (): ProjectionTables => ({ signals: new Map(), schedule: new Map(), allowed: new Map(), leagueAllowed: {} });
 
 // ---------------------------------------------------------------- config (calibration values)
@@ -59,6 +62,8 @@ export const V4 = {
   lateGames: 4,
   /** Last season's per-game points enter the model rate as this many pseudo-games (when he played ≥ priorMinGames). */
   priorK: 2,
+  /** Small samples lean on last season more: prior weight = max(priorK, priorKSmall − sample games) (≥ 6 games: priorK). */
+  priorKSmall: 8,
   priorMinGames: 4,
   /** Points allowed: pseudo-games of league average, and the factor's clamp. */
   matchupK: 4,
@@ -193,6 +198,8 @@ interface Base {
   unflagged: number;
   flagged: number;
   priorRate: number | null;
+  /** Pseudo-games last season's rate counts as (priorWeight). */
+  priorW: number;
   games: number;
   ppg26: number;
   ppgExp26: number;
@@ -279,7 +286,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       ppg25: hasPrior ? score(scoring, p.prior!.line, p.pos) / p.prior!.games : 0,
       trend: weeks.length >= 3 ? mean(exp.slice(-2)) - mean(exp) : 0,
     };
-    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null };
+    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorW: 0 };
     const sig = signalsOf(p);
     // Missing expected data (ffopportunity has no usage for him while he scores): rate on recency-weighted actual
     // points, with the usual prior / ECR shrinkage, instead of ~0 usage.
@@ -293,12 +300,13 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const t = sig?.talent;
     const priorRate =
       t && t.priorGames >= V4.priorMinGames && t.priorExpPpg !== null && t.priorActPpg !== null ? (t.priorExpPpg + t.priorActPpg) / 2 : null;
+    const priorW = priorRate !== null ? priorWeight(sampleGames) : 0;
     let model: number | null = null;
     if (expRate !== null && sampleGames > 0) {
       const cur = expRate * eff;
-      model = priorRate !== null ? (sampleGames * cur + V4.priorK * priorRate) / (sampleGames + V4.priorK) : cur;
+      model = priorRate !== null ? (sampleGames * cur + priorW * priorRate) / (sampleGames + priorW) : cur;
     } else if (priorRate !== null) model = priorRate;
-    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate };
+    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorW };
   };
   const bases = all.map(makeBase);
   const baseById = new Map(bases.map((b) => [b.p.id, b]));
@@ -679,7 +687,7 @@ function explainItems(
     else if (x.expRate !== null) add("Usage", `${f1(x.expRate)} expected pts/game, latest games weigh most`);
     if (x.effRaw !== null) add("Finishing", `×${x.eff.toFixed(2)} (actual ÷ expected ${x.effRaw.toFixed(2)}, pulled toward 1)`);
     if (x.flagged > 0) add("Odd games", `${x.flagged} count 25%: backup QB, left early or blowout`);
-    if (x.priorRate !== null) add("2025", `${f1(x.priorRate)} pts/game, counts as ${V4.priorK} games`);
+    if (x.priorRate !== null) add("2025", `${f1(x.priorRate)} pts/game, counts as ${Number.isInteger(x.priorW) ? x.priorW : x.priorW.toFixed(1)} games`);
   }
   if (x.gamesLeft > 0 && Math.abs(x.avgMatchup - 1) >= 0.01) add("Matchups", `×${x.avgMatchup.toFixed(2)} on average (opponents' points allowed)`);
   const next = x.weeks.find((w) => w.game);

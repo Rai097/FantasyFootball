@@ -376,3 +376,23 @@ test("release (d): an unconfirmed return is worth ½ of his full healthy surplus
   assert.equal(y.yahooProj, 88.5);
   assert.equal(y.yahooProjWeekly, 9.1);
 });
+
+test("small samples lean on last season more: prior weight = max(priorK, priorKSmall − games) (fix 2026-10-27)", () => {
+  // 10 pts/game this season (usage = production), 18 pts/game last season (16 games).
+  const prior = { games: 16, line: line({ rec: 6 * 16, recYd: 120 * 16 }) };
+  const mk = (id: string, n: number) => rawPlayer(id, "WR", { weeks: games(n, { rec: 5, recYd: 50 }, { rec: 5, recYd: 50 }, { targets: 7, carries: 0, airYards: 70 }), prior });
+  const val = valuePlayers(L({ scoring: PPR }), [...POOL, mk("small", 3), mk("full", 7)]);
+  const num = (id: string, label: string) => Number(val.players.get(id)!.whyItems!.find((d) => d.label === label)!.value.match(/^[\d.]+/)![0]);
+  const priorRate = num("small", "2025");
+  assert.ok(priorRate > 15, `fixture: prior ${priorRate} pts/game`);
+  const why = (id: string) => val.players.get(id)!.whyItems!.find((d) => d.label === "2025")!.value;
+  // 3 games: the prior counts as 8 − 3 = 5 games (was 2): (3 × 10 + 5 × prior) / 8.
+  assert.match(why("small"), /counts as 5 games/);
+  const small = num("small", "Our model");
+  const old = (3 * 10 + V4.priorK * priorRate) / (3 + V4.priorK);
+  assert.ok(Math.abs(small - (3 * 10 + 5 * priorRate) / 8) <= 0.06, `3-game model ${small}`);
+  assert.ok(small - old >= 1, `moves materially toward the prior: ${old.toFixed(1)} → ${small}`);
+  // 7 games: max(2, 8 − 7) = 2 — unchanged.
+  assert.match(why("full"), new RegExp(`counts as ${V4.priorK} games`));
+  assert.ok(Math.abs(num("full", "Our model") - (7 * 10 + V4.priorK * priorRate) / (7 + V4.priorK)) <= 0.06, "7-game model unchanged");
+});
