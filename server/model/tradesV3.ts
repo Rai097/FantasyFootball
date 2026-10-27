@@ -469,7 +469,6 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     const trueGive = packageValue(give.map(riserUp(trueOf)));
     const trueGet = packageValue(get.map(trueOf));
     const theirDropP = give.length > get.length ? dropCost(th.drops.map(marketOf)) : 0;
-    const myDropP = get.length > give.length ? dropCost(me.drops.map(marketOf)) : 0;
     const myDropT = get.length > give.length ? dropCost(me.drops.map(trueOf)) : 0;
     const theirRecvNet = marketGive - theirDropP;
     const fairness = theirRecvNet / Math.max(1, marketGet);
@@ -481,13 +480,15 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     const all = [...give, ...get].sort((a, b) => marketOf(b) - marketOf(a) || trueOf(b) - trueOf(a));
     const bestToMe = get.includes(all[0]);
     // Consolidation premium: in any deal that is not 1-for-1, whoever receives the single best player
-    // must give ≥ 110% of the other side's package (perceived, net of drop cost).
+    // must give ≥ 110% of the other side's package, net of drop cost. Their side is judged on what they see (market);
+    // mine on our true values — the market is never my bar (Model v4).
     let premiumOk = true;
     let premiumMine = false;
     if (give.length > 1 || get.length > 1) {
       if (bestToMe) premiumOk = theirRecvNet >= V3.consolidationPremium * marketGet;
-      else {
-        premiumOk = marketGet - myDropP >= V3.consolidationPremium * marketGive;
+      const bestTrue = [...give, ...get].sort((a, b) => trueOf(b) - trueOf(a) || marketOf(b) - marketOf(a))[0];
+      if (give.includes(bestTrue) && trueGet - myDropT < V3.consolidationPremium * trueGive) {
+        premiumOk = false;
         premiumMine = true;
       }
     }

@@ -164,6 +164,20 @@ test("consolidation premium: whoever receives the best player in a non-1-for-1 d
   assert.equal(J()([P("mRB2")], [P("tWR2")]).premiumOk, true);
 });
 
+test("consolidation premium: my side is judged on our true values, never the market (Model v4)", () => {
+  // The market rates the player I give (mRB1) far above both pieces I get; our true values say I get much more.
+  const withMarket = (p: ValuedPlayer, market: number): ValuedPlayer => ({ ...p, market });
+  const give = withMarket(P("mRB1"), 90);
+  const get = [withMarket(P("tWR1"), 20), withMarket(P("tWR2"), 15)];
+  const j = J()([give], get);
+  assert.equal(j.bestToMe, false, "market: I give the best player");
+  assert.ok(j.trueGet > 1.1 * j.trueGive, "true values: I get well over 110%");
+  assert.doesNotMatch(j.myFail, /best player/);
+  // Our true values still guard me: selling the true best player for less than 110% of him fails my side.
+  const cheap = J()([withMarket(P("mRB1"), 10)], [withMarket(P("tWR2"), 80), withMarket(P("tWR3"), 80)]);
+  assert.match(cheap.myFail, /best player/);
+});
+
 test("drop cost: the side receiving more players nets the player it must cut (≥ 3)", () => {
   const j = J()([P("mRB3"), P("mRB4")], [P("tWR3")]);
   assert.equal(j.theirDrops.length, 1);
