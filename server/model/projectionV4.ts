@@ -56,12 +56,15 @@ export interface ProjectionTables {
 export const priorWeight = (sampleGames: number, roleUp = false): number => (roleUp ? V4.priorK : Math.max(V4.priorK, V4.priorKSmall - sampleGames));
 
 /**
- * Role change (fix 2026-10-27): this season's recency-weighted expected points/game (TD part regressed) ≥
- * V4.roleUpRatio × last season's,
- * on ≥ V4.roleUpMinGames unflagged games (one fill-in start is not a new role).
+ * Role change (fix 2026-10-27): this season's recency-weighted expected points/game (TD part regressed) reaches the bar
+ * max(V4.roleUpRatio × last season's, last season's + V4.roleUpMinGain), last season's > 0, on ≥ V4.roleUpMinGames
+ * unflagged games (one fill-in start is not a new role).
  */
-export const isRoleUp = (expPpg: number, priorExpPpg: number, unflagged: number): boolean =>
-  unflagged >= V4.roleUpMinGames && expPpg >= V4.roleUpRatio * priorExpPpg;
+export function isRoleUp(expPpg: number, priorExpPpg: number, unflagged: number): boolean {
+  if (!(priorExpPpg > 0) || !Number.isFinite(expPpg) || unflagged < V4.roleUpMinGames) return false;
+  // 1e-9: 1.5 × a non-representable prior (e.g. 6.6) must still accept exactly 1.5×.
+  return expPpg >= Math.max(V4.roleUpRatio * priorExpPpg, priorExpPpg + V4.roleUpMinGain) - 1e-9;
+}
 
 export const emptyTables = (): ProjectionTables => ({ signals: new Map(), schedule: new Map(), allowed: new Map(), leagueAllowed: {} });
 
@@ -78,6 +81,8 @@ export const V4 = {
   priorKSmall: 8,
   /** Role grew: this season's expected pts/game ≥ this × last season's (≥ roleUpMinGames unflagged games) → priorK only. */
   roleUpRatio: 1.5,
+  /** ...and at least this many expected pts/game above last season (a 0-pt or tiny 2025 never reads as a ratio jump). */
+  roleUpMinGain: 3,
   roleUpMinGames: 2,
   /** Expected TDs per opportunity regress toward a baseline with this many games × his opportunity rate (last season's
    *  actual TDs per opportunity when he played ≥ priorMinGames, else the position's mean actual rate this season). */

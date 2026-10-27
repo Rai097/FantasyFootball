@@ -50,22 +50,28 @@ const sigTables = (...inputs: PlayerSignalInput[]): ProjectionTables => ({
 
 describe("role-change prior (adversarial)", () => {
   test("isRoleUp / priorWeight units: exactly 1.5× qualifies, below does not, < roleUpMinGames never; roleUp → priorK only", () => {
-    assert.equal(isRoleUp(6, 4, 2), true, "exactly 1.5×");
-    assert.equal(isRoleUp(5.999, 4, 2), false);
-    assert.equal(isRoleUp(100, 4, 1), false, "one unflagged game is never a role");
+    // Fix round 1: the bar also needs +V4.roleUpMinGain (3) growth, so the ratio binds from an 8-ppg prior on.
+    assert.equal(isRoleUp(12, 8, 2), true, "exactly 1.5×");
+    assert.equal(isRoleUp(11.999, 8, 2), false);
+    assert.equal(isRoleUp(100, 8, 1), false, "one unflagged game is never a role");
     assert.equal(isRoleUp(NaN, 4, 5), false, "NaN usage is not a role change");
     assert.equal(isRoleUp(10, NaN, 5), false, "NaN prior is not a role change");
-    // 3.3 × 1.5 = 4.95 in floats is 4.949999…; the boundary must hold for non-representable priors too.
-    assert.equal(isRoleUp(1.5 * 3.3, 3.3, 2), true);
+    // 6.6 × 1.5 = 9.9 in floats is 9.899999…; the boundary must hold for non-representable priors too.
+    assert.equal(isRoleUp(1.5 * 6.6, 6.6, 2), true);
+    // Absolute floor: a 4-ppg prior needs 7 (not 6); a 0-ppg prior is never a ratio jump.
+    assert.equal(isRoleUp(6.5, 4, 2), false, "+2.5 is under roleUpMinGain");
+    assert.equal(isRoleUp(7, 4, 2), true);
+    assert.equal(isRoleUp(20, 0, 2), false, "no 2025 usage to compare");
     assert.equal(priorWeight(3, true), V4.priorK);
     assert.equal(priorWeight(3, false), V4.priorKSmall - 3);
     assert.equal(priorWeight(10, false), V4.priorK);
   });
 
-  test("exactly 1.5× through valuePlayers: 6.0 vs 4.0 expected/g is a role change; 5.99 keeps the boost", () => {
-    const at = one(rawPlayer("at", "WR", { weeks: games(3, { rec: 2, recYd: 40 }), prior: BACKUP_PRIOR }));
-    assert.match(item(at, "2025")!, /counts as 2 games \(role grew: 6\.0 vs 4\.0 expected\/g\)$/);
-    const under = one(rawPlayer("under", "WR", { weeks: games(3, { rec: 2, recYd: 39.9 }), prior: BACKUP_PRIOR }));
+  test("exactly 1.5× through valuePlayers: 12.0 vs 8.0 expected/g is a role change; 11.99 keeps the boost", () => {
+    const P8 = { games: 16, line: line({ rec: 64, recYd: 640 }) };
+    const at = one(rawPlayer("at", "WR", { weeks: games(3, { rec: 4, recYd: 80 }), prior: P8 }));
+    assert.match(item(at, "2025")!, /counts as 2 games \(role grew: 12\.0 vs 8\.0 expected\/g\)$/);
+    const under = one(rawPlayer("under", "WR", { weeks: games(3, { rec: 4, recYd: 79.9 }), prior: P8 }));
     assert.equal(grew(under), false);
     assert.equal(priorW(under), V4.priorKSmall - 3);
   });
@@ -123,7 +129,7 @@ describe("role-change prior (adversarial)", () => {
 
   // DEFECT (low): with a 0.0 pts/game 2025 the ratio test `x ≥ 1.5 × 0` is always true, so a player with zero usage in
   // BOTH seasons is told "role grew: 0.0 vs 0.0 expected/g" (no absolute floor on the growth).
-  test.todo("DEFECT low: zero usage both seasons (10-game 0-pt 2025, three 0-pt games) must not say 'role grew: 0.0 vs 0.0'", () => {
+  test("DEFECT low (fixed): zero usage both seasons (10-game 0-pt 2025, three 0-pt games) must not say 'role grew: 0.0 vs 0.0'", () => {
     const v = one(rawPlayer("zeroBoth", "WR", { weeks: games(3, {}), prior: { games: 10, line: line({}) } }));
     assert.equal(grew(v), false, item(v, "2025"));
   });
