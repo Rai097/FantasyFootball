@@ -11,7 +11,7 @@ import { league, line, rawPlayer, team } from "./testkit.js";
 import { PPR } from "../data/fixtures/signals2026.js";
 import type { League, Player, Position, StatLine, ValuedPlayer, WeekLine } from "./types.js";
 import type { PlayerGame, PlayerSignalInput, SkillPos } from "./signals/types.js";
-import { staleMemo } from "../data/signalTables.js";
+import { staleMemo } from "../data/memo.js";
 import { injuryKind } from "./projection.js";
 
 const wk = (week: number, actual: Partial<StatLine>, expected: Partial<StatLine> = actual, teamAbbr = "KC", opp = { targets: 6, carries: 0, airYards: 60 }): WeekLine => ({

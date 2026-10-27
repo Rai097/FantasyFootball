@@ -6,7 +6,8 @@ import { fetchCached } from "./cache.js";
 import { sources } from "./sources.js";
 import { parseCsv, num, opt } from "./csv.js";
 import { normPos, normTeam } from "./names.js";
-import { addLines, DB_STALE_MS, emptyLine, lineFrom } from "./players.js";
+import { addLines, emptyLine, getPlayerDb, lineFrom } from "./players.js";
+import { staleMemo } from "./memo.js";
 import type { StatLine } from "../model/types.js";
 import { usualStarters } from "../model/signals/context.js";
 import { computeAllSignals, type PlayerSignals } from "../model/signals/index.js";
@@ -427,37 +428,18 @@ export function buildPointsAllowed(
   return { byDefense, leagueAvg };
 }
 
-// ---- thin loader: lazily, refreshed on the player database's cadence (DB_STALE_MS, 6 h) ----
+// ---- thin loader: lazily, rebuilt with the player database ----
+// One shared refresh: every memo is keyed by the player database generation, so a player DB rebuild (DB_STALE_MS)
+// rebuilds the season tables, signals and projection tables with it; old generations fall out of the bounded memos.
 
-/**
- * Promise memo whose entries expire after `ttlMs` (and on rejection), bounded to `max` keys (oldest dropped).
- * Exported for tests (fake clock).
- */
-export function staleMemo<V>(ttlMs: number, max: number, now: () => number = Date.now) {
-  const m = new Map<string, { at: number; value: Promise<V> }>();
-  return {
-    get(key: string, make: () => Promise<V>): Promise<V> {
-      const hit = m.get(key);
-      if (hit && now() - hit.at <= ttlMs) return hit.value;
-      m.delete(key);
-      if (m.size >= max) m.delete(m.keys().next().value!);
-      const value = make();
-      const entry = { at: now(), value };
-      m.set(key, entry);
-      value.catch(() => {
-        if (m.get(key) === entry) m.delete(key);
-      });
-      return value;
-    },
-    size: () => m.size,
-  };
-}
+/** The current player database generation (awaiting it also triggers the rebuild when the DB is stale). */
+const generation = () => getPlayerDb().then((db) => db.generation);
 
-const tablesMemo = staleMemo<SeasonTables>(DB_STALE_MS, 4);
+const tablesMemo = staleMemo<SeasonTables>(Infinity, 4);
 
-/** Parsed season tables from the cached files (same URLs / TTLs as the player database; rebuilt every 6 h). */
-export function getSeasonTables(season: number): Promise<SeasonTables> {
-  return tablesMemo.get(String(season), () =>
+/** Parsed season tables from the cached files (same URLs / TTLs as the player database; rebuilt with it). */
+export async function getSeasonTables(season: number): Promise<SeasonTables> {
+  return tablesMemo.get(`${await generation()}|${season}`, () =>
     Promise.all([
       fetchCached(sources.epWeekly(season), 3).catch(() => ""),
       fetchCached(sources.epWeekly(season - 1), 24 * 7).catch(() => ""),
@@ -477,11 +459,11 @@ export function getSignalInputs(season: number): Promise<Map<string, PlayerSigna
 }
 
 const SIGNALS_MEMO_MAX = 8;
-const signalsMemo = staleMemo<Map<string, PlayerSignals>>(DB_STALE_MS, SIGNALS_MEMO_MAX);
+const signalsMemo = staleMemo<Map<string, PlayerSignals>>(Infinity, SIGNALS_MEMO_MAX);
 
-/** All skill players' signals for a season under a league's scoring (memoized per process, bounded, 6 h). */
-export function getAllSignals(season: number, scoring: Scoring): Promise<Map<string, PlayerSignals>> {
-  return signalsMemo.get(`${season}|${JSON.stringify(scoring)}`, () =>
+/** All skill players' signals for a season under a league's scoring (memoized per DB generation and scoring, bounded). */
+export async function getAllSignals(season: number, scoring: Scoring): Promise<Map<string, PlayerSignals>> {
+  return signalsMemo.get(`${await generation()}|${season}|${JSON.stringify(scoring)}`, () =>
     getSignalInputs(season).then((inputs) => computeAllSignals(inputs.values(), { season, scoring, asOf: new Date() })),
   );
 }
@@ -491,11 +473,11 @@ export async function playerSignals(season: number, playerId: string, scoring: S
   return (await getAllSignals(season, scoring)).get(playerId);
 }
 
-const projMemo = staleMemo<ProjectionTables>(DB_STALE_MS, SIGNALS_MEMO_MAX);
+const projMemo = staleMemo<ProjectionTables>(Infinity, SIGNALS_MEMO_MAX);
 
-/** Signals + remaining schedule + points allowed for projection v4 under a league's scoring (6 h memo). */
-export function getProjectionTables(season: number, scoring: Scoring): Promise<ProjectionTables> {
-  return projMemo.get(`${season}|${JSON.stringify(scoring)}`, async () => {
+/** Signals + remaining schedule + points allowed for projection v4 under a league's scoring (rebuilt with the player DB). */
+export async function getProjectionTables(season: number, scoring: Scoring): Promise<ProjectionTables> {
+  return projMemo.get(`${await generation()}|${season}|${JSON.stringify(scoring)}`, async () => {
     const [tables, signals] = await Promise.all([getSeasonTables(season), getAllSignals(season, scoring)]);
     const allowed = buildPointsAllowed(tables.ep, tables.games, scoring);
     return { signals, schedule: buildSchedule(tables.games), allowed: allowed.byDefense, leagueAllowed: allowed.leagueAvg };

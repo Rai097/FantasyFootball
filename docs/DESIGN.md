@@ -869,10 +869,19 @@ Owner-specific worked cases live outside the repo (public).
     361 would need ≤ 0.5 × std-dev and no flex floor (sweep: 0.5 × std, no floor → 42).
   - Mean |v4 ppg − old ppg| over rostered players: QB 1.12, RB 1.31, WR 1.01, TE 1.21, K/DEF 0 (unchanged model).
   - Labels across the pool: 44 buy-low, 22 sell-high. Valuation + analysis 41 ms; projection tables 180 ms per
-    scoring (6 h memo, refreshed with the player DB).
+    scoring (rebuilt with the player DB).
+* **One shared refresh** (fix round 1): `getPlayerDb` (memo, `DB_STALE_MS` = 6 h, clock `dataClock`) recomputes the NFL
+  calendar from games.csv on every rebuild (`PlayerDb.state`; `getNflState()` reads it, so a server running for days
+  advances the week) and bumps `PlayerDb.generation`; the season tables, signals and projection tables are memoized
+  per generation, so they rebuild together with the DB (no second timer). Tested with an injected clock
+  (`server/data/refresh.test.ts`).
+* **Fix round 1 calibration (2026 cache, demo league 42, week 7)**: roster RES now 0 regardless of the last game —
+  13 of 45 RES players were projected > 0 before, 0 after; labels 42 buy-low / 20 sell-high; no player hit the
+  missing-expected fallback; a QB with ≥ 40% of his team's starts is usual (platoon), players with a qbOut game
+  unchanged at 69.
 * Known gaps: the 2026 cache has DAL@PHI week 7 unplayed, so `currentWeek` = 7 and most teams show week 7 as "no game";
-  `getNflState` caches the current week for the process lifetime (a long-running server does not advance it);
-the Trade Finder `mode` (now / balanced / playoffs roster score) is separate from the value mode;
+  the week advances at the next 6-hourly data refresh after the schedule file shows the game scored (up to ~12 h with
+  the 6 h schedule download TTL); the Trade Finder `mode` (now / balanced / playoffs roster score) is separate from the value mode;
   `/values` without `?team=` uses the league default team's mode (the UI always sends its team); Trade Finder v3's
   "out 4+ weeks" rule counts bye-only weeks while v4 counts scheduled games (off by one in the week-7 data state);
   `rosterScore.weeklyPoints` still derives weekly points from ppg for hand-built players without `weekly` (fixtures).

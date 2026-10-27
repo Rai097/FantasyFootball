@@ -2,12 +2,17 @@ import { fetchCached } from "./cache.js";
 import { sources } from "./sources.js";
 import { parseCsv, num, opt } from "./csv.js";
 import { normTeam, normName, normPos, NFL_TEAM_NAMES, teamFromDefenseName } from "./names.js";
-import { getNflState } from "./nfl.js";
+import { computeNflState, type NflState } from "./nfl.js";
+import { staleMemo } from "./memo.js";
 import type { Player, Position, StatLine, WeekLine } from "../model/types.js";
 
 export interface PlayerDb {
   season: number;
   builtAt: string;
+  /** Increments on every rebuild; derived tables (signals, projection tables) are keyed by it. */
+  generation: number;
+  /** NFL calendar recomputed from the schedule on every rebuild (current week = first week with an unplayed game). */
+  state: NflState;
   players: Map<string, Player>;
   byYahoo: Map<string, string>;
   bySleeper: Map<string, string>;
@@ -49,25 +54,24 @@ export function addLines(a: StatLine, b: StatLine): StatLine {
 }
 export const emptyLine = (): StatLine => ({ passYd: 0, passTd: 0, passInt: 0, rushYd: 0, rushTd: 0, rec: 0, recYd: 0, recTd: 0, twoPt: 0, fumLost: 0 });
 
-let dbPromise: Promise<PlayerDb> | null = null;
-let dbBuiltAt = 0;
-/** The player database (and every table derived from the same files, e.g. Model v4 signals) rebuilds after this. */
+/**
+ * The ONE data refresh: the player database rebuilds after this, and with it the NFL calendar (current week) and every
+ * table derived from the same files (Model v4 signals / projection tables are keyed by `PlayerDb.generation`).
+ */
 export const DB_STALE_MS = 6 * 36e5;
+/** Clock of the refresh (tests replace `now` to simulate a server running for days). */
+export const dataClock = { now: (): number => Date.now() };
+
+const dbMemo = staleMemo<PlayerDb>(DB_STALE_MS, 1, () => dataClock.now());
+let generationCounter = 0;
 
 export function getPlayerDb(): Promise<PlayerDb> {
-  if (!dbPromise || Date.now() - dbBuiltAt > DB_STALE_MS) {
-    dbBuiltAt = Date.now();
-    dbPromise = buildPlayerDb().catch((e) => {
-      dbPromise = null;
-      throw e;
-    });
-  }
-  return dbPromise;
+  return dbMemo.get("db", () => buildPlayerDb(++generationCounter));
 }
 
-async function buildPlayerDb(): Promise<PlayerDb> {
+async function buildPlayerDb(generation: number): Promise<PlayerDb> {
   const t0 = Date.now();
-  const state = await getNflState();
+  const state = computeNflState(await fetchCached(sources.schedule, 6));
   const season = state.season;
   const [idsCsv, rosterCsv, ecrCsv, weeklyCsv, epCsv, epPriorCsv, injCsv, snapCsv, dynCsv] = await Promise.all([
     fetchCached(sources.playerIds, 24),
@@ -276,6 +280,8 @@ async function buildPlayerDb(): Promise<PlayerDb> {
   const db: PlayerDb = {
     season,
     builtAt: new Date().toISOString(),
+    generation,
+    state,
     players,
     byYahoo,
     bySleeper,

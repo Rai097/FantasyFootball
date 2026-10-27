@@ -1,7 +1,6 @@
-import { fetchCached } from "./cache.js";
-import { sources } from "./sources.js";
 import { parseCsv } from "./csv.js";
 import { normTeam } from "./names.js";
+import { getPlayerDb } from "./players.js";
 
 export interface NflState {
   season: number;
@@ -13,11 +12,17 @@ export interface NflState {
   lastRegularWeek: number;
 }
 
-let cached: NflState | null = null;
-
+/**
+ * The NFL calendar as of the latest data refresh: recomputed from the schedule on every player database rebuild
+ * (players.ts DB_STALE_MS), so a server running for days advances the week.
+ */
 export async function getNflState(): Promise<NflState> {
-  if (cached) return cached;
-  const rows = parseCsv(await fetchCached(sources.schedule, 6));
+  return (await getPlayerDb()).state;
+}
+
+/** Pure: the calendar from nflverse games.csv (current week = first REG week with an unplayed game). */
+export function computeNflState(scheduleCsv: string): NflState {
+  const rows = parseCsv(scheduleCsv);
   const season = Math.max(...rows.map((r) => Number(r.season)));
   const reg = rows.filter((r) => Number(r.season) === season && r.game_type === "REG");
   const weeks = [...new Set(reg.map((r) => Number(r.week)))].sort((a, b) => a - b);
@@ -44,6 +49,5 @@ export async function getNflState(): Promise<NflState> {
       }
     }
   }
-  cached = { season, currentWeek, completedWeeks: currentWeek - 1, byes, lastRegularWeek };
-  return cached;
+  return { season, currentWeek, completedWeeks: currentWeek - 1, byes, lastRegularWeek };
 }

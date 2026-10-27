@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { staleMemo } from "./memo.js";
 import {
-  staleMemo,
   buildPointsAllowed,
   buildSchedule,
   buildStarters,
@@ -92,7 +92,7 @@ test("signal inputs: one game per week with team totals, margin, starter and sna
   assert.equal(inputs.get(IDS.monangai)!.games.length, 4);
 });
 
-test("signal memos refresh on the player database's cadence (6 h) and forget failures", async () => {
+test("staleMemo (the player DB refresh memo): rebuilt after 6 h, bounded, forgets failures", async () => {
   let t = 0;
   let builds = 0;
   const memo = staleMemo<number>(DB_STALE_MS, 2, () => t);

@@ -125,6 +125,8 @@ function fakeDb(ps: Player[]): PlayerDb {
   return {
     season: 2026,
     builtAt: "",
+    generation: 0,
+    state: { season: 2026, currentWeek: 8, completedWeeks: 7, byes: {}, lastRegularWeek: 18 },
     players,
     byYahoo: new Map(),
     bySleeper: new Map(),
