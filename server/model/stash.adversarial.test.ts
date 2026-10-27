@@ -162,8 +162,8 @@ test("stash: a strong-role returner outranks a healthy low-role player with no s
   assert.deepEqual(stashWatch(input([scrub, mid, star])).map((r) => r.id), ["star", "mid"]);
 });
 
-test("known gap: a rostered player the import name matcher failed on (team.unmatched) is not in the rostered set — how he shows", () => {
-  // api.ts builds `rostered` from team.playerIds only; an unmatched roster line is a name in team.unmatched.
+test("caller omits the unmatched list: a rostered player the import name matcher failed on shows, but only as 'check'", () => {
+  // `rostered` comes from team.playerIds only; an unmatched roster line is a name in team.unmatched (api.ts passes it).
   const l = league([team("a", ["owner1"], { unmatched: ["Star Receiver"] })]);
   const rostered = new Set(l.teams.flatMap((t) => t.playerIds));
   const star = inj("star", "WR", { healthyRate: 18, stashScore: 40 }, { name: "Star Receiver" });
@@ -176,9 +176,15 @@ test("known gap: a rostered player the import name matcher failed on (team.unmat
   assert.equal(stale[0].call, "add");
 });
 
-test("known gap (strict): a rostered-but-unmatched player must not appear in Stash watch", { todo: "DESIGN 'Known gaps': team.unmatched names are not in the rostered set" }, () => {
+test("a rostered-but-unmatched player (team.unmatched) must not appear in Stash watch", () => {
   const l = league([team("a", ["owner1"], { unmatched: ["Star Receiver"] })]);
   const rostered = new Set(l.teams.flatMap((t) => t.playerIds));
+  const unmatched = l.teams.flatMap((t) => t.unmatched);
   const star = inj("star", "WR", { healthyRate: 18, stashScore: 40 }, { name: "Star Receiver" });
-  assert.deepEqual(stashWatch(input([star], { rostered, availability: new Map() })).map((r) => r.id), []);
+  assert.deepEqual(stashWatch(input([star], { rostered, unmatched, availability: new Map() })).map((r) => r.id), []);
+  // Import / Yahoo spellings "Name (POS, TEAM)" / "Name (POS)": name + position must both match; "?" = name only.
+  const by = (u: string[]) => stashWatch(input([star], { rostered, unmatched: u, availability: new Map() })).map((r) => r.id);
+  assert.deepEqual(by(["Star Receiver Jr. (WR, NYJ)"]), []);
+  assert.deepEqual(by(["star receiver (?)"]), []);
+  assert.deepEqual(by(["Star Receiver (RB)"]), ["star"], "same name, other position: a different player");
 });

@@ -3,6 +3,7 @@
 // healthy, ranked by playoff-weighted points from their return week. Pure: reads projection v4's `ret` numbers.
 import type { Availability, DetailItem, Position, StashCall, StashRow, ValuedPlayer } from "./types.js";
 import { returnText } from "./returns.js";
+import { normName, normPos } from "../data/names.js";
 
 export const STASH_WATCH = { limit: 10 } as const;
 export type { StashCall, StashRow };
@@ -18,6 +19,19 @@ export interface StashInput {
   finalWeek: number;
   usesFaab?: boolean;
   limit?: number;
+  /**
+   * Roster lines the league source could not match to a player (Team.unmatched: "Name (POS, TEAM)", "Name (POS)" or
+   * a bare name). Someone rosters them, so a player with the same name (+ position when given) is never a stash.
+   */
+  unmatched?: string[];
+}
+
+/** "Name (POS, TEAM)" → normalized name + position (undefined when missing or "?"). */
+function unmatchedKey(line: string): { name: string; pos?: string } {
+  const m = /^(.*?)\s*\(([^,)]*)/.exec(line);
+  const name = normName(m ? m[1] : line);
+  const pos = m ? normPos(m[2].trim()) : "";
+  return pos && pos !== "?" ? { name, pos } : { name };
 }
 
 const f1 = (x: number) => x.toFixed(1);
@@ -25,10 +39,16 @@ const PRACTICE_FLAG = "practice upgrade: about to become a waiver fight";
 
 export function stashWatch(x: StashInput): StashRow[] {
   const rows: StashRow[] = [];
+  const unmatched = (x.unmatched ?? []).map(unmatchedKey).filter((k) => k.name);
+  // Name alone when the line has no position: wrongly hiding a stash beats suggesting a rostered player.
+  const rosteredByName = (p: ValuedPlayer) => {
+    const n = normName(p.name);
+    return unmatched.some((k) => k.name === n && (!k.pos || k.pos === p.pos));
+  };
   for (const p of x.players) {
     const r = p.ret;
     const floor = x.flexLevel[p.pos];
-    if (!r || x.rostered.has(p.id) || p.team === "FA" || p.pos === "K" || p.pos === "DEF") continue;
+    if (!r || x.rostered.has(p.id) || p.team === "FA" || p.pos === "K" || p.pos === "DEF" || rosteredByName(p)) continue;
     if (r.healthyRate === undefined || floor === undefined || r.healthyRate < floor || !r.stashScore || r.playoffPts === undefined) continue;
     const availability = x.availability.get(p.id) ?? "unknown";
     const call: StashCall = availability === "fa" ? "add" : availability === "waivers" ? "claim-cheap" : "check";

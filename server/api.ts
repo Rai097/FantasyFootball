@@ -515,6 +515,7 @@ apiRouter.get(
       const stash = stashWatch({
         players: l.ctx.players.values(),
         rostered: new Set(league.teams.flatMap((t) => t.playerIds)),
+        unmatched: league.teams.flatMap((t) => t.unmatched ?? []),
         availability: new Map(input.map((f) => [f.player.id, f.availability ?? (f.onWaivers ? "waivers" : "fa")])),
         flexLevel: l.ctx.valuation.flexLevel,
         regularSeasonEnd: league.settings.regularSeasonEnd,
