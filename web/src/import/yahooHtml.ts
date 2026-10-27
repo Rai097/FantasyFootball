@@ -71,6 +71,14 @@ export function decodeEntities(s: string): string {
   });
 }
 
+/**
+ * Empties attribute values that carry raw markup (Yahoo's `data-tooltip="<table>…<tr>…</table>"`): left in, their
+ * `</table>` / `<tr` end the regex table and row scans early, so most of a roster went unread (verified 2026-10-27).
+ */
+export function stripMarkupAttrs(html: string): string {
+  return html.replace(/(\s[\w:-]+\s*=\s*)("[^"]*"|'[^']*')/g, (m, name: string, v: string) => (v.includes("<") ? `${name}""` : m));
+}
+
 /** Visible text of an HTML fragment: drops script/style, turns block ends into newlines, cells into tabs. */
 export function htmlToText(html: string): string {
   return decodeEntities(
@@ -540,7 +548,7 @@ export function parseStandingsHtml(html: string, leagueId: string): StandingsPar
     return { id: links[0][1], name: named ? oneLine(named[2]) : "" };
   };
 
-  for (const t of html.matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
+  for (const t of stripMarkupAttrs(html).matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
     let cols: Partial<Record<StandingsColumn, number>> | undefined;
     for (const r of t[0].matchAll(/<tr\b[\s\S]*?<\/tr>/gi)) {
       const link = teamOf(r[0]);
@@ -750,7 +758,7 @@ export function parseProjectionHtml(html: string, kind: "ros" | "week"): Project
   }
   const want = kind === "week" ? WEEK_PROJ_HEADER : PTS_HEADER;
   const link = /\/nfl\/players\/(\d+)/;
-  for (const t of html.matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
+  for (const t of stripMarkupAttrs(html).matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
     let col: number | undefined;
     for (const r of t[0].matchAll(/<tr\b[\s\S]*?<\/tr>/gi)) {
       const cells = spanCells(r[0]);

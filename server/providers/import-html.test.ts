@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { availabilityFrom, htmlToText, mapSlotToken, parseMyTeamId, parsePlayersHtml, parsePosTeam, parseProjectionHtml, parseSettingsHtml, parseStandingsHtml, playerKey, rosViewIndicator, navLink, NAV_TEXT, waiverStatusOf } from "../../web/src/import/yahooHtml.js";
+import { availabilityFrom, htmlToText, mapSlotToken, parseMyTeamId, parsePlayersHtml, parsePosTeam, parseProjectionHtml, parseSettingsHtml, stripMarkupAttrs, parseStandingsHtml, playerKey, rosViewIndicator, navLink, NAV_TEXT, waiverStatusOf } from "../../web/src/import/yahooHtml.js";
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const html = (n: string) => readFileSync(path.join(dir, n), "utf8");
@@ -213,6 +213,18 @@ test("projections (week): the roster page's 'Proj' column, matched by header; no
   assert.equal(none.values.size, 0);
   assert.match(none.diag.note!, /no Proj column/);
   assert.ok(none.diag.headers.includes("Fan Pts"), JSON.stringify(none.diag.headers));
+});
+
+test("projections: markup inside an attribute (Yahoo's data-tooltip with <table>/<tr>) does not end the table or row early", () => {
+  // Real Yahoo pages (2026-10-27) carry data-tooltip="<table>…" on some rows: half the league's rosters went unread.
+  const page = html("yahoo-web-team-proj-remaining.html");
+  const tip = ` data-tooltip="<table><tr><td>Note</td></tr></table>"`;
+  let n = 0;
+  const withTips = page.replace(/<a\b(?=[^>]*\/nfl\/players\/)/g, (m) => (n++ < 2 ? m + tip : m));
+  assert.equal(n >= 2, true, "fixture has player links to decorate");
+  const r = parseProjectionHtml(withTips, "ros");
+  assert.deepEqual([...r.values], [...parseProjectionHtml(page, "ros").values]);
+  assert.equal(stripMarkupAttrs(`<td class="a" data-tooltip='<tr>x</tr>' title="ok">`), `<td class="a" data-tooltip="" title="ok">`);
 });
 
 test("projections (rest of season): Remaining Games view selected → every Fan Pts table (offense, K, DEF); legend table skipped; bad cells skipped", () => {
