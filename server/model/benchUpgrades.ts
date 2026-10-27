@@ -1,5 +1,5 @@
 // Bench upgrades: 1-for-1 swaps of one of my bench players (or my weakest skill starter) for a partner's bench player,
-// judged by the Trade Finder v3 engine (judge3: roster score, market fairness, acceptance). DESIGN "Trade finder v3".
+// judged by the Trade Finder engine (judge3: roster score, acceptance from the partner's perceived view). DESIGN "Release (d)".
 import type { DetailItem, Trade, ValuedPlayer } from "./types.js";
 import { effPpg, eligible } from "./lineup.js";
 import { fmtSigned, tradeDeadlinePassed, tradeable, type TradeContext } from "./tradeKit.js";
@@ -52,7 +52,8 @@ function upgradeItems(ctx: TradeContext, j: Judged3, my: TeamV3, mine: ValuedPla
   add("Playoffs", `${fmtSigned(d.playoffs)} pts/wk`, toneOf(d.playoffs));
   add("Depth", fmtSigned(d.depth), toneOf(d.depth));
   add("Your team score", fmtSigned(j.myDelta), toneOf(j.myDelta));
-  add("Fairness to them", `${j.fairness.toFixed(2)} by market value`);
+  add(j.perceivedSource === "yahoo" ? "What Yahoo shows" : "Yahoo view (estimate)", `you ${fmtSigned(j.myPerceived)}, them ${fmtSigned(j.theirPerceived)} pts rest of season`, toneOf(j.theirPerceived));
+  add("Market value", `they get ${fmtSigned((j.fairness - 1) * 100)}% (FantasyCalc)`);
   add("Acceptance", `${Math.round(j.acceptance * 100)}%`);
   return items;
 }
@@ -98,7 +99,7 @@ export function findBenchUpgrades(ctx: TradeContext, myTeamId: string, opts: { m
     gotSeen.add(g.id);
     gaveSeen.set(m.id, (gaveSeen.get(m.id) ?? 0) + 1);
     const t = buildTrade3(ctx, j, my, their, mode);
-    t.summary = makeSummary(`${m.name} for ${g.name}: your season lineup ${fmtSigned(j.myParts.season)} pts/wk.`, `Fairness ${j.fairness.toFixed(2)} to them, ~${Math.round(j.acceptance * 100)}% accept.`);
+    t.summary = makeSummary(`${m.name} for ${g.name}: your season lineup ${fmtSigned(j.myParts.season)} pts/wk.`, `${j.perceivedSource === "yahoo" ? "Yahoo shows" : "Yahoo likely shows"} them ${fmtSigned(j.theirPerceived)} pts, ~${Math.round(j.acceptance * 100)}% accept.`);
     t.details = [...upgradeItems(ctx, j, my, m, g), ...(qbItems(my, their, [m], [g]) ?? [])];
     if (j.myParts.depth > 0.05 && !t.tags.includes("depth upgrade")) t.tags.unshift("depth upgrade");
     picked.push(t);

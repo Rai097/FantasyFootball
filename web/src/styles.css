@@ -470,11 +470,9 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .strip-val { font-size: 10.5px; font-variant-numeric: tabular-nums; line-height: 1.3; }
 .strip-wk { font-size: 9.5px; line-height: 1.1; }
 
-/* ---- Trade finder v3: fairness band, pitch, notes, partners */
-.band { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--card-2); }
-.band-fair { background: var(--pos-bg); border-color: rgba(62, 207, 122, 0.4); color: var(--pos); }
-.band-slightly-favors-them, .band-slightly-favors-you, .band-favors-them { background: var(--warn-bg); border-color: rgba(245, 184, 65, 0.4); color: var(--warn); }
-.band-favors-you { background: var(--neg-bg); border-color: rgba(255, 107, 107, 0.4); color: var(--neg); }
+/* ---- Trade finder v4: their-view / lineup / market lines, pitch, notes, partners */
+.trade-labels { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.trade-labels li.neg { color: var(--neg); }
 .pitch { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; background: var(--bg-2); border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin: 10px 0; font-size: 13px; }
 .pitch-text { font-style: italic; min-width: 0; overflow-wrap: anywhere; }
 .tag.tag-good { background: var(--pos-bg); border-color: rgba(62, 207, 122, 0.4); }
@@ -533,7 +531,6 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .side-players { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .side-players .side-player { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .trade-row .trade-metrics { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
-.trade-row .band { align-self: flex-start; margin-top: 2px; }
 
 /* Best-fit partners: # | team | why they fit | fit | chevron. */
 .fit-list .xlist-head, .partner-row .xrow-head { grid-template-columns: 22px minmax(120px, 190px) minmax(0, 1fr) 52px 16px; }

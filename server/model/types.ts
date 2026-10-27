@@ -339,19 +339,20 @@ export interface Trade {
   /** Near misses only: why the trade did not make the main list. */
   reason?: string;
   // ---- Trade Finder v3 (market-value packages); optional so hand-made fixtures stay valid.
-  /** Fairness band from the partner's point of view (perceived market values). */
-  band?: FairnessBand;
-  /** "Fair", "Slightly favors them (+7%)", … */
-  bandLabel?: string;
-  /** Partner's perceived edge in percent: (fairness − 1) × 100. */
-  fairnessPct?: number;
+  /** "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" — our projections, rest of season per week. */
+  lineupLabel?: string;
+  /** "Market value: they get +16%" — FantasyCalc package values (a minor part of acceptance). */
+  marketLabel?: string;
+  /**
+   * The rest-of-season lineup change Yahoo's evaluator would show (perceived values): you / them in total points,
+   * source "yahoo" when every player in the deal has a captured Yahoo projection, else "estimate".
+   */
+  yahooView?: { you: number; them: number; source: "yahoo" | "estimate"; label: string };
   /** One line I could paste to the other manager. */
   pitch?: string;
   /** Package values (best + 0.85·second + 0.70·third), market and true, net of drop cost on the receiving side. */
   packages?: { marketGive: number; marketGet: number; trueGive: number; trueGet: number; myTrueChange: number; theirMarketChange: number };
 }
-
-export type FairnessBand = "fair" | "slightly-favors-them" | "favors-them" | "slightly-favors-you" | "favors-you";
 
 /** GET /trades2 response. */
 export interface TradeFinderResult {

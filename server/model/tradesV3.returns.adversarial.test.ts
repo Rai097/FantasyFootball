@@ -58,7 +58,7 @@ test("evaluate: an out player I GIVE is valued on his return estimate (true valu
   const c = make();
   const ev = evaluateTradeV3(c, "me", "them", ["mIR"], ["tWR5"]);
   assert.ok(Math.abs(ev.packages!.trueGive - 70) < 1e-9, `trueGive ${ev.packages!.trueGive}`);
-  assert.ok(ev.details!.some((d) => d.label === "Injured, you give" && /return unconfirmed, valued 70\.0/.test(d.value)), JSON.stringify(ev.details));
+  assert.ok(ev.details!.some((d) => d.label === "Injured, you give" && /return unconfirmed, a bet on his recovery \(valued 70\.0/.test(d.value)), JSON.stringify(ev.details));
   // Selling him for a bench WR does not make my lineup worse now (he scores 0), but I hand over 70 of true value.
   assert.ok(!/^Accept/.test(ev.verdict), ev.verdict);
 });

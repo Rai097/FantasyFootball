@@ -1,6 +1,8 @@
-// Trade Finder v3: market-value packages that another manager would actually send or accept.
-// Perceived value = FantasyCalc market (fallback: our value); true value = our model. See docs/DESIGN.md "Trade finder v3".
-import type { DetailItem, FairnessBand, LeagueSettings, Position, SlotKind, Team, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
+// Trade Finder v3 → v4 (Model v4 release (d)): packages another manager would actually accept.
+// Acceptance comes from THEIR view: the lineup change Yahoo's evaluator would show them (perceived values: Yahoo
+// projections / FantasyPros rank + recent games, perception.ts), then a recent spike of what they give, market value
+// (FantasyCalc) only as a minor term. True value = our model. See docs/DESIGN.md "Trade finder v3" and "Release (d)".
+import type { DetailItem, LeagueSettings, Position, SlotKind, Team, TeamAnalysis, Trade, TradeFinderResult, TradeSide, ValuedPlayer } from "./types.js";
 import { FLEX_SLOTS, effPpg, eligible, optimalLineup, slotLabels, usable, type LineupResult } from "./lineup.js";
 import { applyTrade, combos, fmtSigned, lineupChanges, names, teamState, tradeDeadlinePassed, type TradeContext } from "./tradeKit.js";
 import { irSet } from "./analysis.js";
@@ -11,6 +13,9 @@ import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
 import { marketTag } from "./labels.js";
 import { returnText } from "./returns.js";
+import { isSpike, perceivedLineupTotal, perceptionOf, yahooCoverage } from "./perception.js";
+import { teamStrength } from "./teamStrength.js";
+import { weeklyPoints } from "./rosterScore.js";
 
 /** Config for Trade Finder v3 (architect's design after user feedback on v2). */
 export const V3 = {
@@ -27,29 +32,28 @@ export const V3 = {
   minDropCost: 3,
   /** The side receiving the single best player in an uneven deal must give ≥ 110% of the other package. */
   consolidationPremium: 1.1,
-  /** Fairness bands (partner's perceived edge). */
-  fairBand: 0.05,
-  slightBand: 0.12,
   /** Need model. */
   minMyDelta: 0.5,
   minMyTrueGain: 0.03,
-  maxPartnerLoss: 0.03,
-  partnerLineupFloor: -0.3,
-  partnerFloorFairness: 1.05,
-  bestPlayerLoss: 0.05,
   /** Partner targeting. */
   topPartners: 8,
   minTrades: 6,
-  /** Acceptance: logistic(k · edgePct), +5% → 0.65. */
+  /** v4 acceptance, dominant term: logistic in their perceived lineup change per week, +1 pt/wk → 0.70. */
+  accLineupK: Math.log(0.7 / 0.3),
+  /** Market term: logistic(k · market edge %), +5% → 0.65, weighted 20% (FantasyCalc matters only a little). */
   accK: Math.log(0.65 / 0.35) / 5,
+  marketWeight: 0.2,
+  /** Each player they give right after a spike game (≥ 1.5× his perceived rate): × 0.7. */
+  spikeMult: 0.7,
+  /** A perceived loss for them caps acceptance here (and keeps the deal off the main list). */
+  perceivedLossCap: 0.25,
   extraPlayerMult: 0.85,
   loseTopMult: 0.8,
   fixesWorstMult: 1.1,
   accCap: 0.95,
-  /** Ranking: min(myGain, partnerGain + margin) × P. */
-  margin: 2,
-  /** Score ÷ (1 + 2 × market overpay beyond +12%): the same gain at a fairer price ranks first. */
-  overpayPenalty: 2,
+  /** Gem bonus: perception gaps in my favour (pts/game, capped) × this, added to my playoff-lineup gain. */
+  gapBonus: 0.25,
+  gapCap: 4,
   perPartner: 2,
   perGive: 2,
   limit: 10,
@@ -64,7 +68,7 @@ export const V3 = {
   thinPenalty: 1.0,
   /** v3.1: giving a riser costs ×1.15 of his value (selling upside); same for the partner. */
   riserPremium: 1.15,
-  /** No suggestion (any list, near misses included) below this gain for me: smaller deltas are projection noise. */
+  /** No suggestion (any list, near misses included) below this playoff-lineup (team strength) gain for me, pts/week. */
   minMyGain: 1.0,
   /** Search bounds. */
   poolSize: 14,
@@ -92,34 +96,57 @@ export function dropCost(cutValues: number[]): number {
   return cutValues.reduce((a, v) => a + Math.max(V3.minDropCost, v), 0);
 }
 
-/** Partner-perspective fairness band: ratio = perceived received / perceived given by the partner. */
-export function fairnessBand(ratio: number): { band: FairnessBand; label: string; pct: number } {
-  const p = (ratio - 1) * 100;
-  const a = Math.abs(ratio - 1);
-  const signed = `${p >= 0 ? "+" : "−"}${Math.abs(p).toFixed(0)}%`;
-  if (a <= V3.fairBand + 1e-9) return { band: "fair", label: `Fair (${signed} to them)`, pct: r1(p) };
-  const them = ratio > 1;
-  if (a <= V3.slightBand + 1e-9) return { band: them ? "slightly-favors-them" : "slightly-favors-you", label: `Slightly favors ${them ? "them" : "you"} (${signed} to them)`, pct: r1(p) };
-  return { band: them ? "favors-them" : "favors-you", label: `Favors ${them ? "them" : "you"} (${signed} to them)`, pct: r1(p) };
+const pctSigned = (p: number) => `${p >= 0 ? "+" : "−"}${Math.abs(p).toFixed(0)}%`;
+
+/** "Market value: they get +16%" — FantasyCalc package value they receive vs give (ratio = received / given). */
+export function marketLabel(ratio: number): string {
+  return `Market value: they get ${pctSigned((ratio - 1) * 100)}`;
 }
 
-/** P(accept) before multipliers: logistic in the partner's perceived edge (percent). */
+/** "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" — our projections, rest of season per week. */
+export function lineupLabel(mine: number, theirs: number): string {
+  const verdict = mine > 0.05 ? "good for you" : mine < -0.05 ? "bad for you" : "neutral for you";
+  return `Lineup impact: ${verdict} (${fmtSigned(mine)}/wk you, ${fmtSigned(theirs)}/wk them)`;
+}
+
+/** Market term of acceptance: logistic in the partner's market edge (percent), +5% → 0.65. */
 export function acceptCurve(edgePct: number): number {
   return 1 / (1 + Math.exp(-V3.accK * edgePct));
 }
 
+/** Lineup term of acceptance: logistic in their perceived lineup change per week, +1 → 0.70, 0 → 0.5. */
+export function lineupCurve(perWeek: number): number {
+  return 1 / (1 + Math.exp(-V3.accLineupK * perWeek));
+}
+
 export interface AcceptFactors {
+  /** Their perceived (Yahoo-style) lineup change, points per remaining week. */
+  perceivedPerWeek: number;
+  /** Their perceived lineup change over the rest of the season < 0 (rounded to 0.1). */
+  perceivedLoss: boolean;
+  /** Their market edge in percent: (market received / given − 1) × 100. */
+  marketEdgePct: number;
+  /** Players they give right after a spike game. */
+  spikes: number;
   /** Players I give beyond what I get (roster spots the partner must free). */
   extraGiven: number;
   losesTheirTop: boolean;
   fixesWorst: boolean;
 }
-export function acceptanceV3(edgePct: number, f: AcceptFactors): number {
-  let p = acceptCurve(edgePct);
+
+/**
+ * v4 acceptance from THEIR view: 80% their perceived lineup change, 20% market edge, × 0.7 per player they give after
+ * a spike game, × 0.85 per extra player, × 0.8 for their best player, × 1.1 when it fixes their weakest slot; cap 0.95.
+ * A perceived loss caps it at 0.25.
+ */
+export function acceptanceV4(f: AcceptFactors): number {
+  let p = (1 - V3.marketWeight) * lineupCurve(f.perceivedPerWeek) + V3.marketWeight * acceptCurve(f.marketEdgePct);
+  p *= Math.pow(V3.spikeMult, Math.max(0, f.spikes));
   p *= Math.pow(V3.extraPlayerMult, Math.max(0, f.extraGiven));
   if (f.losesTheirTop) p *= V3.loseTopMult;
   if (f.fixesWorst) p *= V3.fixesWorstMult;
-  return Math.min(V3.accCap, p);
+  p = Math.min(V3.accCap, p);
+  return f.perceivedLoss ? Math.min(V3.perceivedLossCap, p) : p;
 }
 
 // ---------------------------------------------------------------- eligibility
@@ -214,6 +241,10 @@ export interface TeamV3 extends TeamBase {
   core: ValuedPlayer[];
   starterList: ValuedPlayer[];
   bad: boolean;
+  /** Playoff lineup strength (teamStrength total, pts/week). */
+  strength: number;
+  /** The rest-of-season lineup total Yahoo's evaluator would show (perceived values). */
+  perceived: number;
 }
 
 export function teamV3(ctx: TradeContext, teamId: string): TeamV3 {
@@ -263,7 +294,9 @@ export function teamV3(ctx: TradeContext, teamId: string): TeamV3 {
   const bad = !!rec && games >= 2 && rec.wins / games <= 1 / 3 + 1e-9;
   const starterList = s.base.lineup.map((l) => l.player).filter((p): p is ValuedPlayer => !!p);
   const core = [...starterList, ...[...s.base.bench].sort((a, b) => effPpg(b) - effPpg(a)).slice(0, 3)];
-  return { ...s, analysis, pieces, deficit, weakest, surplus, surplusNames, topMarketId: top?.id ?? null, starters, core, starterList, bad };
+  const strength = teamStrength(S, s.roster, s.irIds).total;
+  const perceived = perceivedLineupTotal(S, s.roster, s.irIds);
+  return { ...s, analysis, pieces, deficit, weakest, surplus, surplusNames, topMarketId: top?.id ?? null, starters, core, starterList, bad, strength, perceived };
 }
 
 const deficitFor = (t: TeamV3, pos: "RB" | "WR" | "TE") => Math.max(t.deficit[pos], 0.5 * t.deficit.FLEX);
@@ -316,6 +349,21 @@ export interface Judged3 {
   myDelta: number;
   /** Partner's rest-of-season weekly lineup delta (our projections). */
   theirLineup: number;
+  /** My playoff-lineup strength change (teamStrength total, pts/week); 0 when not computed (my side fails early). */
+  strengthDelta: number;
+  /** What Yahoo's evaluator would show over the rest of the season (perceived values): me / them, total points. */
+  myPerceived: number;
+  theirPerceived: number;
+  /** "yahoo" when every player in the deal carries a captured Yahoo projection, else "estimate". */
+  perceivedSource: "yahoo" | "estimate";
+  /** Their perceived lineup total falls (rounded to 0.1): capped acceptance, never on the main list. */
+  perceivedLoss: boolean;
+  /** Σ perception gaps of what I get − of what I give (pts/game; + = they underrate what I get / overrate what I give). */
+  gapFavor: number;
+  /** Players they give right after a spike game (≥ 1.5× their perceived rate). */
+  spikes: ValuedPlayer[];
+  /** Bye / playoff cover I lose (details bullets; empty = none). */
+  coverItems: DetailItem[];
   marketGive: number;
   marketGet: number;
   trueGive: number;
@@ -419,7 +467,6 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     const fairness = theirRecvNet / Math.max(1, marketGet);
     const theirMarketChange = theirRecvNet - marketGet;
     const myTrueChange = trueGet - myDropT - trueGive;
-    const marketTotal = marketGive + marketGet;
     const trueTotal = trueGive + trueGet;
 
     // Single best player in the deal (market, then true value).
@@ -442,23 +489,45 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     else if (myDelta < V3.minMyDelta) myFail = `your team ${fmtSigned(myDelta)} (needs +${V3.minMyDelta.toFixed(1)})${slotPenalty > 0 ? ` after −${slotPenalty.toFixed(1)} slot-loss aversion` : ""}`;
     else if (myTrueChange < V3.minMyTrueGain * trueTotal) myFail = `you pay market price: true value ${fmtSigned(myTrueChange)} (needs +${(V3.minMyTrueGain * trueTotal).toFixed(1)}, 3% of the deal)`;
 
+    // THEIR view (release (d)): the lineup totals Yahoo's evaluator would show, on perceived values (unscaled rosters:
+    // the partner does not apply our target-overlap discount).
+    const giveIds = new Set(give.map((p) => p.id));
+    const getIds = new Set(get.map((p) => p.id));
+    const myRosterAfter = my.roster.filter((p) => !giveIds.has(p.id)).concat(get);
+    const theirRosterAfter = their.roster.filter((p) => !getIds.has(p.id)).concat(give);
+    const myPerceived = perceivedLineupTotal(S, myRosterAfter, my.irIds) - my.perceived;
+    const theirPerceived = perceivedLineupTotal(S, theirRosterAfter, their.irIds) - their.perceived;
+    const nWeeks = Math.max(1, S.finalWeek - S.currentWeek + 1);
+    const perceivedLoss = r1(theirPerceived) < 0;
+    const perceivedSource = [...give, ...get].every((p) => perceptionOf(p, S).source === "yahoo") ? "yahoo" : "estimate";
+    const gapFavor = get.reduce((a, p) => a + perceptionOf(p, S).gap, 0) - give.reduce((a, p) => a + perceptionOf(p, S).gap, 0);
+    const spikes = get.filter((p) => isSpike(perceptionOf(p, S)));
+
     let theirFail = "";
     if (!premiumMine && !premiumOk) theirFail = `consolidation premium: they give the best player, so your package must be worth ≥ ${pct(V3.consolidationPremium)} of theirs (it is ${pct(fairness)})`;
-    else if (theirMarketChange < -V3.maxPartnerLoss * marketTotal) theirFail = `they lose ${Math.abs(theirMarketChange).toFixed(1)} market value (${pct(fairness)} of what they give)`;
-    else if (bestToMe && theirMarketChange < -V3.bestPlayerLoss * marketGet) theirFail = `they give the best player and lose ${pct(-theirMarketChange / Math.max(1, marketGet))} market value`;
-    else if (!(theirLineup > 0 || (theirLineup >= V3.partnerLineupFloor && fairness >= V3.partnerFloorFairness)))
-      theirFail = `their weekly lineup ${fmtSigned(theirLineup)} pts${fairness >= V3.partnerFloorFairness ? "" : " without a value premium"}`;
+    else if (perceivedLoss) theirFail = `${perceivedSource === "yahoo" ? "Yahoo shows" : "Yahoo would likely show"} them ${fmtSigned(theirPerceived)} pts rest of season`;
 
     const losesTheirTop = get.some((p) => p.id === their.topMarketId);
     const w = their.weakest;
-    const fixesWorst = !!w && theirLineup > 0 && give.some((p) => fitsGroup(w.group, p.pos) && effPpg(p) > effPpg(w.player));
-    const acceptance = acceptanceV3((fairness - 1) * 100, { extraGiven: give.length - get.length, losesTheirTop, fixesWorst });
-    // Ranking: min(my gain, their gain + margin) × P, discounted when I overpay by market beyond the "slightly" band.
-    const overpay = Math.max(0, fairness - 1 - V3.slightBand);
-    const score = (Math.min(myDelta, theirLineup + V3.margin) * acceptance) / (1 + V3.overpayPenalty * overpay);
+    const fixesWorst = !!w && theirPerceived > 0 && give.some((p) => fitsGroup(w.group, p.pos) && effPpg(p) > effPpg(w.player));
+    const acceptance = acceptanceV4({
+      perceivedPerWeek: theirPerceived / nWeeks,
+      perceivedLoss,
+      marketEdgePct: (fairness - 1) * 100,
+      spikes: spikes.length,
+      extraGiven: give.length - get.length,
+      losesTheirTop,
+      fixesWorst,
+    });
+    // My playoff-lineup gain (team strength, release (b)) — only when my side can pass (it is the costly part).
+    const strengthDelta = myFail ? 0 : teamStrength(S, myAfter.filter((p) => !me.drops.includes(p)), my.irIds).total - my.strength;
+    // Gem: playoff gain × acceptance, plus a bonus when the perception gaps favour me.
+    const score = acceptance * (strengthDelta + V3.gapBonus * Math.min(V3.gapCap, Math.max(0, gapFavor)));
     const edgeSum = get.reduce((a, p) => a + edgeOf(p), 0) - give.reduce((a, p) => a + edgeOf(p), 0);
+    const coverItems = give.length ? coverLost(S, my, give, get) : [];
     return {
-      give, get, myParts, theirParts, myDrops: me.drops, theirDrops: th.drops, myDelta, theirLineup,
+      give, get, myParts, theirParts, myDrops: me.drops, theirDrops: th.drops, myDelta, theirLineup, strengthDelta: r1(strengthDelta),
+      myPerceived: r1(myPerceived), theirPerceived: r1(theirPerceived), perceivedSource, perceivedLoss, gapFavor: r1(gapFavor), spikes, coverItems,
       marketGive, marketGet, trueGive, trueGet, fairness, theirMarketChange, myTrueChange, bestToMe, premiumOk,
       myOk: !myFail, partnerOk: !theirFail, acceptance, fixesWorst, losesTheirTop, score, edgeSum, myFail, theirFail, tags31, items31, slotPenalty, overlap,
     };
@@ -517,19 +586,86 @@ function byeItems(S: LeagueSettings, j: Judged3, myAfter: LineupResult): DetailI
   return out;
 }
 
-function tradePitch(j: Judged3, their: TeamV3): string {
-  const w = their.weakest;
+/** Points of player p in week w (projection v4 weekly; 0 = no game / out). */
+const ptsIn = (S: LeagueSettings, p: ValuedPlayer, w: number) => weeklyPoints(p, S)[w - S.currentWeek] ?? 0;
+
+/**
+ * Bye / playoff cover I lose by giving `give` (one bullet each):
+ *  - a starter's bye in the weeks ahead (current week → final week) at a position where the player I give is my best
+ *    bench option that week, and nothing I keep or get covers it as well;
+ *  - my only backup QB / TE (the playoff cover when the starter is hurt).
+ */
+export function coverLost(S: LeagueSettings, my: TeamV3, give: ValuedPlayer[], get: ValuedPlayer[]): DetailItem[] {
+  const out: DetailItem[] = [];
+  const giveIds = new Set(give.map((p) => p.id));
+  const starters = my.starterList.filter((p) => p.pos !== "K" && p.pos !== "DEF" && !giveIds.has(p.id));
+  const benchBefore = my.roster.filter((p) => !my.starters.has(p.id) && !my.irIds.has(p.id));
+  const benchAfter = benchBefore.filter((p) => !giveIds.has(p.id)).concat(get);
+  const best = (pool: ValuedPlayer[], pos: string, w: number) =>
+    pool.filter((p) => p.pos === pos && p.bye !== w).reduce<{ p: ValuedPlayer | null; v: number }>((b, p) => (ptsIn(S, p, w) > b.v ? { p, v: ptsIn(S, p, w) } : b), { p: null, v: 0 });
+  const seen = new Set<string>();
+  for (const s of starters) {
+    const w = s.bye;
+    if (w === undefined || w < S.currentWeek || w > S.finalWeek) continue;
+    const before = best(benchBefore, s.pos, w);
+    if (!before.p || !giveIds.has(before.p.id)) continue;
+    if (best(benchAfter, s.pos, w).v >= before.v - 0.5) continue;
+    const key = `${before.p.id}:${w}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ label: "Bye cover lost", value: `${before.p.name} covers ${s.name}'s week ${w} bye (${before.v.toFixed(1)} pts)`, tone: "warn" });
+  }
+  for (const pos of ["QB", "TE"] as const) {
+    const startersAt = my.starterList.filter((p) => p.pos === pos).length;
+    if (!startersAt) continue;
+    const backups = benchBefore.filter((p) => p.pos === pos && usable(p));
+    const gone = backups.filter((p) => giveIds.has(p.id));
+    if (!gone.length || backups.length > gone.length || get.some((p) => p.pos === pos)) continue;
+    out.push({ label: "Playoff cover lost", value: `${gone[0].name} is your only ${pos} backup`, tone: "warn" });
+  }
+  return out;
+}
+
+/**
+ * A backup I give (projects below their starter at his position) who plays in a week ahead when that starter — one
+ * they keep — is on bye.
+ */
+function theirByeCover(S: LeagueSettings, their: TeamV3, give: ValuedPlayer[], get: ValuedPlayer[]): { player: ValuedPlayer; starter: ValuedPlayer; week: number } | null {
+  const getIds = new Set(get.map((p) => p.id));
+  for (const p of give) {
+    for (const s of their.starterList) {
+      const w = s.bye;
+      if (getIds.has(s.id) || w === undefined || w < S.currentWeek || w > S.finalWeek || s.pos !== p.pos || p.bye === w || ptsIn(S, p, w) <= 0) continue;
+      if (effPpg(p) >= effPpg(s)) continue; // he would start anyway: not a bye-cover argument
+      return { player: p, starter: s, week: w };
+    }
+  }
+  return null;
+}
+
+/**
+ * Pitch: reasons that matter to THEM — the slot it fills, the bye it covers, what their lineup gains in the numbers
+ * they see (Yahoo projections), recent production of what they get. Never a market-value claim.
+ */
+function tradePitch(S: LeagueSettings, j: Judged3, their: TeamV3): string {
   const deal = `my ${names(j.give)} for your ${names(j.get)}`;
   const Deal = `${deal[0].toUpperCase()}${deal.slice(1)}`;
-  const theirs = r1(j.theirLineup);
-  const mine = r1(j.myParts.season);
-  const gains = theirs > 0 ? `you gain ${fmtSigned(theirs)} pts/week in your lineup, I gain ${fmtSigned(mine)}` : `your lineup holds steady and I gain ${fmtSigned(mine)} pts/week`;
-  // A player whose return is unconfirmed has a placeholder value: no value claim, say what the bet is.
+  const reasons: string[] = [];
+  // A player whose return is unconfirmed has a placeholder value: say what the bet is.
   const unsure = [...j.give, ...j.get].filter(returnUnconfirmed);
-  if (unsure.length) return `${Deal} — ${names(unsure)}${unsure.length > 1 ? " have unconfirmed returns, so this is a bet on their recovery" : "'s return is unconfirmed, so this is a bet on his recovery"}; ${gains}.`;
-  if (w && j.fixesWorst) return `Your ${w.slot} slot is your weakest; ${deal} — ${gains}.`;
-  if (j.fairness >= 1 + V3.fairBand) return `${Deal} — you win on value (+${Math.round((j.fairness - 1) * 100)}% by market) and ${gains}.`;
-  return `${Deal} — fair by market value; ${gains}.`;
+  if (unsure.length) reasons.push(`${names(unsure)}${unsure.length > 1 ? " have unconfirmed returns, so this is a bet on their recovery" : "'s return is unconfirmed, so this is a bet on his recovery"}`);
+  const w = their.weakest;
+  if (w && j.fixesWorst) reasons.push(`it fills your ${w.slot}, your weakest spot`);
+  const cover = theirByeCover(S, their, j.give, j.get);
+  if (cover) reasons.push(`${cover.player.name} covers ${cover.starter.name}'s week ${cover.week} bye`);
+  if (j.theirPerceived > 0) reasons.push(`${j.perceivedSource === "yahoo" ? "Yahoo projects" : "the projections put"} your lineup ${fmtSigned(j.theirPerceived)} pts over the rest of the season`);
+  const hot = j.give
+    .map((p) => ({ p, pc: perceptionOf(p, S) }))
+    .filter(({ pc }) => pc.lastGamePts !== undefined && pc.lastGamePts >= Math.max(10, pc.rate))
+    .sort((a, b) => b.pc.lastGamePts! - a.pc.lastGamePts!)[0];
+  if (hot) reasons.push(`${hot.p.name} scored ${hot.pc.lastGamePts!.toFixed(1)} last game`);
+  if (!reasons.length) reasons.push("it keeps your starting lineup level");
+  return `${Deal}: ${reasons.slice(0, 3).join("; ")}.`;
 }
 
 /** "QB rule" items when a QB moves (null when none does); used for trade and bench-upgrade cards. */
@@ -550,7 +686,6 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   const themAfter = applyTrade(S.slots, their.roster, get, give, their.irIds);
   const me = sideOf(my.team.id, give, my.base, meAfter, j.myParts, j.myDelta, j.marketGive);
   const them = sideOf(their.team.id, get, their.base, themAfter, j.theirParts, combine(j.theirParts, MODE_WEIGHTS.balanced), j.marketGet);
-  const band = fairnessBand(j.fairness);
   const key = `${their.team.id}:${give.map((p) => p.id).sort().join(",")}>${get.map((p) => p.id).sort().join(",")}`;
   const p100 = Math.round(j.acceptance * 100);
   const tags: string[] = [...edgeTags(j), ...j.tags31];
@@ -564,33 +699,48 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   if (get.length > give.length) tags.push("adds depth (you drop a bench player)");
   if (give.some((p) => p.pos === "QB") || get.some((p) => p.pos === "QB")) tags.push("spare starting QB");
   if (j.losesTheirTop) tags.push("asks for their best player");
-  if (j.theirLineup > 0 && j.myParts.season > 0) tags.push("helps both");
+  if (j.theirPerceived > 0 && j.myParts.season > 0) tags.push("helps both");
+  if (j.coverItems.length) tags.push("loses bye cover");
+  for (const p of j.spikes) tags.push(`just spiked: ${p.name}`);
+  const yahoo = yahooViewOf(j);
+  const lineup = lineupLabel(j.myParts.season, j.theirLineup);
+  const market = marketLabel(j.fairness);
   const summary = makeSummary(
-    `${names(give)} for ${names(get)}: your team ${fmtSigned(j.myDelta)}, their lineup ${fmtSigned(j.theirLineup)} pts/wk.`,
-    `${band.label}, ~${p100}% accept.`,
+    `${names(give)} for ${names(get)}: playoff lineup ${fmtSigned(j.strengthDelta)}/wk, your team ${fmtSigned(j.myDelta)}.`,
+    `${j.perceivedSource === "yahoo" ? "Yahoo shows" : "Yahoo likely shows"} them ${fmtSigned(j.theirPerceived)} pts, ~${p100}% accept.`,
   );
+  const nWeeks = Math.max(1, S.finalWeek - S.currentWeek + 1);
   const { items: details, add } = detailBuilder();
+  add("Playoff lineup", `${fmtSigned(j.strengthDelta)} pts/wk in weeks ${S.regularSeasonEnd + 1}–${S.finalWeek} (team strength)`, toneOf(j.strengthDelta));
   add("Your team score", `${fmtSigned(j.myDelta)} (${mode} mode)`, toneOf(j.myDelta));
   add("Now", `${fmtSigned(j.myParts.now)} pts this week`, toneOf(j.myParts.now));
   add("Season", `${fmtSigned(j.myParts.season)} pts/wk rest of season`, toneOf(j.myParts.season));
   add("Playoffs", `${fmtSigned(j.myParts.playoffs)} pts/wk in weeks ${S.regularSeasonEnd + 1}–${S.finalWeek}`, toneOf(j.myParts.playoffs));
   add("Depth", `${fmtSigned(j.myParts.depth)} (bench above replacement)`, toneOf(j.myParts.depth));
   for (const d of j.items31) add(d.label, d.value, d.tone);
+  for (const d of j.coverItems) add(d.label, d.value, d.tone);
+  add(j.perceivedSource === "yahoo" ? "What Yahoo shows" : "Yahoo view (estimate)", `you ${fmtSigned(j.myPerceived)}, them ${fmtSigned(j.theirPerceived)} pts rest of season`, toneOf(j.theirPerceived));
+  if (j.perceivedSource !== "yahoo") add("Their view from", "FantasyPros ROS rank + last 3 games: Yahoo projections not captured yet", "warn");
   add("Their weekly lineup", `${fmtSigned(j.theirLineup)} pts (our projections)`, toneOf(j.theirLineup));
+  for (const p of j.spikes) {
+    const pc = perceptionOf(p, S);
+    add("Just spiked", `${p.name}: ${pc.lastGamePts!.toFixed(1)} pts last game vs ${pc.rate.toFixed(1)} usual: × ${V3.spikeMult}`, "warn");
+  }
+  if (Math.abs(j.gapFavor) >= 0.5) add("Perception gap", `${fmtSigned(j.gapFavor)} pts/g ${j.gapFavor > 0 ? "in your favour" : "against you"} (our rate − their view)`, toneOf(j.gapFavor));
   add("Market: you give", j.marketGive.toFixed(1));
   add("Market: you get", j.marketGet.toFixed(1));
   if (them.drops?.length) add("They must cut", them.drops.map((p) => p.name).join(", "));
   if (me.drops?.length) add("You cut", me.drops.map((p) => p.name).join(", "));
-  add("Fairness to them", `${j.fairness.toFixed(2)}: ${band.label}`);
   add("True value (ours)", `give ${j.trueGive.toFixed(1)}, get ${j.trueGet.toFixed(1)} (${fmtSigned(j.myTrueChange)})`, toneOf(j.myTrueChange));
-  add("Acceptance", `${p100}% from their ${fmtSigned((j.fairness - 1) * 100)}% market edge`);
+  add("Acceptance", `${p100}%: their lineup ${fmtSigned(j.theirPerceived / nWeeks)}/wk (80%), market ${pctSigned((j.fairness - 1) * 100)} (20%)`);
+  if (j.perceivedLoss) add("Their view", `a loss for them: acceptance capped at ${pct(V3.perceivedLossCap)}`, "neg");
   if (give.length > get.length) add("Extra players", `× ${V3.extraPlayerMult} per extra player they must roster`);
-  if (j.losesTheirTop) add("Their best player", `× ${V3.loseTopMult}: you ask for their market #1`);
+  if (j.losesTheirTop) add("Their best player", `× ${V3.loseTopMult}: you ask for their most valued player`);
   if (j.fixesWorst) add("Fixes their weakest slot", `× ${V3.fixesWorstMult}`);
   for (const d of byeItems(S, j, meAfter.lineup)) add(d.label, d.value, d.tone);
   for (const d of qbItems(my, their, give, get) ?? []) add(d.label, d.value, d.tone);
   for (const d of injuredItems(give, get)) add(d.label, d.value, d.tone);
-  add("Rank score", `${j.score.toFixed(2)} = min(your gain, theirs + ${V3.margin}) × acceptance`);
+  add("Rank score", `${j.score.toFixed(2)} = (playoff gain + gap bonus) × acceptance`);
   return {
     key,
     me,
@@ -602,11 +752,22 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
     details,
     tags,
     mode,
-    band: band.band,
-    bandLabel: band.label,
-    fairnessPct: band.pct,
-    pitch: tradePitch(j, their),
+    lineupLabel: lineup,
+    marketLabel: market,
+    yahooView: yahoo,
+    pitch: tradePitch(S, j, their),
     packages: { marketGive: r1(j.marketGive), marketGet: r1(j.marketGet), trueGive: r1(j.trueGive), trueGet: r1(j.trueGet), myTrueChange: r1(j.myTrueChange), theirMarketChange: r1(j.theirMarketChange) },
+  };
+}
+
+/** "What Yahoo shows them: you +12.0, them −13.4 pts" (or the estimate wording when projections are not captured). */
+export function yahooViewOf(j: Pick<Judged3, "myPerceived" | "theirPerceived" | "perceivedSource">): NonNullable<Trade["yahooView"]> {
+  const nums = `you ${fmtSigned(j.myPerceived)}, them ${fmtSigned(j.theirPerceived)} pts`;
+  return {
+    you: j.myPerceived,
+    them: j.theirPerceived,
+    source: j.perceivedSource,
+    label: j.perceivedSource === "yahoo" ? `What Yahoo shows them: ${nums}` : `What Yahoo likely shows them: ${nums} (estimate)`,
   };
 }
 
@@ -635,7 +796,7 @@ function classify(j: Judged3): Cls | null {
     const headliner = Math.max(...j.give.map(marketOf), ...j.get.map(marketOf));
     return j.myDelta >= V3.clearDelta && headliner >= V3.minHeadliner && !j.overlap ? "clear" : "edge";
   }
-  if (j.myOk && !j.partnerOk && j.fairness >= 0.85 && j.theirLineup >= -2) return "refuse";
+  if (j.myOk && !j.partnerOk && j.fairness >= 0.85) return "refuse";
   if (!j.myOk && j.partnerOk && j.myDelta > 0 && j.myTrueChange >= -0.05 * (j.trueGive + j.trueGet)) return "marginal";
   return null;
 }
@@ -730,8 +891,8 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
       for (const [give, get] of packagesFor(my, their, { maxGive, maxGet, wantPos })) {
         const j = J(give, get);
         simulated++;
-        // Never sell a player whose role is rising, and never suggest a noise-level gain (owner, Model v4).
-        if (give.some((p) => p.riser) || j.myDelta < V3.minMyGain) continue;
+        // Never sell a player whose role is rising, and never suggest a noise-level playoff gain (owner, Model v4).
+        if (give.some((p) => p.riser) || j.strengthDelta < V3.minMyGain) continue;
         const cls = classify(j);
         if (cls) cands.push({ j, their, cls });
       }
@@ -760,12 +921,21 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
     const reason = makeSummary(reasonOf(c));
     return { ...t, reason, details: [{ label: "Why not on the list", value: c.cls === "marginal" ? "Marginal for you" : c.cls === "unlikely" ? "Unlikely to accept" : "They'd likely refuse" }, ...(t.details ?? [])], tags: [...t.tags, c.cls === "marginal" ? "marginal" : "they'd likely refuse"] };
   });
-  const { summary, details: summaryDetails } = summarize(my, ranked, trades, smallerEdges, valueSource, mode);
+  const coverage = yahooCoverage([my, ...others].flatMap((t) => t.roster));
+  const { summary, details: summaryDetails } = summarize(my, ranked, trades, smallerEdges, valueSource, mode, coverage);
   return { trades, smallerEdges, nearMisses, mode, valueSource, partners, summary, summaryDetails, simulated };
 }
 
 /** Finder headline: one short line (≤ 255) + the reasons as items (shown on tap). */
-function summarize(my: TeamV3, ranked: { their: TeamV3; c: number }[], trades: Trade[], edges: Trade[], source: ValueSource, mode: TradeMode): { summary: string; details: DetailItem[] } {
+function summarize(
+  my: TeamV3,
+  ranked: { their: TeamV3; c: number }[],
+  trades: Trade[],
+  edges: Trade[],
+  source: ValueSource,
+  mode: TradeMode,
+  coverage: { captured: number; total: number },
+): { summary: string; details: DetailItem[] } {
   const { items, add } = detailBuilder();
   const n = trades.length;
   const best = ranked.slice(0, 3).map((r) => r.their);
@@ -787,7 +957,14 @@ function summarize(my: TeamV3, ranked: { their: TeamV3; c: number }[], trades: T
     else add("Why none", `No fair package with ${ranked[0].their.team.name} raises both lineups`);
     add("Next step", "Check best-fit partners and near misses for a plausible ask");
   }
-  add("Perceived values", source === "fantasycalc" ? "FantasyCalc market values" : "Our model (market values unavailable, no edges)");
+  add(
+    "Their view",
+    coverage.captured
+      ? `Yahoo projections: ${coverage.captured} of ${coverage.total} rostered players captured`
+      : "Estimate (FantasyPros ROS rank + last 3 games): Yahoo projections not captured yet",
+    coverage.captured ? undefined : "warn",
+  );
+  add("Market values", source === "fantasycalc" ? "FantasyCalc (a minor part of acceptance)" : "Unavailable: our values used, no market edges");
   return { summary: makeSummary(summary), details: items };
 }
 
@@ -877,7 +1054,7 @@ export function injuredItems(give: ValuedPlayer[], get: ValuedPlayer[]): DetailI
     p.ret!.week !== null
       ? `${p.name}: ${returnText(p.ret!.week, p.ret!.confidence)}, valued from his return (${p.value.toFixed(1)})`
       : p.ret!.tradeValue
-        ? `${p.name}: return unconfirmed, valued ${p.ret!.tradeValue.toFixed(1)} on a return estimate (× 0.5)`
+        ? `${p.name}: return unconfirmed, a bet on his recovery (valued ${p.ret!.tradeValue.toFixed(1)}, ½ of healthy)`
         : `${p.name}: return unconfirmed, no healthy role on record: value 0`;
   for (const p of give) if (p.ret?.absent) out.push({ label: "Injured, you give", value: line(p), tone: "warn" });
   for (const p of get) if (p.ret?.absent) out.push({ label: "Injured, you get", value: line(p), tone: "warn" });

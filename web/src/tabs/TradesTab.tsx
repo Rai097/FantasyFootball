@@ -121,7 +121,7 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
           <>
             {data.valueSource === "model" && (
               <div className="notice warn one-line small">
-                Market values are unavailable: using our own values. <HelpTip text="FantasyCalc did not answer, so 'what the other manager thinks' uses our values: fairness and acceptance are rougher and 'market undervalues / overvalues' tags are not shown." />
+                Market values are unavailable: using our own values. <HelpTip text="FantasyCalc did not answer, so the market-value part of acceptance (20%) uses our values and 'market undervalues / overvalues' tags are not shown." />
               </div>
             )}
             <div className={`notice finder-summary${data.trades.length === 0 ? " warn" : ""}`}>
@@ -232,11 +232,11 @@ const BENCH_TIP =
   "1-for-1 swaps of a bench player (or your weakest starter) that add 0.8+ pts/week to your rest-of-season lineup; both players worth 3+, the one you get a real asset.";
 
 const RANKING = [
-  { label: "Your team", value: "+1.0 or more in the chosen mode" },
-  { label: "Their side", value: "Fair or better by market value" },
-  { label: "Their lineup", value: "Not worse after the trade" },
-  { label: "Acceptance", value: "40% or more" },
-  { label: "Order", value: "min(your gain, their gain + 2) × acceptance" },
+  { label: "Your playoff lineup", value: "+1.0 pts/week or more (weeks 15–17)" },
+  { label: "Their side", value: "Not a loss in what Yahoo shows them" },
+  { label: "Their view", value: "Yahoo projections + recent games (estimate until captured)" },
+  { label: "Acceptance", value: "40% or more: 80% their lineup view, 20% market value" },
+  { label: "Order", value: "(your playoff gain + perception-gap bonus) × acceptance" },
   { label: "Variety", value: "At most 2 per partner and 2 per player you give" },
 ];
 

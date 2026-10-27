@@ -471,8 +471,11 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
       }
       assert.equal(typeof t.pitch, "string");
       assert.ok(t.pitch.length > 20, t.key);
-      assert.ok(["fair", "slightly-favors-them", "favors-them", "slightly-favors-you", "favors-you"].includes(t.band), `${t.key}: band ${t.band}`);
-      assert.equal(typeof t.bandLabel, "string");
+      assert.doesNotMatch(t.pitch, /market/i, `${t.key}: pitch never argues market value`);
+      assert.match(t.lineupLabel, /^Lineup impact: /, t.key);
+      assert.match(t.marketLabel, /^Market value: they get /, t.key);
+      assert.ok(t.yahooView && t.yahooView.them >= 0 && /^What Yahoo (likely )?shows them: /.test(t.yahooView.label), `${t.key}: yahooView`);
+      assert.equal(t.band, undefined, `${t.key}: the market fairness band is replaced by the two labels`);
       perPartner.set(t.them.teamId, (perPartner.get(t.them.teamId) ?? 0) + 1);
     }
     for (const [id, n] of perPartner) assert.ok(n <= 2, `partner ${id}: ${n} trades`);

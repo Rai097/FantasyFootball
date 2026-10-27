@@ -3,14 +3,17 @@ import assert from "node:assert/strict";
 import {
   V3,
   acceptCurve,
-  acceptanceV3,
+  acceptanceV4,
+  lineupCurve,
+  lineupLabel,
+  marketLabel,
   benchUpgradeFilter,
   benchUpgradeOk,
+  coverLost,
   qbItems,
   bestQbRank,
   dropCost,
   evaluateTradeV3,
-  fairnessBand,
   findTradesV3,
   ineligibleReason,
   judge3,
@@ -48,31 +51,31 @@ test("drop cost: each cut player's value, at least 3", () => {
   assert.equal(dropCost([1, 5]), 8);
 });
 
-test("fairness bands: fair ±5%, slightly 5–12%, favors > 12%", () => {
-  assert.equal(fairnessBand(1).band, "fair");
-  assert.equal(fairnessBand(1.05).band, "fair");
-  assert.equal(fairnessBand(0.95).band, "fair");
-  assert.equal(fairnessBand(1.08).band, "slightly-favors-them");
-  assert.equal(fairnessBand(0.9).band, "slightly-favors-you");
-  assert.equal(fairnessBand(1.12).band, "slightly-favors-them");
-  assert.equal(fairnessBand(1.13).band, "favors-them");
-  assert.equal(fairnessBand(0.8).band, "favors-you");
-  assert.match(fairnessBand(1.08).label, /^Slightly favors them \(\+8% to them\)$/);
-  assert.equal(fairnessBand(1.08).pct, 8);
+test("labels split: lineup impact (our projections, per week) and market value (FantasyCalc) replace the fairness band", () => {
+  assert.equal(lineupLabel(0.3, -0.2), "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)");
+  assert.equal(lineupLabel(-1, 2), "Lineup impact: bad for you (−1.0/wk you, +2.0/wk them)");
+  assert.equal(lineupLabel(0.02, 0), "Lineup impact: neutral for you (+0.0/wk you, +0.0/wk them)");
+  assert.equal(marketLabel(1.16), "Market value: they get +16%");
+  assert.equal(marketLabel(0.92), "Market value: they get −8%");
 });
 
-test("acceptance curve: +5% → 0.65, −5% → 0.35, 0 → 0.5; multipliers and cap", () => {
+test("acceptance v4: their perceived lineup dominates (80%), market 20%; spike, extra players, best player, fixes, cap", () => {
   assert.ok(Math.abs(acceptCurve(5) - 0.65) < 1e-9);
-  assert.ok(Math.abs(acceptCurve(-5) - 0.35) < 1e-9);
-  assert.equal(acceptCurve(0), 0.5);
-  const none = { extraGiven: 0, losesTheirTop: false, fixesWorst: false };
-  assert.ok(Math.abs(acceptanceV3(5, { ...none, extraGiven: 1 }) - 0.65 * 0.85) < 1e-9);
-  assert.ok(Math.abs(acceptanceV3(5, { ...none, extraGiven: 2 }) - 0.65 * 0.85 * 0.85) < 1e-9);
-  assert.ok(Math.abs(acceptanceV3(5, { ...none, losesTheirTop: true }) - 0.65 * 0.8) < 1e-9);
-  assert.ok(Math.abs(acceptanceV3(0, { ...none, fixesWorst: true }) - 0.55) < 1e-9);
-  assert.equal(acceptanceV3(60, { ...none, fixesWorst: true }), V3.accCap);
-  // Negative "extra" (I receive more than I give) is not a bonus.
-  assert.equal(acceptanceV3(0, { ...none, extraGiven: -1 }), 0.5);
+  assert.ok(Math.abs(lineupCurve(1) - 0.7) < 1e-9);
+  assert.equal(lineupCurve(0), 0.5);
+  const none = { perceivedPerWeek: 0, perceivedLoss: false, marketEdgePct: 0, spikes: 0, extraGiven: 0, losesTheirTop: false, fixesWorst: false };
+  assert.equal(acceptanceV4(none), 0.5);
+  assert.ok(Math.abs(acceptanceV4({ ...none, perceivedPerWeek: 1 }) - (0.8 * 0.7 + 0.2 * 0.5)) < 1e-9);
+  // A big market edge cannot carry a deal their lineup does not like.
+  assert.ok(acceptanceV4({ ...none, perceivedPerWeek: -0.1, marketEdgePct: 40 }) < acceptanceV4({ ...none, perceivedPerWeek: 1, marketEdgePct: 0 }));
+  assert.ok(Math.abs(acceptanceV4({ ...none, spikes: 1 }) - 0.5 * 0.7) < 1e-9);
+  assert.ok(Math.abs(acceptanceV4({ ...none, extraGiven: 2 }) - 0.5 * 0.85 * 0.85) < 1e-9);
+  assert.ok(Math.abs(acceptanceV4({ ...none, losesTheirTop: true }) - 0.4) < 1e-9);
+  assert.ok(Math.abs(acceptanceV4({ ...none, fixesWorst: true }) - 0.55) < 1e-9);
+  assert.equal(acceptanceV4({ ...none, perceivedPerWeek: 10, marketEdgePct: 60, fixesWorst: true }), V3.accCap);
+  assert.equal(acceptanceV4({ ...none, extraGiven: -1 }), 0.5, "receiving more players is not a bonus");
+  // A perceived loss is never ≥ 0.25, whatever the market says.
+  for (const m of [0, 30, 100]) assert.ok(acceptanceV4({ ...none, perceivedPerWeek: -0.05, perceivedLoss: true, marketEdgePct: m, fixesWorst: true }) <= V3.perceivedLossCap);
 });
 
 // ---------------------------------------------------------------- eligibility
@@ -180,7 +183,10 @@ test("finder: no K/DEF/backup QBs/waiver-level pieces; pitch, band, summary, det
       if (p.pos === "QB") assert.equal(p.id, "mQB2", t.key);
     }
     assert.ok(t.pitch && t.pitch.length > 20, t.key);
-    assert.ok(t.band && t.bandLabel, t.key);
+    assert.match(t.lineupLabel!, /^Lineup impact: (good|bad|neutral) for you \(/, t.key);
+    assert.match(t.marketLabel!, /^Market value: they get [+−]\d+%$/, t.key);
+    assert.match(t.yahooView!.label, /^What Yahoo (likely )?shows them: you [+−]\d+\.\d, them [+−]\d+\.\d pts/, t.key);
+    assert.doesNotMatch(t.pitch!, /market/i, `${t.key}: pitch never argues market value`);
     assert.deepEqual(summaryProblems(t.summary), [], t.summary);
     assert.ok(t.details && t.details.length > 0, t.key);
     assert.deepEqual(detailProblems(t.details!), [], t.key);
@@ -198,7 +204,7 @@ test("finder: no K/DEF/backup QBs/waiver-level pieces; pitch, band, summary, det
     assert.ok((t.me.scoreDelta ?? 0) >= V3.clearDelta - 0.05, t.key);
     assert.ok(t.acceptance >= V3.minAcceptance, t.key);
     assert.ok((t.packages?.myTrueChange ?? 0) >= 0, t.key);
-    assert.ok((t.them.seasonDelta ?? 0) >= V3.partnerLineupFloor - 0.05, t.key);
+    assert.ok(t.yahooView!.them >= 0, `${t.key}: never a perceived loss for them on the main list`);
   }
   for (const t of r.nearMisses) assert.match(t.reason!, /^(They'd likely refuse|Partner unlikely|Marginal)/);
   // ≤ 2 per partner, ≤ 2 per player I give.
@@ -208,9 +214,9 @@ test("finder: no K/DEF/backup QBs/waiver-level pieces; pitch, band, summary, det
   for (const [id, n] of giveCount) assert.ok(n <= V3.perGive, id);
 });
 
-test("evaluate: v3 verdict, band and acceptance; flags pieces outside the rules", () => {
+test("evaluate: verdict, labels and acceptance; flags pieces outside the rules", () => {
   const ev = evaluateTradeV3(ctx, "me", "them", ["mRB3"], ["tWR3"]);
-  assert.ok(ev.band);
+  assert.ok(ev.lineupLabel && ev.marketLabel && ev.yahooView);
   assert.ok(ev.acceptance > 0 && ev.acceptance <= V3.accCap);
   assert.equal(typeof ev.verdict, "string");
   const k = evaluateTradeV3(ctx, "me", "them", ["mK"], ["tWR5"]);
@@ -379,7 +385,7 @@ test("release (c): an injured star with an unconfirmed return is worth his retur
   const c = ctxFor(league([team("me", mine), team("them", roster)]), [...mine, ...roster]);
   const ev = evaluateTradeV3(c, "me", "them", ["mRB3"], ["tIR"]);
   assert.ok(Math.abs(ev.packages!.trueGet - 30) < 1e-9, `true value of what I get = his trade value, got ${ev.packages!.trueGet}`);
-  assert.ok(ev.details!.some((d) => d.label === "Injured, you get" && /tIR: return unconfirmed, valued 30\.0 on a return estimate/.test(d.value)), JSON.stringify(ev.details));
+  assert.ok(ev.details!.some((d) => d.label === "Injured, you get" && /tIR: return unconfirmed, a bet on his recovery \(valued 30\.0/.test(d.value)), JSON.stringify(ev.details));
   const ev2 = evaluateTradeV3(c, "me", "them", ["mRB3"], ["tBK"]);
   assert.ok(ev2.details!.some((d) => d.label === "Injured, you get" && /back ~wk 10 \(medium\)/.test(d.value)));
   assert.deepEqual(detailProblems(ev.details!), []);
@@ -394,4 +400,88 @@ test("release (c): an injured star with an unconfirmed return is worth his retur
   assert.match(ev.pitch!, /tIR's return is unconfirmed, so this is a bet on his recovery/);
   assert.doesNotMatch(ev.pitch!, /by market|fair by/);
   assert.ok(!ev.tags.some((t) => /market (under|over)values: tIR/.test(t)), JSON.stringify(ev.tags));
+});
+
+// ---------------------------------------------------------------- v4: their view (release (d))
+
+/** A fresh context on copies of the fixture rosters (perceptions are cached per player object). */
+function freshCtx(edit: (p: ValuedPlayer) => void = () => {}) {
+  const m = mine.map((p) => ({ ...p }));
+  const t = theirs.map((p) => ({ ...p }));
+  [...m, ...t].forEach(edit);
+  const c = ctxFor(league([team("me", m), team("them", t)]), [...m, ...t]);
+  return { c, P: (id: string) => c.players.get(id)!, J: () => judge3(c, teamV3(c, "me"), teamV3(c, "them"), "balanced") };
+}
+
+test("v4: a deal our projections like for them but Yahoo shows as a loss → acceptance ≤ 0.25, a near miss, never the main list", () => {
+  // Captured Yahoo projections: they rate my RB3 at ~1.5/game and their WR3 at ~15/game.
+  const yahoo: Record<string, number> = { mRB3: 20, tWR3: 210 };
+  const f = freshCtx((p) => {
+    if (yahoo[p.id] !== undefined) p.yahooProj = yahoo[p.id];
+  });
+  const j = f.J()([f.P("mRB3")], [f.P("tWR3")]);
+  assert.equal(j.perceivedSource, "yahoo");
+  assert.ok(j.theirPerceived < 0, `perceived ${j.theirPerceived}`);
+  assert.equal(j.perceivedLoss, true);
+  assert.ok(j.acceptance <= V3.perceivedLossCap, `acceptance ${j.acceptance}`);
+  assert.equal(j.partnerOk, false);
+  assert.match(j.theirFail, /^Yahoo shows them −\d+\.\d pts rest of season$/);
+  const r = findTradesV3(f.c, "me", { valueSource: "model", limit: 50 });
+  for (const t of [...r.trades, ...r.smallerEdges]) {
+    assert.ok(t.yahooView!.them >= 0, `${t.key}: perceived loss on a main list`);
+    assert.ok(t.acceptance > V3.perceivedLossCap, t.key);
+  }
+  for (const t of r.nearMisses) if (t.yahooView!.them < 0) assert.ok(t.acceptance <= V3.perceivedLossCap, t.key);
+  const ev = evaluateTradeV3(f.c, "me", "them", ["mRB3"], ["tWR3"]);
+  assert.match(ev.yahooView!.label, /^What Yahoo shows them: you [+−]\d+\.\d, them −\d+\.\d pts$/);
+  assert.ok(ev.details!.some((d) => d.label === "What Yahoo shows"), "captured: no estimate wording");
+  // Not captured: the card says it is an estimate.
+  const est = evaluateTradeV3(ctx, "me", "them", ["mRB3"], ["tWR3"]);
+  assert.equal(est.yahooView!.source, "estimate");
+  assert.match(est.yahooView!.label, /\(estimate\)$/);
+  assert.ok(est.details!.some((d) => d.label === "Their view from" && /not captured yet/.test(d.value)));
+});
+
+test("v4: asking for a receiver right after his 2-TD game lowers acceptance (recency bias + spike) and is tagged", () => {
+  const base = freshCtx();
+  const calm = base.J()([base.P("mRB3")], [base.P("tWR3")]);
+  // Week 3 (current week 4): 8 catches, 150 yards, 2 TDs = 31 half-PPR points vs his 14/game.
+  const spiked = freshCtx((p) => {
+    if (p.id === "tWR3") p.weeks = [{ season: 2026, week: 3, team: p.team, actual: { passYd: 0, passTd: 0, passInt: 0, rushYd: 0, rushTd: 0, rec: 8, recYd: 150, recTd: 2, twoPt: 0, fumLost: 0 }, expected: { passYd: 0, passTd: 0, passInt: 0, rushYd: 0, rushTd: 0, rec: 0, recYd: 0, recTd: 0, twoPt: 0, fumLost: 0 } }];
+  });
+  const j = spiked.J()([spiked.P("mRB3")], [spiked.P("tWR3")]);
+  assert.deepEqual(j.spikes.map((p) => p.id), ["tWR3"]);
+  assert.ok(j.acceptance < calm.acceptance, `spike ${j.acceptance} vs calm ${calm.acceptance}`);
+  const t = evaluateTradeV3(spiked.c, "me", "them", ["mRB3"], ["tWR3"]);
+  assert.ok(t.tags.includes("just spiked: tWR3"), t.tags.join());
+  assert.ok(t.details!.some((d) => d.label === "Just spiked" && /^tWR3: 31\.0 pts last game/.test(d.value)), JSON.stringify(t.details));
+});
+
+test("v4: giving my best bench RB while a starting RB has a bye ahead, or my only QB backup, flags lost cover", () => {
+  const f = freshCtx((p) => {
+    if (p.id === "mRB1") p.bye = 9;
+    if (p.id === "tRB1") p.ppg = 12.5;
+  });
+  const my = teamV3(f.c, "me");
+  const items = coverLost(f.c.league.settings, my, [f.P("mRB4")], [f.P("tWR5")]);
+  assert.deepEqual(items.map((d) => d.label), ["Bye cover lost"]);
+  assert.match(items[0].value, /^mRB4 covers mRB1's week 9 bye/);
+  // Getting an RB back who covers the week as well (12.5 vs 12.0) keeps the cover.
+  assert.deepEqual(coverLost(f.c.league.settings, my, [f.P("mRB4")], [f.P("tRB1")]), []);
+  const qb = coverLost(f.c.league.settings, my, [f.P("mQB2")], [f.P("tWR5")]);
+  assert.deepEqual(qb.map((d) => [d.label, d.value]), [["Playoff cover lost", "mQB2 is your only QB backup"]]);
+  const t = evaluateTradeV3(f.c, "me", "them", ["mRB4"], ["tWR5"]);
+  assert.ok(t.tags.includes("loses bye cover"), t.tags.join());
+  assert.ok(t.details!.some((d) => d.label === "Bye cover lost"));
+});
+
+test("v4: pitches give reasons that matter to them — never a market-value claim — on every list and on evaluate", () => {
+  const r = findTradesV3(ctx, "me", { valueSource: "model", limit: 50 });
+  const all = [...r.trades, ...r.smallerEdges, ...r.nearMisses, evaluateTradeV3(ctx, "me", "them", ["mRB3"], ["tWR3"])];
+  assert.ok(all.length > 1);
+  for (const t of all) {
+    assert.doesNotMatch(t.pitch!, /market|by value|you win on value/i, t.pitch);
+    assert.match(t.pitch!, /^My .+ for your .+: .+\.$/, t.pitch);
+  }
+  assert.ok(r.summaryDetails!.some((d) => d.label === "Their view" && /not captured yet/.test(d.value)));
 });

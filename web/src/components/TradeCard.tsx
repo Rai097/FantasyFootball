@@ -18,10 +18,12 @@ function verdictClass(v: string): string {
 
 export const TRADE_TIPS = {
   team: "Your weighted roster score change for the chosen mode (this week, rest of season, playoffs, bench depth).",
-  accept: "Chance the other manager accepts: from their market-value edge (+5% → 65%), lower for extra players or their best player.",
+  accept: "Chance the other manager accepts, judged from his side: mostly what Yahoo's evaluator shows his lineup, lower if he gives a player right after a big game.",
   yourLineup: "Your weekly lineup points over the rest of the season, byes and injuries included.",
   theirLineup: "Their weekly lineup points over the rest of the season, by our projections.",
-  band: "Fairness by market value from their side: fair within ±5%, slightly 5–12%, favors beyond 12%.",
+  lineup: "Lineup change per week over the rest of the season by our projections (usage, matchups, injuries), for you and for them.",
+  marketValue: "FantasyCalc trade-market value they get vs give. It matters only a little: managers judge by Yahoo's lineup numbers.",
+  yahoo: "Rest-of-season lineup change Yahoo's trade evaluator would show (Yahoo projections). 'Estimate' = not captured yet: FantasyPros rank + last 3 games.",
   market: "Market value (FantasyCalc, from real trades; #1 = 100): what the other manager thinks he is worth.",
   ours: "Our 0–100 rest-of-season value from projected points above replacement and games left.",
 };
@@ -53,23 +55,34 @@ export function TradeCard({ trade, partnerName, verdict, defaultOpen = false }: 
       <div className="one-line">{trade.summary}</div>
       {trade.reason && <div className="notice warn small one-line">{trade.reason}</div>}
       <div className="trade-cols">
-        <Side title="You give" players={me.gives} total={me.valueGiven} drops={me.drops} market={!!trade.band} />
-        <Side title="You get" players={them.gives} total={them.valueGiven} market={!!trade.band} />
+        <Side title="You give" players={me.gives} total={me.valueGiven} drops={me.drops} market={!!trade.marketLabel} />
+        <Side title="You get" players={them.gives} total={them.valueGiven} market={!!trade.marketLabel} />
       </div>
       {trade.pitch && <Pitch text={trade.pitch} />}
       <div className="trade-metrics">
         <Metric label="Your lineup" value={me.seasonDelta ?? me.lineupDelta} unit=" /wk" tip={TRADE_TIPS.yourLineup} />
         <Metric label="Their lineup" value={them.seasonDelta ?? them.lineupDelta} unit=" /wk" tip={TRADE_TIPS.theirLineup} />
         <Metric label="Your team" value={me.scoreDelta ?? me.lineupDelta} unit="" tip={TRADE_TIPS.team} />
-        {trade.bandLabel && (
-          <div className="metric">
-            <span className="metric-label">
-              <ColumnHelp tip={TRADE_TIPS.band}>Fairness</ColumnHelp>
-            </span>
-            <span className={`band band-${trade.band}`}>{trade.bandLabel}</span>
-          </div>
-        )}
       </div>
+      {(trade.yahooView || trade.lineupLabel || trade.marketLabel) && (
+        <ul className="trade-labels">
+          {trade.yahooView && (
+            <li className={trade.yahooView.them < 0 ? "neg" : undefined}>
+              {trade.yahooView.label} <HelpTip text={TRADE_TIPS.yahoo} />
+            </li>
+          )}
+          {trade.lineupLabel && (
+            <li>
+              {trade.lineupLabel} <HelpTip text={TRADE_TIPS.lineup} />
+            </li>
+          )}
+          {trade.marketLabel && (
+            <li className="muted">
+              {trade.marketLabel} <HelpTip text={TRADE_TIPS.marketValue} />
+            </li>
+          )}
+        </ul>
+      )}
       <div className="trade-cols">
         <Changes title="Your lineup" lines={me.lineupChanges} />
         <Changes title={`${partnerName}'s lineup`} lines={them.lineupChanges} />
