@@ -30,8 +30,11 @@ MODEL v4 (DESIGN "Model v4"): (a) signals, (b) projection v4 / labels / power sc
    him back at full rate from wk +4 + ½ × lineup without him (top 2 per roster exact, more at expected points), in team
    strength, roster score and the partner's view (DESIGN "Fix round 2 — the scenario mix"). Real import: the owner's
    example +2.8 → +2.0/wk; 18 suggestions, 11 where I give an unconfirmed piece (set changed); trades2 0.78 s.
-   Pending: owner drags "Trade Desk import v4" and re-imports once Yahoo shows week 8; then check the per-team
-   `projections` diagnostics (Fan Pts body-cell alignment, K/DEF tables). Next release: (e) playoff odds + Best moves.
+   Import v5 (1208bba, live): Yahoo's data-tooltip attributes held raw <table>/<tr> markup that cut v4's table scans
+   short (122/189 ROS). VERIFIED 2026-10-27 on the owner's v5 import: projWeek 8, rest-of-season 188/188 on all 12
+   teams, weekly 148/188 (the 40 missing = week-8 byes NO/HOU/SF/NYG + single injured players; Yahoo shows "–").
+   Open owner question: power score = 0.7 projected + 0.3 actual points/game (W-L only a last tiebreak); owner said
+   record "shouldn't" count — offered to drop the 0.3 results part, awaiting the call. Next release: (e) playoff odds + Best moves.
 NEXT (backlog, highest value first):
 - DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
