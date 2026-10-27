@@ -18,6 +18,8 @@ export function marketQuery(S: LeagueSettings): { numQbs: 1 | 2; numTeams: numbe
  * trueMarket maps our value onto the market's scale by rank (quantile mapping), so edges compare
  * like with like. A player the market list omits but we rank inside it gets market = trueMarket
  * (marketEstimated, edge 0) instead of a spurious 0. With `values` null the fields are cleared.
+ * No edge for an absent player whose return is unconfirmed: his trade value is a placeholder (healthy rate × 0.5 from
+ * current week + 4), not a market opinion, so "market undervalues / overvalues" would be noise.
  */
 export function attachMarket(players: Map<string, ValuedPlayer>, values: Map<string, MarketValue> | null): void {
   const skill = [...players.values()].filter((p) => p.pos !== "K" && p.pos !== "DEF");
@@ -46,9 +48,12 @@ export function attachMarket(players: Map<string, ValuedPlayer>, values: Map<str
       p.market = p.trueMarket;
       p.marketEstimated = true;
     } else p.market = 0;
-    p.edge = r1(p.trueMarket - p.market);
+    if (!returnUnconfirmed(p)) p.edge = r1(p.trueMarket - p.market);
   });
 }
+
+/** Absent with no return week: his value is a placeholder, so no market edge, tag or value pitch on him. */
+export const returnUnconfirmed = (p: ValuedPlayer): boolean => !!p.ret?.absent && p.ret.week === null;
 
 /**
  * Our value for trades: the projection value, or — for an absent player whose return is unconfirmed (value 0 because

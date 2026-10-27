@@ -6,7 +6,7 @@ import { applyTrade, combos, fmtSigned, lineupChanges, names, teamState, tradeDe
 import { irSet } from "./analysis.js";
 import { MODE_WEIGHTS, activeRoster, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
 import { injuryKind } from "./projection.js";
-import { edgeOf, marketOf, trueOf, type ValueSource } from "./market.js";
+import { edgeOf, marketOf, returnUnconfirmed, trueOf, type ValueSource } from "./market.js";
 import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
 import { marketTag } from "./labels.js";
@@ -524,6 +524,9 @@ function tradePitch(j: Judged3, their: TeamV3): string {
   const theirs = r1(j.theirLineup);
   const mine = r1(j.myParts.season);
   const gains = theirs > 0 ? `you gain ${fmtSigned(theirs)} pts/week in your lineup, I gain ${fmtSigned(mine)}` : `your lineup holds steady and I gain ${fmtSigned(mine)} pts/week`;
+  // A player whose return is unconfirmed has a placeholder value: no value claim, say what the bet is.
+  const unsure = [...j.give, ...j.get].filter(returnUnconfirmed);
+  if (unsure.length) return `${Deal} — ${names(unsure)}${unsure.length > 1 ? " have unconfirmed returns, so this is a bet on their recovery" : "'s return is unconfirmed, so this is a bet on his recovery"}; ${gains}.`;
   if (w && j.fixesWorst) return `Your ${w.slot} slot is your weakest; ${deal} — ${gains}.`;
   if (j.fairness >= 1 + V3.fairBand) return `${Deal} — you win on value (+${Math.round((j.fairness - 1) * 100)}% by market) and ${gains}.`;
   return `${Deal} — fair by market value; ${gains}.`;

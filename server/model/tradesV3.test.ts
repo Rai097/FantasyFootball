@@ -388,4 +388,10 @@ test("release (c): an injured star with an unconfirmed return is worth his retur
   const mv = (value: number, rank: number) => ({ value, raw: value, overallRank: rank, posRank: rank, trend30: 0 }) as MarketValue;
   attachMarket(new Map(ps.map((p) => [p.id, p])), new Map([["a", mv(90, 1)], ["tIR", mv(40, 2)], ["c", mv(8, 3)]]));
   assert.ok(star.trueMarket! > 0, `trueMarket ${star.trueMarket}`);
+  // His value is a placeholder, not a market opinion: no edge (Values shows "—", no market tag) and no value pitch.
+  assert.equal(star.edge, undefined);
+  assert.notEqual(ps[2].edge, undefined, "a healthy player keeps his edge");
+  assert.match(ev.pitch!, /tIR's return is unconfirmed, so this is a bet on his recovery/);
+  assert.doesNotMatch(ev.pitch!, /by market|fair by/);
+  assert.ok(!ev.tags.some((t) => /market (under|over)values: tIR/.test(t)), JSON.stringify(ev.tags));
 });

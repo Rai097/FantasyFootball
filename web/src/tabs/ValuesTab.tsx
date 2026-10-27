@@ -14,7 +14,7 @@ const COLS: { key: SortKey; label: string; num: boolean; tip?: string; hideSm?: 
   { key: "value", label: "Value", num: true, tip: "Our 0–100 trade value: projected weekly points above replacement, playoff weeks weighted most when you hold a playoff spot." },
   { key: "market", label: "Market", num: true, market: true, tip: "What managers trade him for: FantasyCalc value from real trades (#1 = 100); * = not in their list, our estimate." },
   { key: "marketRank", label: "Mkt rk", num: true, market: true, hideSm: true, tip: "His overall rank in the FantasyCalc market list (— = not listed)." },
-  { key: "edge", label: "Edge", num: true, market: true, hideSm: true, tip: "Our value on the market's scale minus his market value: + the market undervalues him, − overvalues him, — when the market has no real value for him." },
+  { key: "edge", label: "Edge", num: true, market: true, hideSm: true, tip: "Our value on the market's scale minus his market value: + the market undervalues him, − overvalues him, — when the market has no real value for him or his return is unconfirmed (his trade value is a placeholder then)." },
   { key: "ppg", label: "PPG", num: true, tip: "Projected points per game when he plays, your scoring: his recent usage and finishing, the experts as a check, and his matchups." },
   { key: "luck", label: "Luck", num: true, tip: "Expected minus actual points per game by his usage, recent games weigh most: + = due for more (buy-low at +2), − = above his usage (sell-high at −2 when TDs drive it)." },
   { key: "ppg26", label: "2026", num: true, hideSm: true, tip: "Actual points per game this season in your scoring (— = no games yet)." },
