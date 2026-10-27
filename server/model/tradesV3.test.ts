@@ -654,3 +654,12 @@ test("injured pieces: row summary with markers stays ≤ 255 chars on a 3-for-1 
   assert.match(ev.summary!, /Christopherson Longfellow-Whitaker Jr\. \(injured, back ~wk 6\)/);
   assert.deepEqual(summaryProblems(ev.summary!), [], ev.summary);
 });
+
+test("search covers every partner (no early stop after the top 8 by complementarity)", () => {
+  const partners = Array.from({ length: 10 }, (_, k) => theirs.map((p) => ({ ...p, id: `${p.id}_${k}`, name: `${p.name}_${k}` })));
+  const c = ctxFor(league([team("me", mine), ...partners.map((ps, k) => team(`p${k}`, ps))]), [...mine, ...partners.flat()]);
+  const one = findTradesV3(c, "me", { valueSource: "model", partnerId: "p9" });
+  const all = findTradesV3(c, "me", { valueSource: "model" });
+  assert.ok(one.trades.length > 0, "identical partners each offer clear trades");
+  assert.equal(all.simulated, 10 * one.simulated, "all 10 partners judged");
+});

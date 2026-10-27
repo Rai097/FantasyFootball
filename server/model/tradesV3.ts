@@ -35,9 +35,6 @@ export const V3 = {
   /** Need model. */
   minMyDelta: 0.5,
   minMyTrueGain: 0.03,
-  /** Partner targeting. */
-  topPartners: 8,
-  minTrades: 6,
   /** v4 acceptance, dominant term: logistic in their perceived lineup change per week, +1 pt/wk → 0.70. */
   accLineupK: Math.log(0.7 / 0.3),
   /** Market term: logistic(k · market edge %), +5% → 0.65, weighted 20% (FantasyCalc matters only a little). */
@@ -938,10 +935,9 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
       }
     }
   };
-  const first = opts.partnerId ? ranked : ranked.slice(0, V3.topPartners);
-  search(first);
-  const clearCount = () => new Set(cands.filter((c) => c.cls === "clear").map((c) => c.their.team.id + c.j.give.map((p) => p.id).join())).size;
-  if (!opts.partnerId && clearCount() < V3.minTrades) search(ranked.slice(V3.topPartners));
+  // Every partner is searched: the old early stop (top 8 by complementarity, the rest only while < 6 clear deals) hid a
+  // real league's best trade (a 10th-ranked partner) once injured pieces filled the first eight (owner 2026-10-26).
+  search(ranked);
 
   const byScore = (a: Cand, b: Cand) => b.j.score - a.j.score || b.j.edgeSum - a.j.edgeSum || b.j.acceptance - a.j.acceptance;
   const limit = opts.limit ?? V3.limit;
