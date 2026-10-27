@@ -1136,3 +1136,16 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
 * Known gaps: the later roster crunch when an IR-slot player returns (someone must be cut) is not modelled; our rate
   for the perception gap (`ourRate`) still excludes an unconfirmed return's expected weeks. Yahoo's IR-slot
   eligibility list is not verified (docs not checked); the set above is the conservative one.
+
+## Fix: one playoff engine + small-sample prior (2026-10-27)
+
+* **One playoff engine**: a trade card showed "playoff lineup +3.1/wk" (team strength) next to "Playoffs +0.5/wk"
+  (roster score) for the same trade. Cause: `rosterParts` multiplied every column by the v3.1 floor factor
+  (0.8 × ppg + 0.2 × floor), `teamStrength` scores plain expected points (on the owner's roster 129.3 vs 136.2 pts/wk;
+  without the factor 136.23 = 136.2). Now the floor factor applies only to the "now" column (this week's lineup and
+  bench depth); the weekly columns (season, playoffs, return scenarios) are projection v4 weekly points, so
+  `parts.playoffs` = `teamStrength(...).lineup` on the same active roster (tested on every demo team, ≤ 0.05).
+  Season and the finder's mode scores follow (volatile players are no longer discounted there).
+* **Trade card labels**: summary, "Lineup impact" label and the "Playoff lineup" bullet all show the lineup delta
+  (`myParts.playoffs`); the team-strength total the finder ranks and gates on (`strengthDelta` ≥ `V3.minMyGain`) is
+  its own bullet "Playoff strength: +x pts/wk (lineup + 0.25 × bench cover)"; the duplicate "Playoffs" bullet is gone.

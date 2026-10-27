@@ -76,8 +76,11 @@ describe("Trades v4 on demo/42", { timeout: 600_000 }, () => {
       for (const t of l.near)
         if (t.tags.includes("marginal")) {
           marginal++;
-          const playoff = Number(t.summary.match(/playoff lineup ([+−]\d+\.\d)\/wk/)?.[1].replace("−", "-"));
-          assert.ok(playoff > 0, `team ${team}: ${t.key} marginal with playoff lineup ${playoff}`);
+          // The gate is the team-strength total (one playoff engine fix: its own "Playoff strength" bullet; the summary
+          // leads with the lineup part, which bench cover alone can leave at +0.0).
+          const row = t.details?.find((d) => d.label === "Playoff strength");
+          const playoff = Number(row?.value.match(/^([+−]\d+\.\d)/)?.[1].replace("−", "-"));
+          assert.ok(playoff > 0, `team ${team}: ${t.key} marginal with playoff strength ${playoff}`);
         }
     assert.ok(marginal > 0, "some marginal near misses on demo/42");
   });

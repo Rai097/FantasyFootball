@@ -232,11 +232,11 @@ const BENCH_TIP =
   "1-for-1 swaps of a bench player (or your weakest starter) that add 0.8+ pts/week to your rest-of-season lineup; both players worth 3+, the one you get a real asset.";
 
 const RANKING = [
-  { label: "Your playoff lineup", value: "+1.0 pts/week or more (weeks 15–17)" },
+  { label: "Your playoff strength", value: "+1.0 pts/week or more (weeks 15–17 lineup + 0.25 × bench cover)" },
   { label: "Their side", value: "Not a loss in what Yahoo shows them" },
   { label: "Their view", value: "Yahoo projections + recent games (estimate until captured)" },
   { label: "Acceptance", value: "40% or more: 80% their lineup view, 20% market value" },
-  { label: "Order", value: "(your playoff gain + perception-gap bonus) × acceptance" },
+  { label: "Order", value: "(your playoff strength gain + perception-gap bonus) × acceptance" },
   { label: "Variety", value: "At most 2 per partner and 2 per player you give" },
 ];
 

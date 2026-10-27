@@ -14,7 +14,7 @@ import { detailBuilder, makeSummary, toneOf } from "./details.js";
 import { marketTag } from "./labels.js";
 import { RETURNS, returnText } from "./returns.js";
 import { isSpike, perceivedLineupTotal, perceptionOf, yahooCoverage } from "./perception.js";
-import { teamStrength } from "./teamStrength.js";
+import { DEPTH_WEIGHT, teamStrength } from "./teamStrength.js";
 import { expectedWeeklyPoints } from "./rosterScore.js";
 
 /** Config for Trade Finder v3 (architect's design after user feedback on v2). */
@@ -103,7 +103,7 @@ export function marketLabel(ratio: number): string {
 
 /**
  * "Lineup impact: good for you (playoffs +1.3/wk, season +0.0/wk; them −0.3/wk season)" — our projections. The verdict
- * follows my playoff-lineup change (team strength: what the finder ranks on and the row summary leads with).
+ * follows my playoff-lineup change (the row summary leads with it; the finder ranks on playoff strength).
  */
 export function lineupLabel(playoffs: number, season: number, theirs: number): string {
   const verdict = playoffs > 0.05 ? "good for you" : playoffs < -0.05 ? "bad for you" : "neutral for you";
@@ -734,19 +734,22 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   if (j.coverItems.length) tags.push("loses bye cover");
   for (const p of j.spikes) tags.push(`just spiked: ${p.name}`);
   const yahoo = yahooViewOf(j);
-  const lineup = lineupLabel(j.strengthDelta, j.myParts.season, j.theirLineup);
+  // One playoff engine (fix 2026-10-27): the playoff lineup is rosterParts' playoffs part (= teamStrength's lineup on the
+  // same roster); strengthDelta is the team-strength total (lineup + DEPTH_WEIGHT × bench cover) the finder ranks on.
+  const poLineup = r1(j.myParts.playoffs);
+  const lineup = lineupLabel(poLineup, j.myParts.season, j.theirLineup);
   const market = marketLabel(j.fairness);
   const summary = makeSummary(
-    `${markedNames(give)} for ${markedNames(get)}: playoff lineup ${fmtSigned(j.strengthDelta)}/wk, your team ${fmtSigned(j.myDelta)}.`,
+    `${markedNames(give)} for ${markedNames(get)}: playoff lineup ${fmtSigned(poLineup)}/wk, your team ${fmtSigned(j.myDelta)}.`,
     `${j.perceivedSource === "yahoo" ? "Yahoo shows" : "Yahoo likely shows"} them ${fmtSigned(j.theirPerceived)} pts, ~${p100}% accept.`,
   );
   const nWeeks = Math.max(1, S.finalWeek - S.currentWeek + 1);
   const { items: details, add } = detailBuilder();
-  add("Playoff lineup", `${fmtSigned(j.strengthDelta)} pts/wk in weeks ${S.regularSeasonEnd + 1}–${S.finalWeek} (team strength)`, toneOf(j.strengthDelta));
+  add("Playoff lineup", `${fmtSigned(poLineup)} pts/wk in weeks ${S.regularSeasonEnd + 1}–${S.finalWeek}`, toneOf(poLineup));
+  add("Playoff strength", `${fmtSigned(j.strengthDelta)} pts/wk (lineup + ${DEPTH_WEIGHT} × bench cover)`, toneOf(j.strengthDelta));
   add("Your team score", `${fmtSigned(j.myDelta)} (${mode} mode)`, toneOf(j.myDelta));
   add("Now", `${fmtSigned(j.myParts.now)} pts this week`, toneOf(j.myParts.now));
   add("Season", `${fmtSigned(j.myParts.season)} pts/wk rest of season`, toneOf(j.myParts.season));
-  add("Playoffs", `${fmtSigned(j.myParts.playoffs)} pts/wk in weeks ${S.regularSeasonEnd + 1}–${S.finalWeek}`, toneOf(j.myParts.playoffs));
   add("Depth", `${fmtSigned(j.myParts.depth)} (bench above replacement)`, toneOf(j.myParts.depth));
   for (const d of j.items31) add(d.label, d.value, d.tone);
   for (const d of j.coverItems) add(d.label, d.value, d.tone);
@@ -771,7 +774,7 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   for (const d of byeItems(S, j, meAfter.lineup)) add(d.label, d.value, d.tone);
   for (const d of qbItems(my, their, give, get) ?? []) add(d.label, d.value, d.tone);
   for (const d of injuredItems(give, get)) add(d.label, d.value, d.tone);
-  add("Rank score", `${j.score.toFixed(2)} = (playoff gain + gap bonus) × acceptance`);
+  add("Rank score", `${j.score.toFixed(2)} = (playoff strength + gap bonus) × acceptance`);
   return {
     key,
     me,

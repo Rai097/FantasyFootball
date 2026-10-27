@@ -288,7 +288,7 @@ function irregular(p: ValuedPlayer, pts: Float64Array): number {
 }
 
 /** Per-player row [effPpg, healthy ppg, ...weekly points], position bit and irregular-week mask. */
-/** back = return-scenario weekly points × floor factor (unconfirmed returns only), backMask = weeks it differs. */
+/** back = return-scenario weekly points (unconfirmed returns only), backMask = weeks it differs. */
 interface Rec { row: Float64Array; bit: number; irr: number; back?: Float64Array; backT: number; backMask: number }
 const recCache = new WeakMap<LeagueSettings, WeakMap<ValuedPlayer, Rec>>();
 
@@ -328,13 +328,14 @@ export function rosterParts(S: LeagueSettings, roster: ValuedPlayer[], replaceme
       row[0] = effPpg(p);
       row[1] = usable(p) ? p.ppg : 0;
       row.set(pts, 2);
-      // v3.1: lineup contribution = 0.8·ppg + 0.2·floor when the weekly floor is known.
-      const ff = floorFactor(p);
-      if (ff !== 1) for (let c = 0; c < stride; c++) row[c] *= ff;
+      // v3.1: the "now" contribution (column 0, also bench depth) = 0.8·ppg + 0.2·floor when the weekly floor is known.
+      // Weekly columns stay expected points: season / playoffs are the same lineups team strength scores (one playoff
+      // engine, fix 2026-10-27: parts.playoffs = teamStrength(...).lineup on the same active roster).
+      row[0] *= floorFactor(p);
       rec = { row, bit: POS_BIT[p.pos] ?? 0, irr: irregular(p, pts), backT: 0, backMask: 0 };
       const back = returnBackPoints(p, S);
       if (back) {
-        rec.back = back.map((v) => v * ff);
+        rec.back = back;
         rec.backT = backTotal(back);
         for (let i = 0; i < back.length; i++) if (rec.back[i] > row[i + 2]) rec.backMask |= i < 31 ? 1 << i : 0;
       }
