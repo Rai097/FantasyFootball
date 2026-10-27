@@ -44,7 +44,8 @@ describe("one playoff engine on demo/42", { timeout: 300_000 }, () => {
       const po = rosterParts(S, activeRoster(me.roster, me.irIds), ctx.replacement).parts.playoffs;
       const ts = teamStrength(S, me.roster, me.irIds);
       if (!ts.weeks.length) continue;
-      assert.ok(Math.abs(po - ts.lineup) <= 0.05, `${t.name}: roster score playoffs ${po.toFixed(2)} vs team strength lineup ${ts.lineup}`);
+      // ts.lineup is rounded to 0.1: 0.05 is the exact bound (+ float epsilon).
+      assert.ok(Math.abs(po - ts.lineup) <= 0.05 + 1e-9, `${t.name}: roster score playoffs ${po.toFixed(2)} vs team strength lineup ${ts.lineup}`);
     }
     assert.ok(floored > 0, "fixture: some players carry a floor factor ≠ 1 (the old cause of the gap)");
   });
