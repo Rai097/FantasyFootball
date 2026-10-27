@@ -397,6 +397,39 @@ test("small samples lean on last season more: prior weight = max(priorK, priorKS
   assert.ok(Math.abs(num("full", "Our model") - (7 * 10 + V4.priorK * priorRate) / (7 + V4.priorK)) <= 0.06, "7-game model unchanged");
 });
 
+test("role change exempts the small-sample prior boost: a backup-turned-starter keeps his current-role rate (fix 2026-10-27)", () => {
+  // Last season a 16-game backup at 4 pts/game; this season 4 games as the starter at 16 pts/game (no TDs: the TD
+  // regression stays out of the arithmetic).
+  const prior = { games: 16, line: line({ rec: 2 * 16, recYd: 20 * 16 }) };
+  const opp = { targets: 8, carries: 0, airYards: 80 };
+  const riser = rawPlayer("riser", "WR", { weeks: games(4, { rec: 6, recYd: 100 }, { rec: 6, recYd: 100 }, opp), prior });
+  // Usage fell or held (an injury-shortened season): 3 games at 17 pts/game after an 18-ppg 2025 — still boosted.
+  const held = rawPlayer("held", "WR", { weeks: games(3, { rec: 7, recYd: 100 }, { rec: 7, recYd: 100 }, opp), prior: { games: 16, line: line({ rec: 6 * 16, recYd: 120 * 16 }) } });
+  // One fill-in start is not a new role: 1 game at 16 after the 4-ppg season keeps the boost (8 − 1 = 7 games).
+  const fill = rawPlayer("fill", "WR", { weeks: games(1, { rec: 6, recYd: 100 }, { rec: 6, recYd: 100 }, opp), prior });
+  // Rookie: no prior, nothing to exempt.
+  const rook = rawPlayer("rook", "WR", { weeks: games(4, { rec: 6, recYd: 100 }, { rec: 6, recYd: 100 }, opp) });
+  const val = valuePlayers(L({ scoring: PPR }), [...POOL, riser, held, fill, rook]);
+  const why = (id: string, label: string) => val.players.get(id)!.whyItems!.find((d) => d.label === label)?.value;
+  const model = (id: string) => Number(why(id, "Our model")!.match(/^[\d.]+/)![0]);
+  const priorRate = Number(why("riser", "2025")!.match(/^[\d.]+/)![0]);
+  assert.equal(priorRate, 4);
+  // Riser: priorK = 2 pseudo-games, not max(2, 8 − 4) = 4.
+  assert.match(why("riser", "2025")!, /counts as 2 games \(role grew: 16\.0 vs 4\.0 expected\/g\)/);
+  const k2 = (4 * 16 + V4.priorK * 4) / (4 + V4.priorK);
+  const boosted = (4 * 16 + 4 * 4) / 8;
+  assert.ok(Math.abs(model("riser") - k2) <= 0.5, `riser model ${model("riser")} vs priorK=2 result ${k2}`);
+  assert.ok(model("riser") - boosted >= 1, `not pulled to the backup role: ${boosted} → ${model("riser")}`);
+  // Held steady with a tiny sample: the boost applies (8 − 3 = 5 games) and he moves toward the 18-ppg prior.
+  assert.match(why("held", "2025")!, /^18\.0 pts\/game, counts as 5 games$/);
+  assert.ok(model("held") - (3 * 17 + V4.priorK * 18) / (3 + V4.priorK) >= 0.2, `held ${model("held")} leans on the prior`);
+  // Fill-in: boost kept.
+  assert.match(why("fill", "2025")!, /^4\.0 pts\/game, counts as 7 games$/);
+  // Rookie: no 2025 line, his model rate is his usage.
+  assert.equal(why("rook", "2025"), undefined);
+  assert.equal(model("rook"), 16);
+});
+
 test("expected touchdowns regress toward last season's TD rate (V4.tdK pseudo-games); the non-TD part is unchanged", () => {
   // 7 games of 60 rush yards + 1.2 expected (and actual) rushing TDs = 13.2 PPR pts/game.
   const wks = games(7, { rushYd: 60, rushTd: 1.2 }, { rushYd: 60, rushTd: 1.2 }, { targets: 0, carries: 15, airYards: 0 });

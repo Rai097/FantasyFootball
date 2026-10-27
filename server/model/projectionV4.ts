@@ -49,8 +49,19 @@ export interface ProjectionTables {
   leagueAllowed: Partial<Record<SkillPos, number>>;
 }
 
-/** Pseudo-games last season's rate counts as next to `sampleGames` of this season (small samples lean on it more). */
-export const priorWeight = (sampleGames: number): number => Math.max(V4.priorK, V4.priorKSmall - sampleGames);
+/**
+ * Pseudo-games last season's rate counts as next to `sampleGames` of this season: small samples lean on it more, unless
+ * his role grew (`roleUp`: last season came from a smaller role, so it keeps only the base weight V4.priorK).
+ */
+export const priorWeight = (sampleGames: number, roleUp = false): number => (roleUp ? V4.priorK : Math.max(V4.priorK, V4.priorKSmall - sampleGames));
+
+/**
+ * Role change (fix 2026-10-27): this season's recency-weighted expected points/game (TD part regressed) ≥
+ * V4.roleUpRatio × last season's,
+ * on ≥ V4.roleUpMinGames unflagged games (one fill-in start is not a new role).
+ */
+export const isRoleUp = (expPpg: number, priorExpPpg: number, unflagged: number): boolean =>
+  unflagged >= V4.roleUpMinGames && expPpg >= V4.roleUpRatio * priorExpPpg;
 
 export const emptyTables = (): ProjectionTables => ({ signals: new Map(), schedule: new Map(), allowed: new Map(), leagueAllowed: {} });
 
@@ -65,6 +76,9 @@ export const V4 = {
   priorK: 2,
   /** Small samples lean on last season more: prior weight = max(priorK, priorKSmall − sample games) (≥ 6 games: priorK). */
   priorKSmall: 8,
+  /** Role grew: this season's expected pts/game ≥ this × last season's (≥ roleUpMinGames unflagged games) → priorK only. */
+  roleUpRatio: 1.5,
+  roleUpMinGames: 2,
   /** Expected TDs per opportunity regress toward a baseline with this many games × his opportunity rate (last season's
    *  actual TDs per opportunity when he played ≥ priorMinGames, else the position's mean actual rate this season). */
   tdK: 8,
@@ -204,6 +218,8 @@ interface Base {
   priorRate: number | null;
   /** Pseudo-games last season's rate counts as (priorWeight). */
   priorW: number;
+  /** His role grew since last season (isRoleUp): the prior keeps the base weight only. */
+  roleUp: boolean;
   /** Expected-TD regression (null = not applied: no expected TD data, actual-points fallback, K / DEF). */
   td: TdShrink | null;
   games: number;
@@ -300,7 +316,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       ppg25: hasPrior ? score(scoring, p.prior!.line, p.pos) / p.prior!.games : 0,
       trend: weeks.length >= 3 ? mean(exp.slice(-2)) - mean(exp) : 0,
     };
-    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorW: 0, td: null };
+    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorW: 0, roleUp: false, td: null };
     const sig = sigOf(p);
     // Missing expected data (ffopportunity has no usage for him while he scores): rate on recency-weighted actual
     // points, with the usual prior / ECR shrinkage, instead of ~0 usage.
@@ -314,8 +330,6 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const t = sig?.talent;
     const priorRate =
       t && t.priorGames >= V4.priorMinGames && t.priorExpPpg !== null && t.priorActPpg !== null ? (t.priorExpPpg + t.priorActPpg) / 2 : null;
-    // Never more pseudo-games than the prior season actually had (a 4-game 2025 counts as ≤ 4 games).
-    const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames), t!.priorGames) : 0;
     // Touchdowns are the noisiest part of expected points: the TD part regresses per opportunity (tdRegression.ts),
     // the rest is unchanged. Not on the actual-points fallback (no expected TDs there).
     let td: TdShrink | null = null;
@@ -333,12 +347,17 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
         points: tdPointsOf(scoring),
       });
     }
+    // A backup-turned-starter: last season's smaller role must not outweigh his new one. Usage = expected points after
+    // the TD regression (a one-off goal-line spike is not a new role); not on the actual-points fallback.
+    const roleUp = priorRate !== null && !missingExp && expRate !== null && isRoleUp(expRate - (td?.ptsDelta ?? 0), t!.priorExpPpg!, unflagged);
+    // Never more pseudo-games than the prior season actually had (a 4-game 2025 counts as ≤ 4 games).
+    const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames, roleUp), t!.priorGames) : 0;
     let model: number | null = null;
     if (expRate !== null && sampleGames > 0) {
       const cur = (expRate - (td?.ptsDelta ?? 0)) * eff;
       model = priorRate !== null ? (sampleGames * cur + priorW * priorRate) / (sampleGames + priorW) : cur;
     } else if (priorRate !== null) model = priorRate;
-    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorW, td };
+    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorW, roleUp, td };
   };
   const bases = all.map(makeBase);
   const baseById = new Map(bases.map((b) => [b.p.id, b]));
@@ -721,7 +740,11 @@ function explainItems(
       add("Touchdowns", `${x.td.raw.toFixed(2)} expected/g regressed to ${x.td.regressed.toFixed(2)} (${x.td.source === "prior" ? "last season" : `${p.pos} average`} ${x.td.base.toFixed(2)})`);
     if (x.effRaw !== null) add("Finishing", `×${x.eff.toFixed(2)} (actual ÷ expected ${x.effRaw.toFixed(2)}, pulled toward 1)`);
     if (x.flagged > 0) add("Odd games", `${x.flagged} count 25%: backup QB, left early or blowout`);
-    if (x.priorRate !== null) add("2025", `${f1(x.priorRate)} pts/game, counts as ${Number.isInteger(x.priorW) ? x.priorW : x.priorW.toFixed(1)} games`);
+    if (x.priorRate !== null) {
+      const w = Number.isInteger(x.priorW) ? x.priorW : x.priorW.toFixed(1);
+      const grew = x.roleUp && x.expRate !== null ? ` (role grew: ${f1(x.expRate - (x.td?.ptsDelta ?? 0))} vs ${f1(x.sig!.talent.priorExpPpg!)} expected/g)` : "";
+      add("2025", `${f1(x.priorRate)} pts/game, counts as ${w} games${grew}`);
+    }
   }
   if (x.gamesLeft > 0 && Math.abs(x.avgMatchup - 1) >= 0.01) add("Matchups", `×${x.avgMatchup.toFixed(2)} on average (opponents' points allowed)`);
   const next = x.weeks.find((w) => w.game);
