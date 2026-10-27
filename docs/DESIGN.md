@@ -795,3 +795,27 @@ Owner-specific worked cases live outside the repo (public).
 * **Playoff odds (e):** weekly team points ~ Normal(v4 lineup projection for that week, σ = the team's own weekly
   std-dev this season, shrunk to the league's), 10k seeded runs over the league's remaining schedule. The import does
   not capture the matchup schedule yet → release (e) starts with a bookmarklet step for it.
+
+**Release (a) implemented (2026-10-26) — enabler, no UI or value change**
+* `server/data/signalTables.ts`: pure builders `parseEpRows`, `buildTeamTotals` (file `*_team` columns, sum fallback),
+  `parseGames`, `buildStarters` (games.csv QB ids, fallback = most pass attempts), `buildUsualStarters`, `buildMargins`,
+  `parseStatus`, `parseRoster` (latest week per player + pfr→gsis), `parseSnaps`, `buildPrior`, `buildSignalInputs`;
+  loader `getSignalInputs(season)` and `getAllSignals(season, scoring)` / `playerSignals(season, id, scoring)`, computed
+  lazily and memoized per process (≤ 8 scorings). Scoring is a required argument (signals are league-specific).
+* `server/model/signals/`: `opportunity`, `context`, `recency`, `luck`, `efficiency`, `trend`, `talent`, entry `index`
+  (`computePlayerSignals`, `computeAllSignals`), shapes in `types`. Nothing outside tests consumes them yet.
+* A game = an ep_weekly row or a snap-count row with offensive snaps (zero opportunity). Unknown snaps / team totals
+  stay undefined (never 0). Timing on the 2026 cache: parse all files ≈ 210 ms once per process; batch for all 536
+  QB/RB/WR/TE ≈ 3–5 ms.
+* Choices (calibration, revisit after the first real-league run):
+  - RB target weight = 1.4 + 1.4·`scoring.rec` (2.8 full PPR, 2.1 half, 1.4 standard) — a literal 2.8·rec would make
+    a standard-league target worth nothing.
+  - Efficiency shrinkage read as totals over n games + k = 6 pseudo-games of his average: (n·raw + k)/(n + k), n = sum
+    of game weights (the literal formula has no sample-size term); null below 0.5 weighted expected pts/game.
+  - `qbOut` is never set on a QB's own games; usual-starter ties go to the earlier starter.
+  - `leftEarly` "before" = mean snap share of his earlier games this season with known snaps (constants from breakouts).
+  - Luck `driver` = "td" when |TD part| ≥ |yardage part|; fumbles have no expected value, so they count as yardage luck.
+  - `halfSnaps` = recency-weighted snap share ≥ 50%.
+* Data finding: with the amendment thresholds, 120 of the 356 players with a known trend are "rising" (87 of 263 WR/TE):
+  +0.03 WOPR/game is small next to weekly noise, and skipping flagged games can stretch the 3-game window. Re-check
+  before release (b)/(d) relies on "rising".
