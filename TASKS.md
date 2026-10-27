@@ -35,6 +35,13 @@ MODEL v4 (DESIGN "Model v4"): (a) signals, (b) projection v4 / labels / power sc
    teams, weekly 148/188 (the 40 missing = week-8 byes NO/HOU/SF/NYG + single injured players; Yahoo shows "–").
    League tab Now / Playoffs toggle SHIPPED 2026-10-27 (live 2810f7a; owner: keep power as is + a pure playoff
    projection mode; DESIGN "League tab modes"). Unverified: 390 px layout (window resize did not apply). Next release: (e) playoff odds + Best moves.
+IN PROGRESS 2026-10-27 (owner feedback on suggested trades): fix round "one playoff engine + small-sample prior + cover
+   label + expected-TD regression" (developer running). Acceptance: a 3-for-1 that sells returning starters for one
+   healthy player may show in Now/Balanced, never in Playoffs mode. NEXT BRIEF after it: "vacated role" — a usage jump that coincides
+   with a same-team, same-position teammate's absence (e.g. lead RB out week-to-week) must revert in the weeks after that
+   teammate's projected return (playoff weeks especially); and a single spike game must not lift our own rate much
+   (recency weight capped for one outlier game). Also check acceptance on "buy the high" deals (partner sees a sell-high
+   vs a breakout: today ×0.7 spike penalty only).
 NEXT (backlog, highest value first):
 - DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
