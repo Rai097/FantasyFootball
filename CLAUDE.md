@@ -19,7 +19,7 @@ Open work and "Resume here" live in TASKS.md.
 - `npm ci` — install (Node 22+).
 - `npm run dev` — server :3000 + Vite UI :5173.
 - `npm run typecheck` — strict TS for server and web.
-- `npm test` — node:test via tsx over `server/**/*.test.ts` (unit + integration on the demo league).
+- `npm test` — node:test via tsx over `server/**/*.test.ts` (unit + integration on the demo league); the wall-clock timing test is skipped there (SKIP_TIMING=1) and run alone as a second step.
 - `npm run build && npm start` — production build served on :3000.
 - `npm run yahoo:probe` — probe the Yahoo API from another network.
 

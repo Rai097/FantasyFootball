@@ -189,7 +189,8 @@ describe("Model v4 API (adversarial)", { timeout: 300_000 }, () => {
     }
   });
 
-  test("demo league timing: each route's first call (league valued) and repeat call < 1 s", async () => {
+  // Wall-clock budget: measured alone (npm test's second step), not while every other test file competes for the CPU.
+  test("demo league timing: each route's first call (league valued) and repeat call < 1 s", { skip: process.env.SKIP_TIMING === "1" && "timed alone in npm test's second step" }, async () => {
     const slow: string[] = [];
     for (const sub of ["analysis", "values", "trades2", "waivers", "league", "breakouts", "bench-upgrades"]) {
       const t0 = performance.now();
