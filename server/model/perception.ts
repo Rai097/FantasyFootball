@@ -15,7 +15,7 @@
 import type { LeagueSettings, ValuedPlayer } from "./types.js";
 import { effPpg } from "./lineup.js";
 import { score } from "./scoring.js";
-import { fillOrder, unconfirmedWeek } from "./rosterScore.js";
+import { fillOrder, irSlotReturns, unconfirmedWeek } from "./rosterScore.js";
 import { weekLineup } from "./teamStrength.js";
 
 export const PERCEPTION = {
@@ -193,7 +193,7 @@ export function isSpike(pc: Perception): boolean {
  */
 export function perceivedLineupTotal(S: LeagueSettings, roster: ValuedPlayer[], irIds: ReadonlySet<string> = new Set()): number {
   const order = fillOrder(S.slots);
-  const active = roster.filter((p) => !irIds.has(p.id) || (p.ret && !p.ret.seasonOver));
+  const active = roster.filter((p) => !irIds.has(p.id) || irSlotReturns(p));
   const n = Math.max(0, S.finalWeek - S.currentWeek + 1);
   let total = 0;
   for (let i = 0; i < n; i++) total += weekLineup(order, active, (p) => (i === 0 && irIds.has(p.id) ? 0 : (perceptionOf(p, S).weekly[i] ?? 0))).total;

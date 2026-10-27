@@ -290,6 +290,9 @@ export function rosterParts(S: LeagueSettings, roster: ValuedPlayer[], replaceme
   };
 }
 
+/** May an IR-slot player play again this season (a return estimate, not out for the season)? The one IR-slot test. */
+export const irSlotReturns = (p: ValuedPlayer): boolean => !!p.ret && !p.ret.seasonOver;
+
 const irViews = new WeakMap<ValuedPlayer, ValuedPlayer>();
 const NO_WEEKS: number[] = [];
 
@@ -302,7 +305,7 @@ const NO_WEEKS: number[] = [];
 export function irSlotView(p: ValuedPlayer): ValuedPlayer {
   let v = irViews.get(p);
   if (!v) {
-    if (p.ret && !p.ret.seasonOver) v = { ...p, effPpg: 0 };
+    if (irSlotReturns(p)) v = { ...p, effPpg: 0 };
     else {
       const { ret: _ret, ...rest } = p;
       v = { ...rest, effPpg: 0, remainingGames: 0, weekly: NO_WEEKS, weeklyFrom: 0 };
