@@ -35,9 +35,13 @@ MODEL v4 (DESIGN "Model v4"): (a) signals, (b) projection v4 / labels / power sc
    teams, weekly 148/188 (the 40 missing = week-8 byes NO/HOU/SF/NYG + single injured players; Yahoo shows "–").
    League tab Now / Playoffs toggle SHIPPED 2026-10-27 (live 2810f7a; owner: keep power as is + a pure playoff
    projection mode; DESIGN "League tab modes"). Unverified: 390 px layout (window resize did not apply). Next release: (e) playoff odds + Best moves.
-IN PROGRESS 2026-10-27 (owner feedback on suggested trades): fix round "one playoff engine + small-sample prior + cover
-   label + expected-TD regression" (developer running). Acceptance: a 3-for-1 that sells returning starters for one
-   healthy player may show in Now/Balanced, never in Playoffs mode. NEXT BRIEF after it: "vacated role" — a usage jump that coincides
+SHIPPED 2026-10-27 (live 5db1266): one playoff engine (floor factor out of season/playoffs), small-sample prior
+   (priorKSmall 8, capped at the prior's games), FLEX-mate cover, per-opportunity TD regression; tester 736a5a6, 2 fix
+   rounds. Residuals: a grown red-zone role still regresses (per-opportunity baseline can't tell it from noise); some
+   0-game QBs moved +1.7–2.3 (ECR-curve drift, not investigated); the 3-for-1 acceptance case is off the list only via
+   the "lean decline" check (strength +1.2 > gate). IN PROGRESS: role-change exemption for the small-sample prior
+   (a backup-turned-starter fell 13.0 → 11.2) + mode-aware listing gate (developer running).
+   NEXT BRIEF after it: "vacated role" — a usage jump that coincides
    with a same-team, same-position teammate's absence (e.g. lead RB out week-to-week) must revert in the weeks after that
    teammate's projected return (playoff weeks especially); and a single spike game must not lift our own rate much
    (recency weight capped for one outlier game). Also check acceptance on "buy the high" deals (partner sees a sell-high
