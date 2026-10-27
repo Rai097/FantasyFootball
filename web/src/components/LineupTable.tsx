@@ -41,7 +41,7 @@ export function LineupTable({ lineup, bench = [], irIds = [] }: { lineup: Lineup
                       title={
                         s.riskFactor === 0
                           ? `${p.injury?.status ?? "Out"}: projected 0 for this week's game; he starts here on rest-of-season points. Bench him this week.`
-                          : `${p.injury?.status ?? "Injured"}: this week's game counted at ×${s.riskFactor} (${f1(p.ppg * s.riskFactor)} pts), later games in full. Check his status before lock.`
+                          : `${p.injury?.status ?? "Injured"}: this week's game counted at ×${s.riskFactor} (${f1(p.weekly?.[0] ?? p.ppg * s.riskFactor)} projected pts), later games in full. Check his status before lock.`
                       }
                     >
                       {s.riskFactor === 0 ? "out this week" : `×${s.riskFactor} · check status`}
