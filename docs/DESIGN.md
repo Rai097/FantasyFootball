@@ -836,7 +836,8 @@ Owner-specific worked cases live outside the repo (public).
 * **Matchup(w)** = opponent's points allowed to the position this season (league scoring, actual lines of the
   opponents' players), with 4 pseudo-games of league average, clamped 0.8–1.2; the next game's Vegas implied total
   multiplies it by 1 + 0.5 × (implied / average − 1), total clamp 0.75–1.25. K/DEF: 1.
-* **Avail(w)**: Questionable 0.85 / Doubtful 0.7 / Out 0 for the current week only; IR / PUP / NFI / NA / long-term
+* **Avail(w)**: Questionable 0.85 / Doubtful 0.7 / Out 0 for his next game only (the first remaining game, not the
+  calendar week, which may be a bye or already played); IR / PUP / NFI / NA / long-term
   detail / suspended, and nflverse roster RES with no game in 2 weeks → 0 for the rest of the season ("return
   unconfirmed", release (c) adds return estimates); designated to return → 0 for his next 4 games, then 1; no NFL team
   → 0. A week without an unplayed game for his team (bye, or already played) → 0.
@@ -866,4 +867,7 @@ Owner-specific worked cases live outside the repo (public).
 * Known gaps: the 2026 cache has DAL@PHI week 7 unplayed, so `currentWeek` = 7 and most teams show week 7 as "no game";
   `getNflState` caches the current week for the process lifetime (a long-running server does not advance it);
   `riskAdjusted` (trades, lineups) still haircuts a Q / D / O player's whole rest of season on top of v4's this-week
-  availability; the Trade Finder `mode` (now / balanced / playoffs roster score) is separate from the value mode.
+  availability; the Trade Finder `mode` (now / balanced / playoffs roster score) is separate from the value mode;
+  `/values` without `?team=` uses the league default team's mode (the UI always sends its team); Trade Finder v3's
+  "out 4+ weeks" rule counts bye-only weeks while v4 counts scheduled games (off by one in the week-7 data state);
+  `rosterScore.weeklyPoints` still derives weekly points from ppg for hand-built players without `weekly` (fixtures).

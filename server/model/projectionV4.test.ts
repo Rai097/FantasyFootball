@@ -78,7 +78,7 @@ test("bye week = 0 (player bye or no game in the schedule); others get rate × m
   assert.ok(s.weekly![9 - 8] > 0);
 });
 
-test("Out = 0 this week only; IR = 0 rest of season; designated to return = 0 for 4 games; Q / D shade this week", () => {
+test("Out = 0 for his next game only; IR = 0 rest of season; designated to return = 0 for 4 games; Q / D shade this week", () => {
   const mk = (id: string, status?: string, detail?: string) =>
     rawPlayer(id, "RB", { ecrPos: 8, weeks: games(6, { rushYd: 90, rec: 3, recYd: 20 }), ...(status ? { injury: { status, detail, week: 8 } } : {}) });
   const val = valuePlayers(L(), [...POOL, mk("ok"), mk("out", "Out", "Hamstring"), mk("ir", "IR"), mk("ret", "IR-R"), mk("q", "Questionable"), mk("d", "Doubtful")]);
@@ -220,4 +220,16 @@ test("luck is unknown (absent) without real usage, never a 0", () => {
   assert.equal(v.luck, undefined);
   assert.equal(v.label, undefined);
   assert.ok(!v.whyItems!.some((d) => d.label === "Luck"));
+});
+
+test("injury availability applies to his NEXT game, even when the current week is a bye or already played", () => {
+  const mk = (id: string, status?: string) => rawPlayer(id, "WR", { ecrPos: 9, weeks: games(6, { rec: 6, recYd: 70 }), ...(status ? { injury: { status, week: 8 } } : {}) });
+  // KC has no game in week 8 (already played / bye): the first remaining game is week 9.
+  const sched: ProjectionTables = { ...emptyTables(), schedule: new Map([["KC", new Map([9, 10, 11, 12, 13, 14, 15, 16, 17].map((w): [number, ScheduledGame] => [w, { opp: "DEN", home: true }]))]]) };
+  const val = valuePlayers(L(), [...POOL, mk("ok"), mk("out", "O"), mk("q", "Q")], sched);
+  const g = (id: string) => val.players.get(id)!.weekly!;
+  assert.equal(g("ok")[0], 0, "no game in week 8");
+  assert.equal(g("out")[1], 0, "Out for the week-9 game");
+  assert.equal(g("out")[2], g("ok")[2], "full after");
+  assert.ok(Math.abs(g("q")[1] - g("ok")[1] * V4.questionable) < 0.06);
 });

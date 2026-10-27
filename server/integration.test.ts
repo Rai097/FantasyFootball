@@ -211,6 +211,7 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
     assert.ok(["playoffs", "balanced"].includes(json.valueMode), `valueMode ${json.valueMode}`);
     const nW = S.finalWeek - S.currentWeek + 1;
     let labelled = 0;
+    let outChecked = 0;
     for (const p of Object.values<any>(json.players)) {
       assert.equal(p.weeklyFrom, S.currentWeek, `${p.name}: weeklyFrom`);
       assert.ok(Array.isArray(p.weekly) && p.weekly.length === nW && p.weekly.every((x: number) => Number.isFinite(x) && x >= 0), `${p.name}: weekly`);
@@ -223,7 +224,13 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
         assert.ok(p.label === "buy-low" ? p.luck >= 2 : p.label === "sell-high" && p.luck <= -2, `${p.name}: ${p.label} at luck ${p.luck}`);
       }
       if (/^(IR|PUP|NA)$/i.test(p.injury?.status ?? "")) assert.ok(p.weekly.every((x: number) => x === 0), `${p.name} (${p.injury.status}) projects 0`);
+      if (/^(O|Out)$/i.test(p.injury?.status ?? "") && !/IR|ACL|Achilles|season|NA|return/i.test(p.injury?.detail ?? "")) {
+        outChecked++;
+        // Out = 0 for his next game: his first remaining week can never be positive (unit tests pin the exact week).
+        assert.equal(p.weekly[0], 0, `${p.name} (Out): weekly ${p.weekly.slice(0, 3).join(",")}`);
+      }
     }
+    assert.ok(outChecked > 0, "the demo pool has Out players to check");
     assert.ok(labelled > 0, "some buy-low / sell-high labels on the demo league");
     for (const t of json.teams) {
       const ps = t.playoffStrength;

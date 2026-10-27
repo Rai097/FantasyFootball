@@ -4,7 +4,7 @@
 //    blended with the ECR rank→points curve as a sanity anchor (25%, 10% from 4 unflagged games; 100% with no games).
 //  - matchup: opponent's points allowed to the position (league scoring), shrunk to the league average; the next game's
 //    Vegas implied team total adds a half-strength bonus.
-//  - avail: Q 0.85 / D 0.7 / Out 0 this week only; IR / long-term / suspended / reserve → 0 for the rest of the season
+//  - avail: Q 0.85 / D 0.7 / Out 0 for his next game only; IR / long-term / suspended / reserve → 0 for the rest of the season
 //    (return unconfirmed); designated to return → 0 for 4 games, then 1.
 // K / DEF keep the ECR-rank line (no stat model). Value = surplus over replacement of mode-weighted weekly points.
 import type { DetailItem, League, Player, Position, ValuedPlayer } from "./types.js";
@@ -60,7 +60,7 @@ export const V4 = {
   /** Next game's Vegas implied total: factor × (1 + vegasWeight × (implied / average − 1)); total clamp. */
   vegasWeight: 0.5,
   totalClamp: [0.75, 1.25] as const,
-  /** Current-week availability for Questionable / Doubtful (Out = 0). */
+  /** Next-game availability for Questionable / Doubtful (Out = 0). */
   questionable: 0.85,
   doubtful: 0.7,
   /** Designated to return: games at 0 before he counts again (the old −4 games). */
@@ -330,13 +330,15 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
         if (a && avg && avg > 0) matchup = clamp((a.pts + V4.matchupK * avg) / (a.games + V4.matchupK) / avg, V4.matchupClamp);
         if (game.implied !== undefined && impliedAvg > 0) matchup = clamp(matchup * (1 + V4.vegasWeight * (game.implied / impliedAvg - 1)), V4.totalClamp);
       }
-      const current = w === S.currentWeek;
+      // The injury report is about his NEXT game: the first remaining one (not the calendar week, which can be a
+      // bye or a game his team already played).
+      const next = gameIdx === 0;
       let avail = 1;
       if (kind === "noTeam" || kind === "long") avail = 0;
       else if (kind === "return") avail = gameIdx < V4.returnGames ? 0 : 1;
-      else if (current && kind === "out") avail = 0;
-      else if (current && kind === "doubtful") avail = V4.doubtful;
-      else if (current && kind === "questionable") avail = V4.questionable;
+      else if (next && kind === "out") avail = 0;
+      else if (next && kind === "doubtful") avail = V4.doubtful;
+      else if (next && kind === "questionable") avail = V4.questionable;
       gameIdx++;
       weeks.push({ week: w, game, matchup, avail, pts: rate * matchup * avail });
     }
@@ -466,9 +468,9 @@ const AVAIL_TEXT: Record<Avail, string | null> = {
   noTeam: "No NFL team: 0 for the rest of the season",
   long: "IR / out long-term: 0 for the rest of the season (return unconfirmed)",
   return: `Designated to return: 0 for his next ${V4.returnGames} games, then full`,
-  out: "Out: 0 this week, full after",
-  doubtful: `Doubtful: ×${V4.doubtful} this week`,
-  questionable: `Questionable: ×${V4.questionable} this week`,
+  out: "Out: 0 for his next game, full after",
+  doubtful: `Doubtful: ×${V4.doubtful} for his next game`,
+  questionable: `Questionable: ×${V4.questionable} for his next game`,
   healthy: null,
 };
 
