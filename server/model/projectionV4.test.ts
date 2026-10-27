@@ -193,3 +193,22 @@ test("default value mode: playoffs for a team in a playoff spot by standings, el
   assert.equal(defaultMode(l, "4"), "playoffs", "seed wins over rank");
   assert.equal(defaultMode(l, undefined), "balanced");
 });
+
+test("replacement level, vorp and the convex 0-100 value scale (one-team league: RB replacement = 3rd best)", () => {
+  // 30 RBs scoring 30, 29, …, 1 pts every game in both seasons: rate = his points (efficiency 1, no ECR).
+  const steady = (i: number) => {
+    const pts = 30 - i;
+    return rawPlayer(`rb${i + 1}`, "RB", { weeks: games(3, { rushYd: pts * 10 }), prior: { games: 17, line: line({ rushYd: pts * 10 * 17 }) } });
+  };
+  const v = valuePlayers(league([team("1", [])], undefined, { scoring: PPR }), Array.from({ length: 30 }, (_, i) => steady(i)));
+  assert.equal(v.replacement.RB, 28);
+  const top = v.players.get("rb1")!;
+  assert.equal(top.ppg, 30);
+  assert.equal(top.value, 100);
+  assert.equal(top.vorp, 2);
+  assert.equal(top.posRank, 1);
+  assert.equal(top.remainingGames, 14, "weeks 4..17, no bye");
+  const second = v.players.get("rb2")!;
+  assert.ok(second.value < 50 && second.value > 30, `half the surplus is worth ~39 (convexity 1.35), got ${second.value}`);
+  assert.equal(v.players.get("rb10")!.value, 0);
+});

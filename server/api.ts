@@ -33,7 +33,10 @@ import { createHash } from "node:crypto";
 import { bookmarkletCode, bookmarkletUrl } from "./providers/import-bookmarklet.js";
 import { analyzeLeague, analyzeTeams, type LeagueContext } from "./model/analysis.js";
 import { buildLeagueView } from "./model/league.js";
-import { attachFloor, attachRisers } from "./model/signals.js";
+import { attachFloor } from "./model/signals.js";
+import { defaultMode, type ValueMode } from "./model/projectionV4.js";
+import { getProjectionTables } from "./data/signalTables.js";
+import type { ProjectionTables } from "./model/projectionV4.js";
 import { getPriorWeeks } from "./data/priorWeeks.js";
 import { findBenchUpgrades } from "./model/benchUpgrades.js";
 import { evaluateTradeV3, findTradesV3 } from "./model/tradesV3.js";
@@ -143,21 +146,48 @@ interface Loaded {
   valueSource: ValueSource;
 }
 
-function loadContext(provider: Provider, id: string, refresh: boolean): Promise<Loaded> {
+interface Base {
+  db: PlayerDb;
+  league: League;
+  /** Projection v4 inputs: signals, remaining schedule, points allowed (league scoring). */
+  tables: ProjectionTables;
+}
+
+/** League + projection tables, cached per league (the expensive part shared by both value modes). */
+function loadBase(provider: Provider, id: string, refresh: boolean): Promise<Base> {
   if (refresh) invalidate(`${provider}:${id}:`);
-  return cached(`${provider}:${id}:ctx`, refresh, async () => {
+  return cached(`${provider}:${id}:base`, false, async () => {
     const { db, league } = await loadLeague(provider, id, refresh);
-    const ctx = analyzeLeague(league, playerPool(db, league));
+    return { db, league, tables: await getProjectionTables(db.season, league.settings.scoring) };
+  });
+}
+
+/**
+ * Valued league for one value mode (projection v4: "playoffs" for a team in a playoff spot, else "balanced"; at most
+ * two contexts per league). Without a mode: the default team's mode (league.myTeamId).
+ */
+async function loadContext(provider: Provider, id: string, refresh: boolean, mode?: ValueMode): Promise<Loaded> {
+  const base = await loadBase(provider, id, refresh);
+  const m = mode ?? defaultMode(base.league, base.league.myTeamId);
+  return cached(`${provider}:${id}:ctx:${m}`, false, async () => {
+    const { db, league, tables } = base;
+    const ctx = analyzeLeague(league, playerPool(db, league), tables, m);
     // Market (perceived) values for Trade Finder v3 and the Values tab; our values when unavailable.
     const md = await getMarketData(marketQuery(league.settings));
     const valueSource: ValueSource = md.source === "fantasycalc" && md.values.size ? "fantasycalc" : "model";
     attachMarket(ctx.players, valueSource === "fantasycalc" ? md.values : null);
-    // v3.1 signals: role risers (ppg blends recent expected points) and weekly floor; then re-analyse teams.
-    attachRisers(ctx.players, league.settings);
+    // v3.1 weekly floor (lineup contribution blends it in); then re-analyse teams.
     attachFloor(ctx.players, await getPriorWeeks(db.season - 1), league.settings.scoring);
     ctx.teams = analyzeTeams(league, ctx.players, ctx.replacement);
     return { db, league, ctx, valueSource };
   });
+}
+
+/** The request team and the league valued in that team's mode (playoffs when it holds a playoff spot). */
+async function loadForTeam(req: Request, provider: Provider, id: string, refresh: boolean): Promise<{ l: Loaded; team: string }> {
+  const base = await loadBase(provider, id, refresh);
+  const team = teamParam(req, base.league, provider);
+  return { l: await loadContext(provider, id, false, defaultMode(base.league, team)), team };
 }
 
 /**
@@ -385,7 +415,7 @@ apiRouter.get(
   "/api/league/:provider/:id",
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
-    const l = await loadContext(provider, req.params.id, isRefresh(req));
+    const l = await loadBase(provider, req.params.id, isRefresh(req));
     res.json(leagueFor(req, provider, l.league));
   }),
 );
@@ -394,11 +424,10 @@ apiRouter.get(
   "/api/league/:provider/:id/analysis",
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
-    const l = await loadContext(provider, req.params.id, isRefresh(req));
-    const team = teamParam(req, l.league, provider);
+    const { l, team } = await loadForTeam(req, provider, req.params.id, isRefresh(req));
     const players: Record<string, ValuedPlayer> = {};
     for (const p of relevantPlayers(l)) players[p.id] = p;
-    const body = { league: leagueFor(req, provider, l.league), players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes, valueSource: l.valueSource };
+    const body = { league: leagueFor(req, provider, l.league), players, teams: l.ctx.teams, replacement: l.ctx.replacement, myTeamId: team, notes: l.ctx.notes, valueSource: l.valueSource, valueMode: l.ctx.mode };
     // My Team renders the value bullets of the request team's players only: everyone else's stay out of this big payload.
     const mine = new Set(l.ctx.teams.find((t) => t.team.id === team)?.team.playerIds ?? []);
     res.type("application/json").send(
@@ -414,8 +443,7 @@ apiRouter.get(
   "/api/league/:provider/:id/league",
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
-    const l = await loadContext(provider, req.params.id, isRefresh(req));
-    const team = teamParam(req, l.league, provider);
+    const { l, team } = await loadForTeam(req, provider, req.params.id, isRefresh(req));
     res.json(buildLeagueView(l.ctx.teams, team));
   }),
 );
@@ -425,8 +453,7 @@ apiRouter.get(
   "/api/league/:provider/:id/trades2",
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
-    const l = await loadContext(provider, req.params.id, isRefresh(req));
-    const team = teamParam(req, l.league, provider);
+    const { l, team } = await loadForTeam(req, provider, req.params.id, isRefresh(req));
     const partner = req.query.partner ? String(req.query.partner) : undefined;
     if (partner && !l.league.teams.some((t) => t.id === partner)) throw new HttpError(400, `Unknown partner "${partner}"`);
     if (partner === team) throw new HttpError(400, "Partner must be a different team");
@@ -447,8 +474,7 @@ apiRouter.get(
   "/api/league/:provider/:id/bench-upgrades",
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
-    const l = await loadContext(provider, req.params.id, isRefresh(req));
-    const team = teamParam(req, l.league, provider);
+    const { l, team } = await loadForTeam(req, provider, req.params.id, isRefresh(req));
     const mode = parseMode(req.query.mode);
     const key = `${provider}:${req.params.id}:bench:${team}:${mode}`;
     // v3 engine: same eligibility and QB rule as the finder; both players market ≥ 3 and value ≥ 3, the one I get market ≥ 8 or value ≥ 5; my season lineup +0.8 pts/week.
@@ -460,9 +486,8 @@ apiRouter.post(
   "/api/league/:provider/:id/trade/evaluate",
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
-    const l = await loadContext(provider, req.params.id, false);
     const body = (req.body ?? {}) as { team?: string; partner?: string; give?: unknown; get?: unknown; mode?: unknown };
-    const team = teamParam(req, l.league, provider);
+    const { l, team } = await loadForTeam(req, provider, req.params.id, false);
     const partner = body.partner ? String(body.partner) : undefined;
     if (!partner || !l.league.teams.some((t) => t.id === partner)) throw new HttpError(400, `Unknown partner "${partner ?? ""}"`, "Pass { team, partner, give: string[], get: string[] }.");
     if (partner === team) throw new HttpError(400, "Partner must be a different team");
@@ -476,8 +501,7 @@ apiRouter.get(
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
     const refresh = isRefresh(req);
-    const l = await loadContext(provider, req.params.id, refresh);
-    const team = teamParam(req, l.league, provider);
+    const { l, team } = await loadForTeam(req, provider, req.params.id, refresh);
     const key = `${provider}:${req.params.id}:waivers:${team}`;
     const result = await cached(key, refresh, async () => {
       const [{ input, myPriority, league, notes }, breakouts] = await Promise.all([
@@ -497,8 +521,7 @@ apiRouter.get(
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
     const refresh = isRefresh(req);
-    const l = await loadContext(provider, req.params.id, refresh);
-    const team = teamParam(req, l.league, provider);
+    const { l, team } = await loadForTeam(req, provider, req.params.id, refresh);
     const rawPos = String(req.query.pos ?? "all").toUpperCase();
     if (!["RB", "WR", "TE", "ALL"].includes(rawPos)) throw new HttpError(400, `Unknown pos "${req.query.pos}"`, "Use pos=RB, WR, TE or all.");
     const pos = rawPos === "ALL" ? "all" : (rawPos as "RB" | "WR" | "TE");
@@ -530,8 +553,8 @@ apiRouter.get(
   "/api/league/:provider/:id/values",
   h(async (req, res) => {
     const provider = parseProvider(req.params.provider);
-    const l = await loadContext(provider, req.params.id, isRefresh(req));
-    if (req.query.team) teamParam(req, l.league, provider); // validate only
+    // With ?team= the values follow that team's mode; without, the league's default team.
+    const l = req.query.team ? (await loadForTeam(req, provider, req.params.id, isRefresh(req))).l : await loadContext(provider, req.params.id, isRefresh(req));
     const owner = new Map<string, string>();
     for (const t of l.league.teams) for (const id of t.playerIds) owner.set(id, t.id);
     // ?id=<player>: that one row with its value explanation (the Values "?" fetches it on tap, keeping the list small).

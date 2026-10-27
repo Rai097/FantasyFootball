@@ -1,11 +1,14 @@
 // Team analysis for every team in a league. See docs/DESIGN.md "Team analysis".
 import type { League, Player, Position, SlotKind, Team, TeamAnalysis, TeamRecord, ValuedPlayer } from "./types.js";
 import { FLEX_SLOTS, effPpg, optimalLineup, usable } from "./lineup.js";
-import { valuationNotes, valuePlayers, type Valuation } from "./projection.js";
+import { valuationNotes, valuePlayers, type ProjectionTables, type Valuation, type ValueMode } from "./projectionV4.js";
+import { teamStrength } from "./teamStrength.js";
 
 export interface LeagueContext {
   league: League;
   valuation: Valuation;
+  /** Value weighting of this context (projection v4: playoffs or balanced). */
+  mode: ValueMode;
   players: Map<string, ValuedPlayer>;
   teams: TeamAnalysis[];
   replacement: Record<Position, number>;
@@ -65,12 +68,11 @@ export function rosterOf(team: Team, players: Map<string, ValuedPlayer>): Valued
   return out;
 }
 
-/** Value every player in `pool` and analyse every team. */
-export function analyzeLeague(league: League, pool: Iterable<Player>): LeagueContext {
-  const poolArr = [...pool];
-  const valuation = valuePlayers(league, poolArr);
+/** Value every player in `pool` (projection v4, the one valuation) and analyse every team. */
+export function analyzeLeague(league: League, pool: Iterable<Player>, tables?: ProjectionTables, mode: ValueMode = "balanced"): LeagueContext {
+  const valuation = valuePlayers(league, [...pool], tables, mode);
   const teams = analyzeTeams(league, valuation.players, valuation.replacement);
-  return { league, valuation, players: valuation.players, teams, replacement: valuation.replacement, notes: valuationNotes(league) };
+  return { league, valuation, mode, players: valuation.players, teams, replacement: valuation.replacement, notes: valuationNotes(league) };
 }
 
 export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>, replacement: Record<Position, number>): TeamAnalysis[] {
@@ -172,6 +174,7 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
       benchStrength: r2(b.topBenchVorp),
       byeExposure,
       injuryFlags,
+      playoffStrength: teamStrength(S, b.roster, irSet(b.team)),
     };
   });
 }

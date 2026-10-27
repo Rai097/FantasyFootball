@@ -1,13 +1,12 @@
-// Trade finder v3.1 player signals: weekly floor / consistency, role risers, same-NFL-team overlap.
-import type { LeagueSettings, Position, Scoring, StatLine, ValuedPlayer } from "./types.js";
+// Trade finder v3.1 player signals: weekly floor / consistency, same-NFL-team overlap. (Role risers come from the
+// Model v4 opportunity trend: ValuedPlayer.riser, set by projectionV4.ts.)
+import type { Position, Scoring, StatLine, ValuedPlayer } from "./types.js";
 import { score } from "./scoring.js";
-import { BREAKOUT_POS, LEFT_EARLY, roleMetrics, snapSeries } from "./breakouts.js";
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
 export const FLOOR = { minGames: 6, weight: 0.2, highFloor: 0.7, highFloorPpg: 10, volatile: 0.45 } as const;
-export const RISER = { snapTrend: 0.12, expTrend: 2, blend: 0.3, maxEarlierShare: 0.65, noisyLow: 0.25 } as const;
 
 /** 25th percentile (linear interpolation). */
 export function percentile(xs: number[], q: number): number {
@@ -48,44 +47,6 @@ export function floorFactor(p: ValuedPlayer): number {
   return 1 - FLOOR.weight + (FLOOR.weight * p.floor) / p.ppg;
 }
 
-/**
- * Rising role: snap share +12 pts AND expected points +2 (last week vs the earlier mean), by the breakouts
- * module's roleMetrics. The breakouts "rising" tier alone (any 50%-snap starter) is far too broad to count.
- * Not risers: in-and-out snap histories (an earlier week < 25% next to one ≥ 50%: injury / left early),
- * players already full-time before (earlier mean ≥ 65%), and anyone whose last week is not a season high.
- */
-export function riserSignal(p: ValuedPlayer, s: Scoring): { riser: boolean; oppLevel: number; roleTrend: number; oppTrend: number } {
-  if (!BREAKOUT_POS.includes(p.pos)) return { riser: false, oppLevel: 0, roleTrend: 0, oppTrend: 0 };
-  const m = roleMetrics(p, s);
-  const earlier = snapSeries(p).shares.slice(0, -1);
-  const noisy = earlier.some((x) => x < RISER.noisyLow) && earlier.some((x) => x >= LEFT_EARLY.before);
-  const mean = earlier.length ? earlier.reduce((a, b) => a + b, 0) / earlier.length : 1;
-  const newHigh = earlier.every((x) => m.roleNow > x);
-  const riser = !noisy && newHigh && mean < RISER.maxEarlierShare && m.roleTrend >= RISER.snapTrend && m.oppTrend >= RISER.expTrend;
-  return { riser, oppLevel: m.oppLevel, roleTrend: m.roleTrend, oppTrend: m.oppTrend };
-}
-
-/** Mark risers and blend 30% of their last-2-week expected ppg into ppg / effPpg (in place). */
-export function attachRisers(players: Map<string, ValuedPlayer>, S: LeagueSettings): void {
-  for (const p of players.values()) {
-    if (p.riser) continue; // already applied to this object
-    const r = riserSignal(p, S.scoring);
-    if (!r.riser || !(p.ppg > 0)) continue;
-    const ppg = (1 - RISER.blend) * p.ppg + RISER.blend * r.oppLevel;
-    const ratio = ppg / p.ppg;
-    p.riser = true;
-    p.why += ` Riser: snaps ${r.roleTrend >= 0 ? "+" : ""}${Math.round(r.roleTrend * 100)} pts, expected pts ${r.oppTrend >= 0 ? "+" : ""}${r1(r.oppTrend)} last week; ppg ${r1(p.ppg)} → ${r1(ppg)} (30% last-2-week expected ${r1(r.oppLevel)}).`;
-    const sg = (x: number) => (x >= 0 ? "+" : "");
-    p.whyItems = [
-      ...(p.whyItems ?? []),
-      { label: "Riser", value: `snaps ${sg(r.roleTrend)}${Math.round(r.roleTrend * 100)} pts, expected pts ${sg(r.oppTrend)}${r1(r.oppTrend)} last week` },
-      { label: "Riser ppg", value: `${r1(p.ppg)} → ${r1(ppg)} (30% of last-2-week expected ${r1(r.oppLevel)})` },
-    ];
-    p.ppg = r2(ppg);
-    if (p.effPpg !== undefined) p.effPpg = r2(p.effPpg * ratio);
-  }
-}
-
 // ---------------------------------------------------------------- same-NFL-team overlap
 
 export const OVERLAP = { shared: 0.85, stack: 1.03 } as const;
@@ -109,14 +70,14 @@ export function overlapFactor(p: ValuedPlayer, core: ValuedPlayer[], starters: V
 }
 
 const scaled = new WeakMap<ValuedPlayer, Map<number, ValuedPlayer>>();
-/** The player with ppg / effPpg × f (same object when f = 1); cached so roster-score caches stay warm. */
+/** The player with ppg / effPpg / weekly × f (same object when f = 1); cached so roster-score caches stay warm. */
 export function scaledPlayer(p: ValuedPlayer, f: number): ValuedPlayer {
   if (f === 1) return p;
   let m = scaled.get(p);
   if (!m) scaled.set(p, (m = new Map()));
   let c = m.get(f);
   if (!c) {
-    c = { ...p, ppg: p.ppg * f, effPpg: (p.effPpg ?? p.ppg) * f };
+    c = { ...p, ppg: p.ppg * f, effPpg: (p.effPpg ?? p.ppg) * f, ...(p.weekly ? { weekly: p.weekly.map((x) => x * f) } : {}) };
     m.set(f, c);
   }
   return c;

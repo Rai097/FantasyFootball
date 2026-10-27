@@ -246,6 +246,11 @@ export interface TeamAnalysis {
   byeExposure: Record<number, number>;
   /** Human-readable injury notes for rostered players. */
   injuryFlags: string[];
+  /**
+   * Playoff lineup strength (teamStrength.ts): optimal weeks 15–17 lineup pts/week (IR slot excluded), bench cover for
+   * one injured starter, total = lineup + 0.25 × depth. Optional so hand-made fixtures stay valid.
+   */
+  playoffStrength?: { lineup: number; depth: number; total: number; weeks: number[] };
 }
 
 export interface TradeSide {

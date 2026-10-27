@@ -261,7 +261,7 @@ export function suggestAsk(bench: ValuedPlayer[], v: number): string {
       if (s >= need && (!best || s < best[0].value + best[1].value)) best = [pool[i], pool[j]];
     }
   if (best) return `Offer ${best[0].name} + ${best[1].name} (value ${best[0].value.toFixed(1)} + ${best[1].value.toFixed(1)})`;
-  return `No bench offer reaches his value (${v.toFixed(1)}); it would take a starter`;
+  return `No bench offer reaches his value (${v.toFixed(1)}): it would take a starter`;
 }
 
 const fmtTrail = (xs: number[], f: (x: number) => string, n = 4) => xs.slice(-n).map(f).join("→");

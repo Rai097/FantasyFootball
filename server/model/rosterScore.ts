@@ -60,8 +60,10 @@ export function scoreWeeks(S: LeagueSettings): { weeks: number[]; playoff: boole
 const weeklyCache = new WeakMap<LeagueSettings, WeakMap<ValuedPlayer, Float64Array>>();
 
 /**
- * Expected points per remaining week: 0 on the bye; healthy ppg otherwise, with the
- * games the injury model removed (weeksLeft − remainingGames) taken from the earliest weeks.
+ * Expected points per remaining week (weeks currentWeek..finalWeek): projection v4's `weekly` (bye / no game = 0,
+ * availability and matchups applied). Hand-built players without a projection (test fixtures) derive it from ppg:
+ * 0 on the bye, healthy ppg otherwise, with the games the injury model removed (weeksLeft − remainingGames) taken
+ * from the earliest weeks.
  */
 export function weeklyPoints(p: ValuedPlayer, S: LeagueSettings): Float64Array {
   let byS = weeklyCache.get(S);
@@ -70,7 +72,12 @@ export function weeklyPoints(p: ValuedPlayer, S: LeagueSettings): Float64Array {
   if (hit) return hit;
   const n = Math.max(0, S.finalWeek - S.currentWeek + 1);
   const out = new Float64Array(n);
-  if (usable(p)) {
+  if (p.weekly && p.weeklyFrom !== undefined) {
+    for (let i = 0; i < n; i++) {
+      const v = p.weekly[S.currentWeek + i - p.weeklyFrom];
+      out[i] = v !== undefined && Number.isFinite(v) && v > 0 ? v : 0;
+    }
+  } else if (usable(p)) {
     let weeksLeft = 0;
     for (let w = S.currentWeek; w <= S.finalWeek; w++) if (p.bye !== w) weeksLeft++;
     let missing = Math.max(0, weeksLeft - p.remainingGames);
@@ -153,7 +160,7 @@ function greedy(masks: Int32Array, bits: Int32Array, table: Float64Array, stride
   return total;
 }
 
-/** Bitmask of week indexes where the player's points differ from his healthy rate (bye / injury). */
+/** Bitmask of week indexes where the player's points differ from his healthy rate (bye / injury / matchup). */
 const irregularCache = new WeakMap<Float64Array, number>();
 function irregular(p: ValuedPlayer, pts: Float64Array): number {
   let m = irregularCache.get(pts);
@@ -229,13 +236,13 @@ export function rosterParts(S: LeagueSettings, roster: ValuedPlayer[], replaceme
       drops.push(roster[j]);
     }
   }
-  // Healthy lineup (every player at his full rate). Weekly points never exceed the healthy
-  // rate, so a week only needs its own lineup when a healthy-lineup starter is on bye / hurt.
+  // Healthy lineup (every player at his full rate). A week reuses it only when no remaining player's points differ
+  // from his healthy rate that week; v4 matchups make most weeks irregular, so those get their own lineup.
   const irrOf = scratch.irr;
   used.set(removed.subarray(0, n));
   const healthy = greedy(P.masks, bits, table, stride, 1, n, used);
   let recompute = 0;
-  for (let j = 0; j < n; j++) if (used[j] && !removed[j]) recompute |= irrOf[j];
+  for (let j = 0; j < n; j++) if (!removed[j]) recompute |= irrOf[j];
   let seasonSum = 0;
   let poSum = 0;
   for (let wi = 0; wi < P.nW; wi++) {

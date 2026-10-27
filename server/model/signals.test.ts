@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FLOOR, attachFloor, attachRisers, floorFactor, floorOf, overlapFactor, percentile, riserSignal, scaledPlayer } from "./signals.js";
+import { FLOOR, attachFloor, floorFactor, floorOf, overlapFactor, percentile, scaledPlayer } from "./signals.js";
 import { rosterScore } from "./rosterScore.js";
 import { league, line, vp } from "./testkit.js";
 import { HALF_PPR } from "./scoring.js";
@@ -36,32 +36,13 @@ test("C: rosterScore uses 0.8·ppg + 0.2·floor for lineup players", () => {
   assert.ok(Math.abs(now(low) - 0.9 * now(plain)) < 0.01, `${now(low)} vs ${now(plain)}`);
 });
 
-const wkExp = (w: number, rec: number, share: number) => ({ w, rec, share });
-function riserPlayer(id: string, series: { w: number; rec: number; share: number }[]) {
-  const weeks: WeekLine[] = series.map(({ w, rec }) => ({ season: 2026, week: w, team: "KC", actual: line({ rec, recYd: rec * 10 }), expected: line({ rec, recYd: rec * 10 }) }));
-  const snapShare = Object.fromEntries(series.map(({ w, share }) => [w, share]));
-  return vp(id, "RB", 8, 10, { ...G, weeks, snapShare, effPpg: 8 });
-}
-
-test("D: riser = snaps +12 pts and expected +2 (new high, not already full-time, not in-and-out); ppg blends 30%", () => {
-  const love = riserPlayer("love", [wkExp(1, 2, 0.43), wkExp(2, 1.5, 0.4), wkExp(3, 4, 0.64)]); // exp 3, 2.25, 6 pts
-  const r = riserSignal(love, HALF_PPR);
-  assert.equal(r.riser, true, JSON.stringify(r));
-  const flat = riserPlayer("flat", [wkExp(1, 3, 0.6), wkExp(2, 3, 0.62), wkExp(3, 3.1, 0.64)]);
-  assert.equal(riserSignal(flat, HALF_PPR).riser, false);
-  const vet = riserPlayer("vet", [wkExp(1, 2, 0.9), wkExp(2, 1, 0.5), wkExp(3, 4, 0.95)]);
-  assert.equal(riserSignal(vet, HALF_PPR).riser, false, "already full-time");
-  const hurt = riserPlayer("hurt", [wkExp(1, 2, 0.7), wkExp(2, 0, 0.1), wkExp(3, 4, 0.8)]);
-  assert.equal(riserSignal(hurt, HALF_PPR).riser, false, "in-and-out");
-  const players = new Map([[love.id, love]]);
-  const level = r.oppLevel;
-  attachRisers(players, S);
-  assert.equal(love.riser, true);
-  assert.ok(Math.abs(love.ppg - (0.7 * 8 + 0.3 * level)) < 0.01);
-  assert.match(love.why, /Riser/);
-  assert.ok(love.whyItems?.some((d) => d.label === "Riser") && love.whyItems.some((d) => d.label === "Riser ppg"), "riser bullets");
-  attachRisers(players, S);
-  assert.ok(Math.abs(love.ppg - (0.7 * 8 + 0.3 * level)) < 0.01, "idempotent");
+test("scaledPlayer scales ppg, effPpg and the v4 weekly points together (cached per factor)", () => {
+  const p = vp("w", "WR", 10, 5, { ...G, effPpg: 9, weekly: [10, 0, 8], weeklyFrom: 4 });
+  const c = scaledPlayer(p, 0.85);
+  assert.deepEqual(c.weekly, [8.5, 0, 6.8]);
+  assert.ok(Math.abs(c.effPpg! - 7.65) < 1e-9 && Math.abs(c.ppg - 8.5) < 1e-9);
+  assert.equal(scaledPlayer(p, 0.85), c);
+  assert.equal(scaledPlayer(p, 1), p);
 });
 
 test("A: same NFL team + group ×0.85 (WR/TE are one group), QB–pass-catcher stack ×1.03", () => {
