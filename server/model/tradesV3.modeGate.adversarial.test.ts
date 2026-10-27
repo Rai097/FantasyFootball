@@ -242,7 +242,7 @@ describe("mode gate on demo/42 (adversarial)", { timeout: 600_000 }, () => {
 
   // DEFECT (low): the marginal near-miss gate is the exact team score > 0, so Win now / Balanced near misses list a
   // noise-level gain the card shows as "Your team score +0.0" (demo/42, balanced: 11:00-0040730>00-0038797).
-  test.todo("DEFECT low: no Win now / Balanced near miss shows a team score of +0.0 (marginal gate on the exact value > 0)", () => {
+  test("DEFECT low (fixed): no Win now / Balanced near miss shows a team score of +0.0 (marginal gate on the exact value > 0)", () => {
     const zero: string[] = [];
     for (const t of lg.teams)
       for (const mode of ["now", "balanced"] as const)

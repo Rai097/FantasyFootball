@@ -734,6 +734,9 @@ test("marginal near misses use the same per-mode measure: a real gain (> 0) in t
   assert.equal(listsInMode({ myDelta: 3, strengthDelta: 0 }, "playoffs", true), false, "Playoffs: needs playoff strength > 0");
   assert.equal(listsInMode({ myDelta: -1, strengthDelta: 0.2 }, "playoffs", true), true);
   assert.equal(listsInMode({ myDelta: 0, strengthDelta: 2 }, "now", true), false);
+  // Noise-level gain: +0.04 shows as +0.0 on the card, so it is no marginal near miss (fix round 1).
+  assert.equal(listsInMode({ myDelta: 0.04, strengthDelta: 0.5 }, "balanced", true), false);
+  assert.equal(listsInMode({ myDelta: 0.05, strengthDelta: 0.5 }, "balanced", true), true);
 });
 
 test("evaluate's mode bar bullet says why a deal clears or fails the mode's listing bar", () => {

@@ -92,8 +92,9 @@ export const modeGain = (j: Pick<Judged3, "strengthDelta" | "myDelta">, mode: Tr
  */
 export function listsInMode(j: Pick<Judged3, "strengthDelta" | "myDelta">, mode: TradeMode, marginal = false): boolean {
   const g = modeGain(j, mode);
-  // The bar compares the gain as the card shows it (0.1-rounded), so the bullet and the gate never disagree.
-  if (!(marginal ? g > 0 : r1(g) >= V3.minMyGain)) return false;
+  // The bar compares the gain as the card shows it (0.1-rounded), so the bullet and the gate never disagree; a marginal
+  // near miss needs a gain that shows as at least +0.1.
+  if (!(marginal ? r1(g) > 0 : r1(g) >= V3.minMyGain)) return false;
   const floor = V3.playoffFloor[mode];
   return floor === undefined || j.strengthDelta >= floor;
 }
