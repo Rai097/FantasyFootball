@@ -87,6 +87,8 @@ describe("fix 2026-10-27 on demo/42: trade cards", { timeout: 600_000 }, () => {
           const ev = evaluateTradeV3(ctx, t.id, tr.them.teamId, tr.me.gives.map((p) => p.id), tr.them.gives.map((p) => p.id), mode);
           const bar = ev.details?.find((x) => x.label === label[mode]);
           assert.ok(bar && bar.value.startsWith("clears"), `${tr.key} (${mode}): ${bar?.value}`);
+          // Green only with an Accept verdict (fix round 1); otherwise neutral.
+          assert.equal(bar!.tone, /^Accept/.test(ev.verdict) ? "pos" : undefined, `${tr.key} (${mode}): ${ev.verdict}`);
           checked++;
         }
     assert.ok(checked > 0, "fixture: some trades listed");

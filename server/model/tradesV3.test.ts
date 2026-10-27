@@ -746,3 +746,11 @@ test("evaluate's mode bar bullet says why a deal clears or fails the mode's list
   assert.equal(modeBarText({ myDelta: 0.4, strengthDelta: 1.2 }, "balanced"), "fails: team score +0.4 (needs +1.0)");
   assert.equal(modeBarText({ myDelta: 0.4, strengthDelta: 1.2 }, "playoffs"), "clears: playoff strength +1.2");
 });
+
+test("Win now help describes the 'now' part as the lineup's average points per game, not literally this week", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../../web/src/tabs/TradesTab.tsx", import.meta.url), "utf8");
+  const now = src.match(/\n  now: \[([\s\S]*?)\],\n/)![1];
+  assert.match(now, /average points per game from now on, missed games counted/);
+  assert.doesNotMatch(now, /this week/);
+});

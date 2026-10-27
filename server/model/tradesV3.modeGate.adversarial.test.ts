@@ -79,7 +79,8 @@ describe("mode gate: injured-now sale (synthetic)", () => {
         const lists = listsInMode({ myDelta: ev.me.scoreDelta!, strengthDelta: strengthOf(ev) }, mode);
         assert.ok(mode === "playoffs" || Math.abs(ev.me.scoreDelta! - V3.minMyGain) > 1e-9, "fixture avoids the rounded bar");
         assert.equal(bar.value.startsWith("clears"), lists, `${rw}/${a}/${b} ${mode}: ${bar.value}`);
-        assert.equal(bar.tone, lists ? "pos" : "warn");
+        // Fix round 1: neutral unless the whole verdict is Accept (the mode bar is one of several bars).
+        assert.equal(bar.tone, lists && /^Accept/.test(ev.verdict) ? "pos" : undefined);
         assert.equal(ev.details!.filter((d) => / bar$/.test(d.label)).length, 1, "one bar bullet");
         if (lists) clears++;
         else fails++;
@@ -124,11 +125,12 @@ describe("mode gate: injured-now sale (synthetic)", () => {
 
   // DEFECT (low): "clears" is only the gain bar + floor; the finder also needs both sides' bars, acceptance etc. A deal
   // the partner refuses (verdict Decline: consolidation premium) shows a green "Win now bar: clears: team score +9.9".
-  test.todo("DEFECT low: a Decline verdict (partner refuses) is not paired with a green 'Win now bar: clears' bullet", () => {
+  test("DEFECT low (fixed): a Decline verdict (partner refuses) is not paired with a green 'Win now bar: clears' bullet", () => {
     const ev = evaluateTradeV3(injuredCtx(12, 15, 14), "me", "them", ["mInjA", "mInjB"], ["tWR1"], "now");
     assert.match(ev.verdict, /Decline|won't accept/);
     const bar = ev.details!.find((d) => d.label === "Win now bar")!;
     assert.ok(!(bar.value.startsWith("clears") && bar.tone === "pos"), `${ev.verdict} + ${bar.value} (${bar.tone})`);
+    assert.equal(bar.tone, undefined, "neutral unless the verdict is Accept");
   });
 });
 

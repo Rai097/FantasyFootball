@@ -239,7 +239,7 @@ const MODE_BAR: Record<TradeMode, { label: string; value: string }[]> = {
     { label: "Playoff strength", value: "Not down more than 0.5 pts/week" },
   ],
   now: [
-    { label: "Your team score", value: "+1.0 or more (this week's lineup, a little bench depth)" },
+    { label: "Your team score", value: "+1.0 or more (your lineup's average points per game from now on, missed games counted, plus a little bench depth)" },
     { label: "Playoff strength", value: "Not down more than 1.0 pts/week" },
   ],
 };

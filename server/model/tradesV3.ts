@@ -1107,7 +1107,8 @@ export function evaluateTradeV3(
   add("Verdict", verdict.replace(/ \(.*\)$/, ""), /^accept/i.test(verdict) ? "pos" : /decline/i.test(verdict) ? "neg" : "warn");
   if (!j.myOk) add("For you", j.myFail, "neg");
   if (!j.partnerOk) add("For them", j.theirFail, "neg");
-  add(`${MODE_LABEL[mode]} bar`, modeBarText(j, mode), listsInMode(j, mode) ? "pos" : "warn");
+  // The mode bar is one of several bars (both sides, acceptance): green only when the whole verdict is Accept.
+  add(`${MODE_LABEL[mode]} bar`, modeBarText(j, mode), listsInMode(j, mode) && /^Accept/.test(verdict) ? "pos" : undefined);
   for (const [p, r] of flagged) add("Outside the rules", `${p.name}: ${r.startsWith("QB rule") ? "QB rule" : r}`, "warn");
   if (tradeDeadlinePassed(ctx.league)) add("Deadline", "The trade deadline has passed", "warn");
   return { ...trade, details: [...pre, ...(trade.details ?? [])], verdict };
