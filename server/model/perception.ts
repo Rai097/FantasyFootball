@@ -5,7 +5,8 @@
 //            FantasyPros rest-of-season rank read as points (projection v4's ECR curve), else our own rate;
 //   rate   = 0.7 × base + 0.3 × his last 3 games' actual points (recency bias; games in the last 4 weeks only);
 //   weekly = rate in every remaining week he has a game (estimate: only weeks our model has him available —
-//            the experts' rank does not price a week he is out); Yahoo's own weekly projection replaces this week.
+//            the experts' rank does not price a week he is out); Yahoo's own weekly projection, when captured,
+//            replaces this week on either source.
 //   gap    = our playoff-weighted rate − perceived rate (+ = they underrate him).
 // Pure. The weekly arrays are cached per player object (never serialised: the Values payload stays small).
 import type { LeagueSettings, ValuedPlayer } from "./types.js";
@@ -128,7 +129,8 @@ export function perceive(p: ValuedPlayer, S: LeagueSettings, hasGame: GameCheck 
       if (source === "yahoo") v = rate;
       else v = ourWeek(p, S, i) > 0 ? rate : 0;
     }
-    if (i === 0 && source === "yahoo" && p.yahooProjWeekly !== undefined && Number.isFinite(p.yahooProjWeekly)) v = games[0] ? Math.max(0, p.yahooProjWeekly) : 0;
+    // Yahoo's own number for this week wins whenever captured (also when the rest-of-season view was not found).
+    if (i === 0 && p.yahooProjWeekly !== undefined && Number.isFinite(p.yahooProjWeekly)) v = games[0] ? Math.max(0, p.yahooProjWeekly) : 0;
     weekly.push(r2(v));
   }
   const last = recent[recent.length - 1];

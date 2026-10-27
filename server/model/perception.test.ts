@@ -29,6 +29,11 @@ test("estimate: without a Yahoo projection the FantasyPros rank (ecrPts) is thei
   assert.equal(pc.source, "ecr");
   assert.equal(pc.base, 12);
   assert.equal(pc.total, 0, "an out player is not shown starting for them on the estimate");
+  // Only this week's Yahoo number captured (rest-of-season view not found): it still replaces week 1.
+  const wkOnly = perceive(vp("w", "WR", 10, 20, { ecrPts: 11, weekly: flat(10), weeklyFrom: 8, yahooProjWeekly: 16.5 }), S);
+  assert.equal(wkOnly.source, "ecr");
+  assert.equal(wkOnly.weekly[0], 16.5);
+  assert.equal(wkOnly.weekly[1], 11);
   const noRank = perceive(vp("m", "RB", 9, 10, { effPpg: 9 }), S);
   assert.equal(noRank.source, "model");
   assert.equal(noRank.base, 9);

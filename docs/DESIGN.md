@@ -979,7 +979,7 @@ Owner-specific worked cases live outside the repo (public).
   check against yahooProjWeekly on the first real import), else `ValuedPlayer.ecrPts` (projection v4's ECR curve at
   his FantasyPros rank, set even when the projection skipped the anchor), else our effPpg. Rate = 0.7 × base + 0.3 ×
   mean actual points of his last ≤ 3 games inside the last 4 weeks. Weekly = rate in game weeks (estimate: only where our
-  model has him available — the rank does not price an absence); Yahoo's weekly number replaces the current week.
+  model has him available — the rank does not price an absence); Yahoo's weekly number (when captured, either source) replaces the current week.
   Gap = our playoff-weighted rate (value mode weights over his game weeks) − perceived rate. Spike = last game ≥ 5 pts
   and ≥ 1.5 × perceived rate.
 * **Their view of a trade**: `perceivedLineupTotal` = Σ over remaining weeks of the optimal lineup on perceived weekly
