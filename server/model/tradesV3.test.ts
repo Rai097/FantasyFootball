@@ -492,3 +492,28 @@ test("v4: pitches give reasons that matter to them — never a market-value clai
   }
   assert.ok(r.summaryDetails!.some((d) => d.label === "Their view" && /not captured yet/.test(d.value)));
 });
+
+test("lazy judge (finder search) skips team strength only for candidates no list takes; otherwise identical", () => {
+  const eager = J();
+  const lazy = judge3(ctx, teamV3(ctx, "me"), teamV3(ctx, "them"), "balanced", { lazy: true });
+  const ids = (xs: string[]) => xs.map(P);
+  const deals: [string[], string[]][] = [
+    [["mRB3"], ["tWR3"]], [["mRB2", "mRB3"], ["tWR1"]], [["mRB1"], ["tWR2", "tWR3"]], [["mRB1", "mRB4"], ["tWR1"]], [["mRB4"], ["tWR5"]], [["mTE"], ["tTE"]],
+  ];
+  let computed = 0;
+  for (const [g, r] of deals) {
+    const e = eager(ids(g), ids(r));
+    const l = lazy(ids(g), ids(r));
+    assert.ok(Number.isFinite(e.strengthDelta), "eager always computes the playoff-lineup change");
+    if (Number.isNaN(l.strengthDelta)) {
+      // Unlisted: both sides fail, or my side fails with no real gain for me / partner fails on a lopsided market.
+      assert.ok(!(e.myOk && e.partnerOk), `${g}>${r}: a passing deal must be simulated`);
+      assert.ok(!(e.myOk && e.fairness >= 0.85), `${g}>${r}: a "refuse" near miss must be simulated`);
+    } else {
+      computed++;
+      assert.equal(l.strengthDelta, e.strengthDelta);
+      assert.equal(l.score, e.score);
+    }
+  }
+  assert.ok(computed > 0);
+});

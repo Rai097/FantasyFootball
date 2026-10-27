@@ -398,7 +398,11 @@ export interface Judged3 {
   theirFail: string;
 }
 
-export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: TradeMode) {
+/**
+ * `lazy` (the finder's search only): skip the team-strength simulation for a candidate no list can take (classify ⇒
+ * null); its strengthDelta / score are then NaN and it is discarded. Evaluate and bench upgrades always compute it.
+ */
+export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: TradeMode, opts: { lazy?: boolean } = {}) {
   const S = ctx.league.settings;
   const repl = ctx.replacement;
   return (give: ValuedPlayer[], get: ValuedPlayer[]): Judged3 => {
@@ -525,7 +529,8 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     });
     // My playoff-lineup gain (team strength, release (b)): always the real number — evaluate shows it and marginal near
     // misses (my side fails) are ranked on it.
-    const strengthDelta = teamStrength(S, myAfter.filter((p) => !me.drops.includes(p)), my.irIds).total - my.strength;
+    const listable = classifiable({ myOk: !myFail, partnerOk: !theirFail, fairness, myDelta, myTrueChange, trueGive, trueGet });
+    const strengthDelta = opts.lazy && !listable ? NaN : teamStrength(S, myAfter.filter((p) => !me.drops.includes(p)), my.irIds).total - my.strength;
     // Gem: playoff gain × acceptance, plus a bonus when the perception gaps favour me.
     const score = acceptance * (strengthDelta + V3.gapBonus * Math.min(V3.gapCap, Math.max(0, gapFavor)));
     const edgeSum = get.reduce((a, p) => a + edgeOf(p), 0) - give.reduce((a, p) => a + edgeOf(p), 0);
@@ -795,15 +800,20 @@ interface Cand {
   cls: Cls;
 }
 
+/** Can any list take this candidate (classify ≠ null)? Uses no team-strength number (judge3 skips that when not). */
+function classifiable(j: Pick<Judged3, "myOk" | "partnerOk" | "fairness" | "myDelta" | "myTrueChange" | "trueGive" | "trueGet">): boolean {
+  if (j.myOk) return j.partnerOk || j.fairness >= 0.85;
+  return j.partnerOk && j.myDelta > 0 && j.myTrueChange >= -0.05 * (j.trueGive + j.trueGet);
+}
+
 function classify(j: Judged3): Cls | null {
+  if (!classifiable(j)) return null;
   if (j.myOk && j.partnerOk) {
     if (j.acceptance < V3.minAcceptance) return "unlikely";
     const headliner = Math.max(...j.give.map(marketOf), ...j.get.map(marketOf));
     return j.myDelta >= V3.clearDelta && headliner >= V3.minHeadliner && !j.overlap ? "clear" : "edge";
   }
-  if (j.myOk && !j.partnerOk && j.fairness >= 0.85) return "refuse";
-  if (!j.myOk && j.partnerOk && j.myDelta > 0 && j.myTrueChange >= -0.05 * (j.trueGive + j.trueGet)) return "marginal";
-  return null;
+  return j.myOk ? "refuse" : "marginal";
 }
 
 function reasonOf(c: Cand): string {
@@ -892,7 +902,7 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
   let simulated = 0;
   const search = (list: typeof ranked) => {
     for (const { their } of list) {
-      const J = judge3(ctx, my, their, mode);
+      const J = judge3(ctx, my, their, mode, { lazy: true });
       for (const [give, get] of packagesFor(my, their, { maxGive, maxGet, wantPos })) {
         const j = J(give, get);
         simulated++;
