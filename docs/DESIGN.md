@@ -1192,8 +1192,8 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
 * **TD regression checked, unchanged**: the baseline is per opportunity and is multiplied by this season's volume, so
   a grown role is not dragged to last season's per-game TDs. For the lead-back case the remaining TD pull comes from
   his very high expected TDs (1.47/g regressed to 1.15), not from the small role: his 2025 TD rate per carry is above
-  the RB average (position baseline 0.97 would pull harder), so swapping the baseline or capping its pseudo-carries
-  would not help him. Not changed.
+  the RB average (the position baseline, 0.64/g at his volume, would regress him to 0.97, harder than 1.15), so
+  swapping the baseline or capping its pseudo-carries would not help him. Not changed.
 * **Mode-aware listing** (`tradesV3.ts` `modeGain`, `listsInMode`): the finder's lists used `strengthDelta ≥
   V3.minMyGain` in every mode. Now each mode lists on its own measure (owner: a deal that helps now but not in the
   playoffs — injured-now players who return before the playoffs, sold for one healthy player — may list in Win now /
