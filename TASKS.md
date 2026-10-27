@@ -13,9 +13,10 @@ VERIFIED 2026-10-26 on the owner's v2 import (real Yahoo pages): standings 12/12
    /standings has no table), waiver order 12/12, availability 172 W / 5 FA / 14 unknown (offense + K lists hit the
    page cap, so a few stay unknown), 25 K + 16 DEF free agents. Bookmark link now served no-store (Cloudflare had
    edge-cached the old ".js" bookmarklet for 4 h).
-MODEL v4 (DESIGN "Model v4"): (a) signals + (b) projection v4 / labels / power score v2 / no riser sales SHIPPED
-   2026-10-26 (live 781a9d2, acceptance cases checked on a data copy — see Claude's memory, not the repo).
-   Next: (c) stash watch + returns, (d) Yahoo projections in the import + trades v4 (acceptance from the partner's
+MODEL v4 (DESIGN "Model v4"): (a) signals, (b) projection v4 / labels / power score v2 / no riser sales, (c) returns +
+   stash watch + IR "hold" values SHIPPED 2026-10-26 (acceptance cases checked on a data copy — see Claude's memory).
+   Residual from (c): IR players with an unconfirmed return have tradeValue 0 (trades ignore them) — fix in (d).
+   Next: (d) Yahoo projections in the import + trades v4 (acceptance from the partner's
    view, bye/playoff cover flag), (e) playoff odds + Best moves.
 NEXT (backlog, highest value first):
 - Right after it (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
