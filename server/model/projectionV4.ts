@@ -512,18 +512,21 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const repl = replacement[x.p.pos];
     for (const w of x.weeks) {
       if (!w.game || w.week < from) continue;
-      const pts = week === null ? hr * w.matchup * RETURNS.unknownWeight : r1(w.pts);
+      const full = week === null ? hr * w.matchup : r1(w.pts);
+      const pts = week === null ? full * RETURNS.unknownWeight : full;
       const po = w.week >= playoffStart;
       total += pts;
       if (po) playoff += pts;
       stash += pts * (po ? 1 : V4.stashEarlyWeight);
-      raw += (po ? W.playoffs : W.season) * Math.max(0, pts - repl);
+      // Trade value: surplus over replacement at his FULL healthy points, then × 0.5 below (release (d) fix — halving
+      // the points first pushed most players under replacement, so an injured starter was worth 0 in trades).
+      raw += (po ? W.playoffs : W.season) * Math.max(0, full - repl);
     }
     info.playoffPts = r1(playoff);
     info.stashScore = r1(stash * (week === null ? 1 : V4.stashConfidence[confidence]));
     if (week === null) {
       info.returnValue = r1(total);
-      if (absent) info.tradeValue = r1(scaled(raw));
+      if (absent) info.tradeValue = r1(RETURNS.unknownWeight * scaled(raw));
     }
     return info;
   };

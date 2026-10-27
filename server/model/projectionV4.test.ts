@@ -332,3 +332,19 @@ test("release (c): a reserve-list WR practising fully, IR minimum to week 10 →
   assert.ok(u.ret!.tradeValue! > 0 && u.ret!.tradeValue! < healthy.value, `trade value ${u.ret!.tradeValue} (healthy ${healthy.value})`);
   for (const x of [v, u]) assert.ok(Object.values(x.ret!).every((n) => typeof n !== "number" || Number.isFinite(n)));
 });
+
+test("release (d): an unconfirmed return is worth ½ of his full healthy surplus in trades — not 0 when half his rate is below replacement", () => {
+  const p = rawPlayer("mid", "WR", { ecrPos: 30, weeks: games(5, { rec: 3, recYd: 40 }) });
+  const input = signalInputFromPlayer(p)!;
+  const tables: ProjectionTables = {
+    ...emptyTables(),
+    signals: new Map([["mid", computePlayerSignals({ ...input, roster: { status: "RES", statusCode: "R01" }, status: [] }, { season: 2026, scoring: PPR, asOf: ASOF })]]),
+  };
+  const ctx = valuePlayers(L(), [...POOL, p], tables);
+  const u = ctx.players.get("mid")!;
+  const repl = ctx.replacement.WR;
+  const hr = u.ret!.healthyRate!;
+  assert.equal(u.ret!.week, null);
+  assert.ok(hr > repl && 0.5 * hr < repl, `fixture: healthy rate ${hr} above replacement ${repl}, half of it below`);
+  assert.ok(u.ret!.tradeValue! > 0, `trade value ${u.ret!.tradeValue}`);
+});
