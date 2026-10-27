@@ -56,14 +56,16 @@ export interface ProjectionTables {
 export const priorWeight = (sampleGames: number, roleUp = false): number => (roleUp ? V4.priorK : Math.max(V4.priorK, V4.priorKSmall - sampleGames));
 
 /**
- * Role change (fix 2026-10-27): this season's recency-weighted expected points/game (TD part regressed) reaches the bar
- * max(V4.roleUpRatio × last season's, last season's + V4.roleUpMinGain), last season's > 0, on ≥ V4.roleUpMinGames
- * unflagged games (one fill-in start is not a new role).
+ * Role change (fix 2026-10-27): the bar is max(V4.roleUpRatio × last season's expected pts/game, last season's +
+ * V4.roleUpMinGain), last season's > 0. This season's recency-weighted expected pts/game (TD part regressed) AND each
+ * of his last V4.roleUpMinGames unflagged games (`recentExp`: expected pts per unflagged game, oldest first) must reach
+ * it: one fill-in start is not a new role, and the recency-weighted rate alone is dominated by the latest game.
  */
-export function isRoleUp(expPpg: number, priorExpPpg: number, unflagged: number): boolean {
-  if (!(priorExpPpg > 0) || !Number.isFinite(expPpg) || unflagged < V4.roleUpMinGames) return false;
+export function isRoleUp(expPpg: number, priorExpPpg: number, recentExp: readonly number[]): boolean {
+  if (!(priorExpPpg > 0) || !Number.isFinite(expPpg) || recentExp.length < V4.roleUpMinGames) return false;
   // 1e-9: 1.5 × a non-representable prior (e.g. 6.6) must still accept exactly 1.5×.
-  return expPpg >= Math.max(V4.roleUpRatio * priorExpPpg, priorExpPpg + V4.roleUpMinGain) - 1e-9;
+  const bar = Math.max(V4.roleUpRatio * priorExpPpg, priorExpPpg + V4.roleUpMinGain) - 1e-9;
+  return expPpg >= bar && recentExp.slice(-V4.roleUpMinGames).every((x) => x >= bar);
 }
 
 export const emptyTables = (): ProjectionTables => ({ signals: new Map(), schedule: new Map(), allowed: new Map(), leagueAllowed: {} });
@@ -83,6 +85,7 @@ export const V4 = {
   roleUpRatio: 1.5,
   /** ...and at least this many expected pts/game above last season (a 0-pt or tiny 2025 never reads as a ratio jump). */
   roleUpMinGain: 3,
+  /** Each of his last this-many unflagged games must clear the bar. */
   roleUpMinGames: 2,
   /** Expected TDs per opportunity regress toward a baseline with this many games × his opportunity rate (last season's
    *  actual TDs per opportunity when he played ≥ priorMinGames, else the position's mean actual rate this season). */
@@ -354,7 +357,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     }
     // A backup-turned-starter: last season's smaller role must not outweigh his new one. Usage = expected points after
     // the TD regression (a one-off goal-line spike is not a new role); not on the actual-points fallback.
-    const roleUp = priorRate !== null && !missingExp && expRate !== null && isRoleUp(expRate - (td?.ptsDelta ?? 0), t!.priorExpPpg!, unflagged);
+    const roleUp = priorRate !== null && !missingExp && expRate !== null && isRoleUp(expRate - (td?.ptsDelta ?? 0), t!.priorExpPpg!, (sig?.weeks ?? []).filter((w) => !w.flagged).map((w) => w.expPts));
     // Never more pseudo-games than the prior season actually had (a 4-game 2025 counts as ≤ 4 games).
     const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames, roleUp), t!.priorGames) : 0;
     let model: number | null = null;

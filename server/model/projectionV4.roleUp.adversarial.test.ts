@@ -51,17 +51,22 @@ const sigTables = (...inputs: PlayerSignalInput[]): ProjectionTables => ({
 describe("role-change prior (adversarial)", () => {
   test("isRoleUp / priorWeight units: exactly 1.5× qualifies, below does not, < roleUpMinGames never; roleUp → priorK only", () => {
     // Fix round 1: the bar also needs +V4.roleUpMinGain (3) growth, so the ratio binds from an 8-ppg prior on.
-    assert.equal(isRoleUp(12, 8, 2), true, "exactly 1.5×");
-    assert.equal(isRoleUp(11.999, 8, 2), false);
-    assert.equal(isRoleUp(100, 8, 1), false, "one unflagged game is never a role");
-    assert.equal(isRoleUp(NaN, 4, 5), false, "NaN usage is not a role change");
-    assert.equal(isRoleUp(10, NaN, 5), false, "NaN prior is not a role change");
+    // Fix round 1: the third argument is his unflagged games' expected pts (oldest first), the last 2 must clear the bar.
+    const two = (x: number) => [x, x];
+    assert.equal(isRoleUp(12, 8, two(12)), true, "exactly 1.5×");
+    assert.equal(isRoleUp(11.999, 8, two(12)), false);
+    assert.equal(isRoleUp(100, 8, [100]), false, "one unflagged game is never a role");
+    assert.equal(isRoleUp(NaN, 4, two(20)), false, "NaN usage is not a role change");
+    assert.equal(isRoleUp(10, NaN, two(20)), false, "NaN prior is not a role change");
     // 6.6 × 1.5 = 9.9 in floats is 9.899999…; the boundary must hold for non-representable priors too.
-    assert.equal(isRoleUp(1.5 * 6.6, 6.6, 2), true);
+    assert.equal(isRoleUp(1.5 * 6.6, 6.6, two(1.5 * 6.6)), true);
     // Absolute floor: a 4-ppg prior needs 7 (not 6); a 0-ppg prior is never a ratio jump.
-    assert.equal(isRoleUp(6.5, 4, 2), false, "+2.5 is under roleUpMinGain");
-    assert.equal(isRoleUp(7, 4, 2), true);
-    assert.equal(isRoleUp(20, 0, 2), false, "no 2025 usage to compare");
+    assert.equal(isRoleUp(6.5, 4, two(6.5)), false, "+2.5 is under roleUpMinGain");
+    assert.equal(isRoleUp(7, 4, two(7)), true);
+    assert.equal(isRoleUp(20, 0, two(20)), false, "no 2025 usage to compare");
+    // Each of the last two unflagged games must clear the bar (the rate alone would).
+    assert.equal(isRoleUp(12, 4, [4, 4, 4, 16]), false, "one fill-in start after backup games");
+    assert.equal(isRoleUp(12, 4, [4, 16, 16]), true, "two straight starts");
     assert.equal(priorWeight(3, true), V4.priorK);
     assert.equal(priorWeight(3, false), V4.priorKSmall - 3);
     assert.equal(priorWeight(10, false), V4.priorK);
@@ -138,7 +143,7 @@ describe("role-change prior (adversarial)", () => {
   // compares the recency-weighted rate (half-life 2 games). A backup with 3 games at 4 pts/g and ONE fill-in start at
   // 16 reads 8.7 expected/g ≥ 1.5 × 4 → "role grew", prior 2 games instead of 4: model 7.1 instead of ~6.4 pts/g.
   // (1 backup game + 1 start: 11.0 vs 4.0, also "role grew".) The developer's test only covers a 1-game season.
-  test.todo("DEFECT medium: 3 backup games (4 pts/g) + one fill-in start (16) keeps the small-sample boost (counts as 4 games)", () => {
+  test("DEFECT medium (fixed): 3 backup games (4 pts/g) + one fill-in start (16) keeps the small-sample boost (counts as 4 games)", () => {
     const weeks = [1, 2, 3].map((w) => wk(w, { rec: 2, recYd: 20 })).concat([wk(4, { rec: 6, recYd: 100 })]);
     const v = one(rawPlayer("fillin", "WR", { weeks, prior: BACKUP_PRIOR }));
     assert.equal(grew(v), false, item(v, "2025"));
