@@ -114,6 +114,21 @@ test("Out = 0 for his next game only; IR = 0 rest of season (return unconfirmed)
   assert.equal(g("ir").availThisWeek, undefined, "long-term: no weekly chip, the season is 0");
 });
 
+test("season-ending report (injury detail says 'season') → ret.seasonOver, no trade value; a plain IR is not season-ending", () => {
+  const mk = (id: string, status: string, detail?: string) =>
+    rawPlayer(id, "RB", { ecrPos: 8, weeks: games(6, { rushYd: 90, rec: 3, recYd: 20 }), injury: { status, detail, week: 8 } });
+  const val = valuePlayers(L(), [...POOL, mk("so", "IR", "Knee - out for season"), mk("so2", "Out", "Season-ending surgery"), mk("ir", "IR")]);
+  for (const id of ["so", "so2"]) {
+    const r = val.players.get(id)!.ret!;
+    assert.equal(r.seasonOver, true, id);
+    assert.equal(r.week, null);
+    assert.equal(r.tradeValue, undefined, `${id}: out for the season is worth nothing in a trade`);
+  }
+  const ir = val.players.get("ir")!.ret!;
+  assert.equal(ir.seasonOver, undefined);
+  assert.ok(ir.tradeValue! > 0, "IR without a season-ending report: a bet on his recovery");
+});
+
 test("scoring.rec 1.0 vs 0.5: a 6-catch receiver gains ~3 pts/game", () => {
   const p = rawPlayer("rec", "WR", { weeks: games(6, { rec: 6, recYd: 60 }), ecrPos: 12 });
   const half = valuePlayers(L({ scoring: { ...PPR, rec: 0.5 } }), [...POOL, p]).players.get("rec")!;

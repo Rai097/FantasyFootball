@@ -171,6 +171,8 @@ export interface ReturnInfo {
   reasons: DetailItem[];
   /** true = absent per the reports; false = not listed but no snaps in his team's last 2+ games. */
   absent: boolean;
+  /** Out for the season per the report (injury detail says "season", projection v4 absence "seasonOver"): never a trade piece. */
+  seasonOver?: true;
   /** Practice participation improved this week (about to become a waiver fight). */
   practiceUp: boolean;
   /** Earliest week under the IR minimum, when it binds. */

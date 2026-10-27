@@ -499,6 +499,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const reasons = absent ? (x.est?.reasons ?? []) : [{ label: "Snaps", value: `none in his team's last ${x.gamesMissed} games, no injury listed`, tone: "warn" as const }];
     const info: ReturnInfo = { week, confidence, reasons, absent, practiceUp: absent && !!x.est?.practiceUp };
     if (x.est?.earliestWeek !== undefined) info.earliestWeek = x.est.earliestWeek;
+    if (x.absence === "seasonOver") info.seasonOver = true;
     const hr = x.healthyRate;
     if (hr === null || x.absence === "seasonOver") return info;
     info.healthyRate = r2(hr);
