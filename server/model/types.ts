@@ -146,6 +146,37 @@ export interface ValuedPlayer extends Player {
    * Doubtful 0.7 / Out 0). Unset when healthy, on a bye, or when his next game is in a later week.
    */
   availThisWeek?: number;
+  /**
+   * Release (c) return estimate: set for absent players (reserve list, designated to return, ruled out, suspended)
+   * and for flex-level players with 0 snaps in their team's last 2 games. Unset for everyone else.
+   */
+  ret?: ReturnInfo;
+}
+
+/** Return estimate + stash numbers (server/model/returns.ts, projectionV4.ts). */
+export interface ReturnInfo {
+  /** Week of his first game back; null = return unconfirmed (never guessed). */
+  week: number | null;
+  confidence: "high" | "medium" | "low" | "unknown";
+  /** Evidence bullets (≤ 90 chars). */
+  reasons: DetailItem[];
+  /** true = absent per the reports; false = not listed but no snaps in his team's last 2+ games. */
+  absent: boolean;
+  /** Practice participation improved this week (about to become a waiver fight). */
+  practiceUp: boolean;
+  /** Earliest week under the IR minimum, when it binds. */
+  earliestWeek?: number;
+  /** Healthy-role rate (pts/game, league scoring) and its source; unset = unknown. */
+  healthyRate?: number;
+  healthySource?: "season" | "prior";
+  /** Only when week is null: healthy rate × games from current week + 4 × 0.5. Stash ranking and the IR "hold" line only. */
+  returnValue?: number;
+  /** Points in the playoff weeks on his return at the healthy rate (unknown return: × 0.5). */
+  playoffPts?: number;
+  /** Playoff-weighted points from the return week (playoff weeks 1.0, earlier 0.33, × confidence): stash rank. */
+  stashScore?: number;
+  /** 0–100 trade value from returnValue (week null, absent only): what trades use instead of 0. */
+  tradeValue?: number;
 }
 
 export type SlotKind = "QB" | "RB" | "WR" | "TE" | "K" | "DEF" | "FLEX" | "SFLEX" | "RFLEX" | "WRRB" | "BN" | "IR";

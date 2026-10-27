@@ -7,7 +7,16 @@
 // appear in the injury report until their practice window opens; roster code R48 = injured, designated to return.
 import type { DetailItem } from "./types.js";
 import type { StatusWeek } from "./signals/types.js";
-import { detailBuilder } from "./details.js";
+
+/** Evidence bullets ≤ 90 chars (a local builder: details.ts → waivers.ts would make an import cycle with projectionV4). */
+function detailBuilder() {
+  const items: DetailItem[] = [];
+  const add = (label: string, value: string, tone?: DetailItem["tone"]) => {
+    const v = value.length <= 90 ? value : `${value.slice(0, 89).replace(/\s+\S*$/, "")}…`;
+    items.push(tone ? { label, value: v, tone } : { label, value: v });
+  };
+  return { items, add };
+}
 
 export type ReturnConfidence = "high" | "medium" | "low" | "unknown";
 
@@ -122,7 +131,7 @@ export function estimateReturn(x: ReturnInput): ReturnEstimate {
     // Ruled out of his next game only (not on a reserve list): back the game after.
     idx = 1;
     conf = x.gamesMissed !== null && x.gamesMissed >= 2 ? "low" : "medium";
-    add("Read", "ruled out of his next game; not on IR");
+    add("Read", "ruled out of his next game, not on IR");
   } else {
     return { ...unknown("on a reserve list, not practising: return unconfirmed"), ...(earliestWeek !== undefined ? { earliestWeek } : {}) };
   }

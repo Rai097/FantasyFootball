@@ -4,10 +4,11 @@
 //    blended with the ECR rank→points curve as a sanity anchor (25%, 10% from 4 unflagged games; 100% with no games).
 //  - matchup: opponent's points allowed to the position (league scoring), shrunk to the league average; the next game's
 //    Vegas implied team total adds a half-strength bonus.
-//  - avail: Q 0.85 / D 0.7 / Out 0 for his next game only; IR / long-term / suspended / reserve → 0 for the rest of the season
-//    (return unconfirmed); designated to return → 0 for 4 games, then 1.
+//  - avail: Q 0.85 / D 0.7 for his next game only; absent (Out / IR / reserve / designated to return / suspended) → 0
+//    before the estimated return week (returns.ts), × 0.85 for the first game back after a reserve-list absence, then 1;
+//    return unconfirmed → 0 (the player gets `ret.returnValue` for stash ranking / the IR hold line, never lineups).
 // K / DEF keep the ECR-rank line (no stat model). Value = surplus over replacement of mode-weighted weekly points.
-import type { DetailItem, League, Player, Position, ValuedPlayer } from "./types.js";
+import type { DetailItem, League, Player, Position, ReturnInfo, ValuedPlayer } from "./types.js";
 import { SKILL_POSITIONS } from "./types.js";
 import { recFormat, score } from "./scoring.js";
 import { clampItem } from "./details.js";
@@ -15,6 +16,8 @@ import { CONVEXITY, KDEF_CURVE, POSITIONS, curveAt, ecrCurve, injuryKind, isQues
 import { computePlayerSignals } from "./signals/index.js";
 import type { PlayerSignalInput, PlayerSignals, SkillPos } from "./signals/types.js";
 import { luckLabel, luckText } from "./labels.js";
+import { RETURNS, estimateReturn, returnText, type Absence, type ReturnEstimate } from "./returns.js";
+import { FLEX_RANK } from "./signals/trend.js";
 
 
 // ---------------------------------------------------------------- inputs
@@ -64,8 +67,11 @@ export const V4 = {
   /** Next-game availability for Questionable / Doubtful (Out = 0). */
   questionable: 0.85,
   doubtful: 0.7,
-  /** Designated to return: games at 0 before he counts again (the old −4 games). */
-  returnGames: 4,
+  /** Stash rank: weight of a pre-playoff week vs a playoff week (1.0), and the weight per return confidence. */
+  stashEarlyWeight: 0.33,
+  stashConfidence: { high: 1, medium: 0.85, low: 0.7, unknown: RETURNS.unknownWeight } as Record<ReturnInfo["confidence"], number>,
+  /** A player with 0 snaps in this many of his team's latest games is a stash candidate even without a report. */
+  stashMissedGames: 2,
   /** Missing expected data: games with expected 0 but actual > 0 needed before the rate falls back to actual points. */
   missingExpGames: 2,
 } as const;
@@ -128,23 +134,30 @@ export function signalInputFromPlayer(p: Player): PlayerSignalInput | null {
   };
 }
 
-type Avail = "noTeam" | "long" | "return" | "out" | "doubtful" | "questionable" | "healthy";
+type Avail = "noTeam" | "absent" | "doubtful" | "questionable" | "healthy";
 
-function availKind(p: Player, sig: PlayerSignals | null): Avail {
-  if (p.team === "FA" && p.pos !== "DEF") return "noTeam";
+/** Availability class and, for an absent player, why (the return estimator's input). */
+function availKind(p: Player, sig: PlayerSignals | null): { kind: Avail; absence?: Absence } {
+  if (p.team === "FA" && p.pos !== "DEF") return { kind: "noTeam" };
   const k = injuryKind(p.injury);
   const st = p.injury?.status.trim().toUpperCase() ?? "";
-  if (k === "long" || st === "SUSP" || st === "SUSPENDED") return "long";
-  // Designated to return beats the roster file (he is still RES there until activated).
-  if (k === "return") return "return";
-  // nflverse roster RES (reserve / IR / PUP / NFI): 0 until a return estimate exists (release (c)), even when he
-  // played last week and Yahoo has no tag yet (freshly placed on IR).
-  if (sig?.rosterStatus === "RES") return "long";
-  if (k === "out") return "out";
-  if (k === "doubtful") return "doubtful";
-  if (isQuestionable(p.injury)) return "questionable";
-  return "healthy";
+  if (st === "SUSP" || st === "SUSPENDED") return { kind: "absent", absence: "suspended" };
+  if (k === "long" && /season/i.test(p.injury?.detail ?? "")) return { kind: "absent", absence: "seasonOver" };
+  // Designated to return (Yahoo IR-R or roster code R48) beats the reserve list (he is RES until activated).
+  if (k === "return" || (sig?.rosterStatus === "RES" && sig.rosterCode === "R48")) return { kind: "absent", absence: "dtr" };
+  // IR / PUP / NFI / NA / long-term detail, or nflverse roster RES even with a game last week (freshly placed on IR).
+  if (k === "long" || sig?.rosterStatus === "RES") return { kind: "absent", absence: "reserve" };
+  if (k === "out") return { kind: "absent", absence: "out" };
+  if (k === "doubtful") return { kind: "doubtful" };
+  if (isQuestionable(p.injury)) return { kind: "questionable" };
+  return { kind: "healthy" };
 }
+
+/** On IR / PUP per the league source or the nflverse roster (the IR minimum applies). */
+const onIr = (p: Player, sig: PlayerSignals | null) => {
+  const st = p.injury?.status.trim().toUpperCase() ?? "";
+  return sig?.rosterStatus === "RES" || /^(IR|PUP|NFI)/.test(st);
+};
 
 interface WeekProj {
   week: number;
@@ -183,6 +196,12 @@ interface Proj extends Base {
   wAnchor: number;
   rate: number;
   availKind: Avail;
+  absence?: Absence;
+  est?: ReturnEstimate;
+  /** Team games played since his last game (null = unknown / no team). */
+  gamesMissed: number | null;
+  healthyRate: number | null;
+  healthySource?: "season" | "prior";
   weeks: WeekProj[];
   gamesLeft: number;
   remainingGames: number;
@@ -199,6 +218,8 @@ export interface Valuation {
   mode: ValueMode;
   /** League-level diagnostics shown with the analysis (scoring caveats, players rated on actual points). */
   notes: string[];
+  /** Healthy-role rate (pts/game) at the position's flex rank (RB30 / WR40 / TE14, QB = league size): stash floor. */
+  flexLevel: Partial<Record<Position, number>>;
   /** Value a player that was not in the pool (e.g. a Yahoo-only free agent or a fresher injury copy). */
   valueOf(p: Player): ValuedPlayer;
 }
@@ -324,10 +345,43 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       }
     }
     rate = Math.max(0, Number.isFinite(rate) ? rate : 0);
-    const kind = availKind(p, b.sig);
+    const { kind, absence } = availKind(p, b.sig);
     const sched = tables.schedule.size ? tables.schedule.get(p.team) : undefined;
+    // His team's remaining game weeks and the games he has missed since his last game.
+    const gameWeeks: number[] = [];
+    for (let w = S.currentWeek; w <= S.finalWeek; w++) if (sched ? sched.has(w) : p.bye !== w) gameWeeks.push(w);
+    let gamesMissed: number | null = null;
+    if (p.team !== "FA" && !b.kdef) {
+      const played = tables.playedWeeks?.get(p.team) ?? Array.from({ length: Math.max(0, S.currentWeek - 1) }, (_, i) => i + 1).filter((w) => w !== p.bye);
+      const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
+      const last = own.length ? Math.max(...own) : 0;
+      gamesMissed = played.filter((w) => w > last && w < S.currentWeek).length;
+    }
+    // Healthy-role rate: the pre-anchor model rate (the ECR rank already prices the absence) with ≥ 2 unflagged
+    // games, else last season's expected points per game.
+    let healthyRate: number | null = null;
+    let healthySource: "season" | "prior" | undefined;
+    if (!b.kdef && b.unflagged >= 2 && b.model !== null) [healthyRate, healthySource] = [b.model, "season"];
+    else if (!b.kdef && b.sig?.talent.priorExpPpg != null && b.sig.talent.priorGames >= V4.priorMinGames) [healthyRate, healthySource] = [b.sig.talent.priorExpPpg, "prior"];
+    let est: ReturnEstimate | undefined;
+    if (kind === "absent" && absence) {
+      const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
+      est = estimateReturn({
+        absence,
+        rosterStatus: b.sig?.rosterStatus,
+        rosterCode: b.sig?.rosterCode,
+        onIr: onIr(p, b.sig),
+        status: b.sig?.status ?? [],
+        currentWeek: S.currentWeek,
+        gameWeeks,
+        gamesMissed,
+        ...(own.length ? { lastGameWeek: Math.max(...own) } : {}),
+      });
+    }
+    const ramp = absence !== "out";
     const weeks: WeekProj[] = [];
     let gameIdx = 0;
+    let backIdx = 0;
     for (let w = S.currentWeek; w <= S.finalWeek; w++) {
       const game: ScheduledGame | null = sched ? (sched.get(w) ?? null) : p.bye === w ? null : { opp: "", home: false };
       if (!game) {
@@ -345,10 +399,12 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       // bye or a game his team already played).
       const next = gameIdx === 0;
       let avail = 1;
-      if (kind === "noTeam" || kind === "long") avail = 0;
-      else if (kind === "return") avail = gameIdx < V4.returnGames ? 0 : 1;
-      else if (next && kind === "out") avail = 0;
-      else if (next && kind === "doubtful") avail = V4.doubtful;
+      if (kind === "noTeam") avail = 0;
+      else if (kind === "absent") {
+        const rw = est?.returnWeek ?? null;
+        if (rw === null || w < rw) avail = 0;
+        else avail = backIdx++ === 0 && ramp ? RETURNS.ramp : 1;
+      } else if (next && kind === "doubtful") avail = V4.doubtful;
       else if (next && kind === "questionable") avail = V4.questionable;
       gameIdx++;
       weeks.push({ week: w, game, matchup, avail, pts: rate * matchup * avail });
@@ -365,6 +421,11 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       wAnchor,
       rate,
       availKind: kind,
+      ...(absence ? { absence } : {}),
+      ...(est ? { est } : {}),
+      gamesMissed,
+      healthyRate,
+      ...(healthySource ? { healthySource } : {}),
       weeks,
       gamesLeft,
       remainingGames: played.reduce((a, x) => a + x.avail, 0),
@@ -387,6 +448,14 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     posSorted[pos] = projs.filter((x) => x.p.pos === pos).map((x) => x.ppg).sort((a, b) => b - a);
   }
 
+  // --- stash floor: healthy-role rate at the flex rank per position (QB: the league's starters)
+  const flexLevel: Partial<Record<Position, number>> = {};
+  for (const pos of SKILL_POSITIONS) {
+    const rank = pos === "QB" ? S.numTeams : FLEX_RANK[pos as Exclude<SkillPos, "QB">];
+    const arr = projs.filter((x) => x.p.pos === pos && x.healthyRate !== null).map((x) => x.healthyRate!).sort((a, b) => b - a);
+    if (rank && arr.length >= rank) flexLevel[pos] = r2(arr[rank - 1]);
+  }
+
   // --- value: surplus over replacement of mode-weighted weekly points, convex 0–100 scale
   const rawOf = (x: Proj) => {
     const repl = replacement[x.p.pos];
@@ -396,9 +465,49 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
   };
   let maxRaw = 0;
   for (const x of projs) maxRaw = Math.max(maxRaw, rawOf(x));
-  const valueOfProj = (x: Proj) => {
-    const raw = rawOf(x);
-    return maxRaw > 0 && raw > 0 ? Math.min(100, 100 * Math.pow(raw / maxRaw, CONVEXITY)) : 0;
+  const scaled = (raw: number) => (maxRaw > 0 && raw > 0 ? Math.min(100, 100 * Math.pow(raw / maxRaw, CONVEXITY)) : 0);
+  const valueOfProj = (x: Proj) => scaled(rawOf(x));
+
+  /** Return estimate + stash numbers at the healthy-role rate (release (c)); undefined when not relevant. */
+  const returnInfo = (x: Proj): ReturnInfo | undefined => {
+    const absent = x.availKind === "absent";
+    const missing = !absent && x.availKind !== "noTeam" && x.gamesMissed !== null && x.gamesMissed >= V4.stashMissedGames;
+    const floor = flexLevel[x.p.pos];
+    if (!absent && !(missing && x.healthyRate !== null && floor !== undefined && x.healthyRate >= floor)) return undefined;
+    const week = absent ? (x.est?.returnWeek ?? null) : null;
+    const confidence = absent ? (x.est?.confidence ?? "unknown") : "unknown";
+    const reasons = absent ? (x.est?.reasons ?? []) : [{ label: "Snaps", value: `none in his team's last ${x.gamesMissed} games, no injury listed`, tone: "warn" as const }];
+    const info: ReturnInfo = { week, confidence, reasons, absent, practiceUp: absent && !!x.est?.practiceUp };
+    if (x.est?.earliestWeek !== undefined) info.earliestWeek = x.est.earliestWeek;
+    const hr = x.healthyRate;
+    if (hr === null || x.absence === "seasonOver") return info;
+    info.healthyRate = r2(hr);
+    if (x.healthySource) info.healthySource = x.healthySource;
+    // Weekly points on his return: known week → 0 before, ramp, full; unknown → from current + 4 at × 0.5.
+    const from = week ?? S.currentWeek + RETURNS.unknownOffset;
+    let back = 0;
+    let total = 0;
+    let playoff = 0;
+    let stash = 0;
+    let raw = 0;
+    const repl = replacement[x.p.pos];
+    for (const w of x.weeks) {
+      if (!w.game || w.week < from) continue;
+      const f = week === null ? RETURNS.unknownWeight : back++ === 0 && x.absence !== "out" && absent ? RETURNS.ramp : 1;
+      const pts = hr * w.matchup * f;
+      const po = w.week >= playoffStart;
+      total += pts;
+      if (po) playoff += pts;
+      stash += pts * (po ? 1 : V4.stashEarlyWeight);
+      raw += (po ? W.playoffs : W.season) * Math.max(0, pts - repl);
+    }
+    info.playoffPts = r1(playoff);
+    info.stashScore = r1(stash * (week === null ? 1 : V4.stashConfidence[confidence]));
+    if (week === null) {
+      info.returnValue = r1(total);
+      if (absent) info.tradeValue = r1(scaled(raw));
+    }
+    return info;
   };
 
   const posRankOf = (pos: Position, ppg: number) => {
@@ -457,7 +566,9 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     if (label) out.label = label;
     if (x.sig?.trend?.rising) out.riser = true;
     const now = x.weeks[0];
-    if (now?.game && now.avail < 1 && (x.availKind === "out" || x.availKind === "doubtful" || x.availKind === "questionable")) out.availThisWeek = now.avail;
+    if (now?.game && now.avail < 1 && (x.absence === "out" || x.availKind === "doubtful" || x.availKind === "questionable")) out.availThisWeek = now.avail;
+    const ret = returnInfo(x);
+    if (ret) out.ret = ret;
     return out;
   };
 
@@ -474,6 +585,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     replacement,
     mode,
     notes,
+    flexLevel,
     valueOf(p: Player) {
       const hit = players.get(p.id);
       if (hit && poolById.get(p.id) === p) return hit;
@@ -487,15 +599,19 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
 
 // ---------------------------------------------------------------- "?" bullets (≤ 90 chars each, no prose)
 
-const AVAIL_TEXT: Record<Avail, string | null> = {
+const AVAIL_TEXT: Record<Exclude<Avail, "absent">, string | null> = {
   noTeam: "No NFL team: 0 for the rest of the season",
-  long: "IR / out long-term: 0 for the rest of the season (return unconfirmed)",
-  return: `Designated to return: 0 for his next ${V4.returnGames} games, then full`,
-  out: "Out: 0 for his next game, full after",
   doubtful: `Doubtful: ×${V4.doubtful} for his next game`,
   questionable: `Questionable: ×${V4.questionable} for his next game`,
   healthy: null,
 };
+
+/** Availability bullet for an absent player: the return estimate and what it does to his weekly points. */
+function absentText(x: Proj): string {
+  const e = x.est;
+  if (!e || e.returnWeek === null) return `${x.absence === "seasonOver" ? "out for the season" : "return unconfirmed"}: 0 for every week`;
+  return `${returnText(e.returnWeek, e.confidence)}: 0 before${x.absence !== "out" ? `, ×${RETURNS.ramp} first game` : ""}`;
+}
 
 function explainItems(
   x: Proj,
@@ -530,8 +646,9 @@ function explainItems(
   if (x.gamesLeft > 0 && Math.abs(x.avgMatchup - 1) >= 0.01) add("Matchups", `×${x.avgMatchup.toFixed(2)} on average (opponents' points allowed)`);
   const next = x.weeks.find((w) => w.game);
   if (next?.game?.opp && !x.kdef) add("Next game", `wk ${next.week} vs ${next.game.opp}: ×${next.matchup.toFixed(2)}${next.game.implied !== undefined ? ` (Vegas ${f1(next.game.implied)} pts)` : ""}`);
-  const avail = AVAIL_TEXT[x.availKind];
+  const avail = x.availKind === "absent" ? absentText(x) : AVAIL_TEXT[x.availKind];
   if (avail) add("Availability", avail, "warn");
+  if (x.availKind === "absent") for (const r of x.est?.reasons ?? []) if (r.label !== "Return") add(r.label, r.value, r.tone);
   const byes = x.weeks.filter((w) => !w.game).map((w) => w.week);
   if (byes.length && byes.length < x.weeks.length) add("No game", `week${byes.length > 1 ? "s" : ""} ${byes.join(", ")}`);
   if (currentWeek <= regEnd) add("Rest of season", `${f1(x.seasonPts)} pts in weeks ${currentWeek}–${regEnd}`);

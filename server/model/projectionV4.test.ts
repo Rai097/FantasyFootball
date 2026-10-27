@@ -5,6 +5,7 @@ import { computeAllSignals, computePlayerSignals } from "./signals/index.js";
 import { ASOF, fixtureInputs, IDS, PPR } from "../data/fixtures/signals2026.js";
 import { detailProblems, league, line, rawPlayer, team } from "./testkit.js";
 import type { Player, Position, StatLine, WeekLine } from "./types.js";
+import type { StatusWeek } from "./signals/types.js";
 
 const wk = (week: number, actual: Partial<StatLine>, expected: Partial<StatLine>, opp = { targets: 0, carries: 0, airYards: 0 }): WeekLine => ({
   season: 2026, week, team: "KC", actual: line(actual), expected: line(expected), opp,
@@ -78,7 +79,7 @@ test("bye week = 0 (player bye or no game in the schedule); others get rate × m
   assert.ok(s.weekly![9 - 8] > 0);
 });
 
-test("Out = 0 for his next game only; IR = 0 rest of season; designated to return = 0 for 4 games; Q / D shade this week", () => {
+test("Out = 0 for his next game only; IR = 0 rest of season (return unconfirmed); designated to return = window estimate; Q / D shade this week", () => {
   const mk = (id: string, status?: string, detail?: string) =>
     rawPlayer(id, "RB", { ecrPos: 8, weeks: games(6, { rushYd: 90, rec: 3, recYd: 20 }), ...(status ? { injury: { status, detail, week: 8 } } : {}) });
   const val = valuePlayers(L(), [...POOL, mk("ok"), mk("out", "Out", "Hamstring"), mk("ir", "IR"), mk("ret", "IR-R"), mk("q", "Questionable"), mk("d", "Doubtful")]);
@@ -88,8 +89,16 @@ test("Out = 0 for his next game only; IR = 0 rest of season; designated to retur
   assert.deepEqual(g("out").weekly!.slice(1), healthy.slice(1));
   assert.ok(g("ir").weekly!.every((x) => x === 0));
   assert.equal(g("ir").value, 0);
-  assert.deepEqual(g("ret").weekly!.slice(0, V4.returnGames), [0, 0, 0, 0]);
-  assert.equal(g("ret").weekly![V4.returnGames], healthy[V4.returnGames]);
+  // Designated to return (no practice row): inside the 21-day window, floored by the IR minimum (missed 1 → 3 more).
+  const ret = g("ret");
+  assert.equal(ret.ret!.week, 8 + 3);
+  assert.equal(ret.ret!.confidence, "medium");
+  assert.deepEqual(ret.weekly!.slice(0, 3), [0, 0, 0]);
+  assert.ok(Math.abs(ret.weekly![3] - healthy[3] * 0.85) < 0.06, "first game back × 0.85");
+  assert.equal(ret.weekly![4], healthy[4]);
+  assert.equal(g("out").ret!.week, 9, "ruled out once: back the game after");
+  assert.equal(g("ir").ret!.week, null);
+  assert.ok(g("ir").ret!.returnValue! > 0, "return unconfirmed: a stash value, not 0");
   assert.ok(Math.abs(g("q").weekly![0] - healthy[0] * V4.questionable) < 0.06);
   assert.ok(Math.abs(g("d").weekly![0] - healthy[0] * V4.doubtful) < 0.06);
   assert.deepEqual(g("q").weekly!.slice(1), healthy.slice(1));
@@ -241,7 +250,7 @@ test("injury availability applies to his NEXT game, even when the current week i
   assert.equal(val.players.get("q")!.availThisWeek, undefined, "no game this week: no 'check status' chip");
 });
 
-test("roster RES = 0 from now on even with a game last week; designated to return keeps its 4-game rule", () => {
+test("roster RES = 0 from now on even with a game last week (return unconfirmed); designated to return uses the estimate", () => {
   const p = rawPlayer("res", "WR", { ecrPos: 10, weeks: games(7, { rec: 5, recYd: 60 }) });
   const input = signalInputFromPlayer(p)!;
   const tables = (status: string): ProjectionTables => ({
@@ -255,8 +264,10 @@ test("roster RES = 0 from now on even with a game last week; designated to retur
   const act = valuePlayers(L(), [...POOL, p], tables("ACT")).players.get("res")!;
   assert.ok(act.weekly![0] > 0);
   const dtr = valuePlayers(L(), [...POOL, { ...p, injury: { status: "IR-R", week: 8 } }], tables("RES")).players.get("res")!;
-  assert.deepEqual(dtr.weekly!.slice(0, V4.returnGames), [0, 0, 0, 0]);
-  assert.equal(dtr.weekly![V4.returnGames], act.weekly![V4.returnGames], "designated to return: full after 4 games");
+  // Played through week 7 → the IR minimum (4 games) binds: back in his 5th remaining game.
+  assert.equal(dtr.ret!.week, 12);
+  assert.deepEqual(dtr.weekly!.slice(0, 4), [0, 0, 0, 0]);
+  assert.equal(dtr.weekly![5], act.weekly![5], "designated to return: full after the ramp game");
 });
 
 test("missing expected data (expected 0, actual > 0 over ≥ 2 games): rate from actual points, flagged, noted", () => {
@@ -283,4 +294,35 @@ test("no buy-low / sell-high label without games left; season / playoff totals =
     assert.equal(p.playoffPts, sum((w) => w > S.regularSeasonEnd), `${p.id} playoffPts`);
     assert.equal(p.seasonPts, sum((w) => w <= S.regularSeasonEnd), `${p.id} seasonPts`);
   }
+});
+
+test("release (c): a reserve-list WR practising fully, IR minimum to week 10 → 0 before, × 0.85 week 10, full after; playoffs count him", () => {
+  const p = rawPlayer("back", "WR", { ecrPos: 12, weeks: games(5, { rec: 6, recYd: 80 }) });
+  const input = signalInputFromPlayer(p)!;
+  const tables = (roster: { status: string; statusCode?: string }, status: StatusWeek[]): ProjectionTables => ({
+    ...emptyTables(),
+    signals: new Map([["back", computePlayerSignals({ ...input, roster, status }, { season: 2026, scoring: PPR, asOf: ASOF })]]),
+  });
+  const healthy = valuePlayers(L(), [...POOL, p], tables({ status: "ACT" }, [])).players.get("back")!;
+  // Missed weeks 6-7 (2 games) → 2 more under the IR minimum (weeks 8, 9) although he practised fully this week.
+  const v = valuePlayers(L(), [...POOL, p], tables({ status: "RES", statusCode: "R01" }, [{ week: 8, practice: "Full Participation in Practice", report: "Questionable" }])).players.get("back")!;
+  assert.equal(v.ret!.week, 10);
+  assert.equal(v.ret!.confidence, "medium", "the IR minimum pushed it back: not high");
+  assert.deepEqual(v.weekly!.slice(0, 2), [0, 0]);
+  assert.ok(Math.abs(v.weekly![2] - 0.85 * healthy.weekly![2]) < 0.06, `week 10 ${v.weekly![2]} vs 0.85 × ${healthy.weekly![2]}`);
+  assert.deepEqual(v.weekly!.slice(3), healthy.weekly!.slice(3));
+  assert.equal(v.playoffPts, healthy.playoffPts, "playoff weeks at full strength");
+  assert.ok(v.playoffPts! > 0 && v.value > 0, "a returner is not worth 0");
+  assert.ok(v.whyItems!.some((d) => d.label === "Availability" && /back ~wk 10 \(medium\)/.test(d.value)), JSON.stringify(v.whyItems));
+  assert.equal(v.ret!.returnValue, undefined, "returnValue only when the return is unconfirmed");
+  // Not practising on the reserve list: unconfirmed, 0 every week, but a stash value (× 0.5 from week 12).
+  const u = valuePlayers(L(), [...POOL, p], tables({ status: "RES", statusCode: "R01" }, [])).players.get("back")!;
+  assert.equal(u.ret!.week, null);
+  assert.ok(u.weekly!.every((x) => x === 0));
+  assert.equal(u.value, 0, "lineups and value ignore returnValue");
+  const fromWk12 = healthy.weekly!.slice(12 - 8).reduce((a, x) => a + x, 0);
+  // Healthy-role rate = the pre-anchor model rate (the ECR rank already prices the absence): within a few % of the anchored one.
+  assert.ok(Math.abs(u.ret!.returnValue! - 0.5 * fromWk12) < 0.05 * fromWk12, `returnValue ${u.ret!.returnValue} vs ½ × ${fromWk12.toFixed(1)}`);
+  assert.ok(u.ret!.tradeValue! > 0 && u.ret!.tradeValue! < healthy.value, `trade value ${u.ret!.tradeValue} (healthy ${healthy.value})`);
+  for (const x of [v, u]) assert.ok(Object.values(x.ret!).every((n) => typeof n !== "number" || Number.isFinite(n)));
 });

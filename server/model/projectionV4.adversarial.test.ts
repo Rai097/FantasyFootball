@@ -198,7 +198,7 @@ describe("projection v4 synthetic edge cases (adversarial)", () => {
     assert.ok(Math.abs(r(w8(sched("HARD", 5))) - 0.75) <= 0.01, `hard + Vegas ${r(w8(sched("HARD", 5)))}`);
   });
 
-  test("injuries: Q / D / Out touch only the next game; IR, PUP, NA, SUSP, Suspended → 0 rest of season; -R → 0 for 4 games", () => {
+  test("injuries: Q / D / Out touch only the next game; IR, PUP, NA, SUSP, Suspended → 0 rest of season; -R → window estimate", () => {
     const base = rawPlayer("inj", "WR", { ecrPos: 6, weeks: games(6, { rec: 6, recYd: 80 }) });
     const healthy = valuePlayers(L(), [...POOL, base]).players.get("inj")!;
     const run = (status: string, detail?: string) => valuePlayers(L(), [...POOL, { ...base, injury: { status, week: 8, ...(detail ? { detail } : {}) } }]).players.get("inj")!;
@@ -215,8 +215,11 @@ describe("projection v4 synthetic edge cases (adversarial)", () => {
     }
     const ir = run("Out", "Knee - ACL");
     assert.ok(ir.weekly!.every((x) => x === 0), `Out ACL: ${ir.weekly}`);
+    // Designated to return (release (c) estimate): missed 1 game → IR minimum leaves 3 → back week 11, × 0.85 that game.
     const ret = run("IR-R");
-    assert.deepEqual(ret.weekly!.slice(0, 4), [0, 0, 0, 0]);
+    assert.equal(ret.ret!.week, 11);
+    assert.deepEqual(ret.weekly!.slice(0, 3), [0, 0, 0]);
+    assert.ok(Math.abs(ret.weekly![3] - 0.85 * healthy.weekly![3]) <= 0.1);
     assert.deepEqual(ret.weekly!.slice(4), healthy.weekly!.slice(4));
   });
 
@@ -384,15 +387,20 @@ describe("projection v4 on the demo league (adversarial, cached 2026 data)", { t
     }
   });
 
-  test("players on nflverse reserve (roster RES) are not projected for their next game", () => {
+  test("players on nflverse reserve (roster RES) score 0 before their estimated return week (every week when unconfirmed)", () => {
     const bad: string[] = [];
+    let estimated = 0;
     for (const p of pool) {
       const s = tables.signals.get(p.id);
       if (s?.rosterStatus !== "RES") continue;
       const v = valuation.players.get(p.id)!;
-      const first = v.weekly!.findIndex((x, i) => x > 0 || (tables.schedule.get(p.team)?.has(lg.settings.currentWeek + i) ?? false));
-      if (first >= 0 && v.weekly![first] > 0) bad.push(`${p.name} ${p.team} (last game wk ${s.weeks.at(-1)?.week}, next ${v.weekly![first]})`);
+      assert.ok(v.ret?.absent, `${p.name}: RES without a return estimate`);
+      const back = v.ret!.week;
+      if (back !== null) estimated++;
+      const early = v.weekly!.findIndex((x, i) => x > 0 && (back === null || lg.settings.currentWeek + i < back));
+      if (early >= 0) bad.push(`${p.name} ${p.team} (back ${back}, wk ${lg.settings.currentWeek + early} = ${v.weekly![early]})`);
     }
     assert.deepEqual(bad, []);
+    assert.ok(estimated > 0, "some reserve players practise (designated to return) and get a week");
   });
 });
