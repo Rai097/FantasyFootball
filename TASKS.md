@@ -22,8 +22,10 @@ MODEL v4 (DESIGN "Model v4"): (a) signals, (b) projection v4 / labels / power sc
    done (DESIGN "Fix round 1"). Pending: owner drags "Trade Desk import v3" and re-imports; then verify the
    `projections` diagnostics and the stored projWeek on real data; authenticated smoke check of trades2 on the Mac. Bench upgrades on the real
    league are empty for want of tradeable bench pieces (gate probe, fix round 1), not a mis-set gate.
-   Open question for the owner: should the finder suggest IR players (return unconfirmed) as pieces now that they
-   carry a value? (eligibility unchanged in (d)). Next release: (e) playoff odds + Best moves.
+   Injured trade pieces (owner 2026-10-26, DESIGN "Injured trade pieces"): BUILT, not deployed — injured players are
+   pieces with ≥ 3 games left from their return (never out for the season), IR slots counted in roster cuts, every
+   partner searched. Residual to watch: return-unconfirmed players often ride along as market sweeteners.
+   Next release: (e) playoff odds + Best moves.
 NEXT (backlog, highest value first):
 - DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:

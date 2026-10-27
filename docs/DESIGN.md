@@ -355,7 +355,7 @@ far steeper, so raw value − market would call every mid player a "sell-high"),
 Unlisted players get market 0, except ones we rank inside the list (`marketEstimated`: market = trueMarket).
 On any fetch failure `valueSource = "model"`: market fields are unset, perceived = our value, the UI warns.
 
-**Eligible pieces**: no K/DEF; not (market < 3 and value < 3); not IR / long-term / out ≥ 4 weeks. QBs only
+**Eligible pieces**: no K/DEF; not (market < 3 and value < 3); injured players per "Injured trade pieces" below. QBs only
 when a team has two QBs ranked ≤ 14 (market position rank) and the other team's best QB ranks > 18 — then the
 QB it does not start (lower projection) may move, in either direction.
 
@@ -371,9 +371,8 @@ partner's perceived change ≥ −3% of the perceived total, their rest-of-seaso
 absorb (give − get), × 0.8 when asking for their market #1, × 1.10 when a player I send beats the starter in
 their weakest group; capped at 0.95.
 **Partners**: complementarity = Σ over RB/WR/TE of their deficit (group ppg below league average; FLEX counts
-half) × my bench surplus (vorp, capped) plus the reverse, plus the QB case. Top 8 partners searched first
-(pools: top 14 eligible by max(market, true); 1–2 per side; 3-for-1 only when I give quantity to a team at
-≤ 1/3 wins); the rest only if < 6 main-list trades were found.
+half) × my bench surplus (vorp, capped) plus the reverse, plus the QB case. Every partner is searched (pools:
+top 14 eligible by max(market, true); 1–2 per side; 3-for-1 only when I give quantity to a team at ≤ 1/3 wins).
 **Ranking**: score = min(my Δ, their lineup Δ + 2) × P ÷ (1 + 2·max(0, fairness − 1.12)) (the same gain at a
 fairer price ranks first); ties by edge. Main list (≤ 10): my Δ ≥ 1.0, P ≥ 0.40, the deal's best player has
 market ≥ 8; ≤ 2 per partner, ≤ 2 per player I give, one per (partner, my top piece, their top piece).
@@ -883,7 +882,7 @@ Owner-specific worked cases live outside the repo (public).
   the week advances at the next 6-hourly data refresh after the schedule file shows the game scored (up to ~12 h with
   the 6 h schedule download TTL); the Trade Finder `mode` (now / balanced / playoffs roster score) is separate from the value mode;
   `/values` without `?team=` uses the league default team's mode (the UI always sends its team); Trade Finder v3's
-  "out 4+ weeks" rule counts bye-only weeks while v4 counts scheduled games (off by one in the week-7 data state);
+  injured-piece games count is bye-only, while v4 counts scheduled games;
   `rosterScore.weeklyPoints` still derives weekly points from ppg for hand-built players without `weekly` (fixtures).
 
 **Release (c) implemented (2026-10-26) — returns and Stash watch** (overrides section 4 and the (b) availability rules)
@@ -932,7 +931,7 @@ Owner-specific worked cases live outside the repo (public).
   points on return and a "?" with the evidence. The analysis payload carries `ret` for the request team only.
 * **Trades v3**: `tradeValueOf(p) = max(value, ret.tradeValue)` feeds true value (`trueOf`), the market quantile
   mapping and `marketOf`'s fallback, so an injured star is not worth 0; the card adds "Injured, you give / get".
-  Finder eligibility is unchanged (IR / out 4+ weeks are still not suggested); the evaluate route values them.
+  Finder eligibility: superseded by "Injured trade pieces (owner 2026-10-26)".
 * **Counts (2026 cache, demo league 42, week 7)**: 128 absent players with an estimate — 2 high, 24 medium, 2 low,
   100 return unconfirmed; 1 flex-level 0-snap player; flex levels QB 19.1 / RB 10.2 / WR 8.6 / TE 8.0 pts/game;
   3 Stash watch candidates (the demo's 12 full rosters hold most injured starters).
@@ -1011,7 +1010,7 @@ Owner-specific worked cases live outside the repo (public).
   "Market values".
 * **IR in trades**: an unconfirmed return's `tradeValue` = 0.5 × the 0–100 value of his FULL healthy surplus from current
   week + 4 (was the surplus of half his points, which fell below replacement for most players ⇒ 0); cards say "a bet on
-  his recovery". Finder eligibility unchanged (IR / out 4+ weeks are still not suggested; evaluate values them).
+  his recovery". Finder eligibility: superseded by "Injured trade pieces (owner 2026-10-26)".
 * **Demo league (2026 cache, week 7, no Yahoo projections → estimate)**: finder 250–410 ms per team (was ~50 ms; the
   perceived lineup runs ~10 greedy week lineups per side per candidate); first three teams 7 / 6 / 5 main-list trades.
 * Known gaps: the stat-view URLs and the real markup of the projected view are unverified (diagnostics on the next
@@ -1033,3 +1032,35 @@ Owner-specific worked cases live outside the repo (public).
   it on any path (the designated-to-return window could).
   Perf: the finder's search skips the team-strength simulation for a candidate no list can take (`judge3` lazy).
 
+## Injured trade pieces (owner 2026-10-26) — overrides every earlier finder-eligibility rule
+
+Owner: injured players are trade pieces in both directions when he has a few weeks left to play; never one out for
+the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
+* **Back with a week** (`ret.absent`, `ret.week` set): eligible with ≥ `V3.minGamesBack` = 3 of his games from
+  `ret.week` through `finalWeek` (his bye excluded; bye-only, no schedule table). Else "back ~wk N: only n games left".
+* **Return unconfirmed** (`ret.week` null): eligible when `ret.tradeValue` > 0 (a bet on his recovery, ½ of healthy)
+  and ≥ 3 games from the week that value assumes (current week + 4, or the IR-minimum `earliestWeek` if later).
+* **Out for the season**: `ReturnInfo.seasonOver` (projection v4 absence "seasonOver" = injury kind "long" with
+  "season" in the detail; without `ret`, the same detail test). The only explicit signal: a Yahoo "IR" with no detail
+  is not season-ending (it is a return-unconfirmed bet when it has a trade value).
+* The IR slot alone is never a reason. The waiver check (market < 3 and value < 3) uses `tradeValueOf` (tradeValue for
+  an unconfirmed return); bench upgrades' "real asset" checks too. Bench upgrades still take only players with games
+  left (`tradeable`), so an unconfirmed return is not a bench swap.
+* **Roster spots** (`tradeKit.rosterExcess`, used by `applyTrade` and `judge3`): cuts = gets − gives + (players I give
+  from my IR slot) − (incoming IR-eligible players that fit my free IR slots). IR-eligible = in the partner's IR slot
+  or listed IR / PUP / NFI (conservative; a plain Out tag is not). Lineups still score an incoming player from his
+  return week (he is activated then; the later roster crunch is not modelled). Drop cost, the "extra players"
+  acceptance factor, "You cut" / "They must cut" follow these cuts.
+* **Cards**: every list (main, smaller edges, near misses, bench upgrades, evaluate) has the "Injured, you give / get"
+  line (return week, or "a bet on his recovery"); row summaries mark the piece "(injured, back ~wk N)" /
+  "(injured, return unconfirmed)" (`markedNames`). The partner's perceived view already has him at 0 in his out
+  weeks (fix round 1), tested at trade level. No riser sales and the ≥ 1.0 playoff gain still hold.
+* **Search**: every partner is searched (the top-8 early stop hid a real best trade once injured pieces filled the
+  first eight).
+* **Owner import (week 8, team 4, after the change)**: 18 suggestions, 13 with an injured piece (4 of 6 main, 3 of 5
+  smaller edges, 6 of 7 near misses); pieces: two return-unconfirmed players I give; four I get (one return
+  unconfirmed, three back ~wk 9–10); bench upgrades still empty. trades2 first call ~0.73 s (was ~0.51 s).
+* Known gaps: an unconfirmed return scores 0 in my lineup model and 0 in the partner's perceived view, so his main
+  effect is market value (FantasyCalc, 20% of acceptance) and true value; the finder now often adds one as a
+  sweetener on my side. Yahoo's IR-slot eligibility list is not verified (docs not checked); the set above is the
+  conservative one.
