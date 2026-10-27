@@ -26,8 +26,10 @@ MODEL v4 (DESIGN "Model v4"): (a) signals, (b) projection v4 / labels / power sc
    pieces with ≥ 3 games left from their return (never out for the season), IR slots counted in roster cuts, every
    partner searched. Fix round 1 BUILT (not deployed): returners count at expected availability in every lineup /
    strength / partner view (unconfirmed ½ × healthy from wk +4, IR slot from his return; DESIGN "Fix round 1 — a
-   returner is never free"). Real import: suggestions unchanged — the unconfirmed pieces (~6–7 pts/wk at ½) sit below
-   the owner's starters, so their playoff cost is ~0. Owner question: price a returner's upside (option value)?
+   returner is never free"). Fix round 2 BUILT (not deployed): an unconfirmed return is a scenario mix, ½ × lineup with
+   him back at full rate from wk +4 + ½ × lineup without him (top 2 per roster exact, more at expected points), in team
+   strength, roster score and the partner's view (DESIGN "Fix round 2 — the scenario mix"). Real import: the owner's
+   example +2.8 → +2.0/wk; 18 suggestions, 11 where I give an unconfirmed piece (set changed); trades2 0.78 s.
    Next release: (e) playoff odds + Best moves.
 NEXT (backlog, highest value first):
 - DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is

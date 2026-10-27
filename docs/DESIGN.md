@@ -1062,7 +1062,8 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   unconfirmed, three back ~wk 9–10); bench upgrades still empty. trades2 first call ~0.73 s (was ~0.51 s).
 * **Fix round 1 — a returner is never free** (one rule in the shared lineup code, every list and side): a returning
   player's expected weekly points = his healthy rate × availability. Back ~wk N: projection v4's own weekly points from
-  wk N (0 before, × 0.85 first game; no confidence factor — that one is stash ranking only). Return unconfirmed:
+  wk N (0 before, × 0.85 first game; no confidence factor — that one is stash ranking only). Return unconfirmed
+  (superseded by fix round 2 below — the scenario mix replaces the ½-rate weeks):
   `ReturnInfo.expWeekly` = healthy × matchup × 0.5 from current week + 4 (0.1-rounded; `returnValue` / `playoffPts`
   are its sums), added by `rosterScore.weeklyPoints` — so team strength, the roster score (judge3 / teamV3) and cover
   checks count it; projection v4's `weekly` / value stay 0 for him (no double discount; `tradeValue` unchanged). Out for
@@ -1081,6 +1082,38 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   17 detail lines moved (season, team score, Yahoo view "you", their weekly lineup). trades2 first call 0.80 s (old
   code, same run: 0.74 s); analysis payload +0.2 KB. Open: pricing the upside (a 50% chance he is back at full rate and
   starts) would be an option-value rule, not this one — owner's call.
+* **Fix round 2 — the scenario mix (Jensen)**: a lineup is a max over players, so averaging an unconfirmed return's
+  RATE first (½ × healthy) understated him: a 12-pt returner became a 6-pt player who never beat a 9.6 FLEX, so giving
+  him away cost ~0. Now (one rule, `rosterScore` "return scenarios"): E[lineup] = p × lineup(him back at his full
+  healthy × matchup from current week + 4) + (1 − p) × lineup(without him), p = `RETURNS.unknownWeight` = ½ (the
+  existing unconfirmed convention, exported as `RETURN_BACK_P`). Who: `ret.week` null, absent, not out for the season,
+  healthy rate known (`returnBackPoints`). `weeklyPoints` is his "not back" scenario (0); `ReturnInfo.backWeekly`
+  (projection v4, replaces `expWeekly`) is the back scenario (0.1-rounded; fixtures without it: healthy rate outside the
+  bye from current week + 4). Only weeks where a returner has back points branch. Confirmed returns stay deterministic
+  (projection v4 weekly from wk N); out for the season 0; `returnValue` / `playoffPts` / `tradeValue` unchanged (stash
+  ranking, IR hold line, finder eligibility).
+  - **k returners on one roster**: k ≤ `EXACT_RETURNS` = 2 → exact 2^k mix per week. Beyond 2: the two with the most
+    back points (ties by id) are mixed exactly, the rest count at their expected points p × back (deterministic). This
+    is bounded — never below the all-½ lineup, never above the exact 2^k mix (lineup value is convex in the players'
+    points). A marginal-sum alternative (Σ each player's mix over a common base) was rejected: with three 12-pt
+    returners competing for one slot it gives 15 > the 12 any lineup can hold.
+  - **Where**: `rosterParts` (roster score: judge3 / teamV3, season and playoff columns; "now" and bench depth never
+    branch — he is out this week), `teamStrength` (lineup, and depth = each scenario's bench cover weighted by its
+    probability; via `mixedWeekLineup`), `perceivedLineupTotal` (the partner's view: perceived weekly is his "not back"
+    0 on both sources, the back scenario is our points on both — Yahoo projects an IR player ~0 and the experts' rank
+    does not price a recovery). League tab playoff strength (analysis.ts) follows via `teamStrength`. Per-player
+    comparisons (bye cover lost / their bye cover) use `expectedWeeklyPoints` = weekly + p × (back − weekly), never
+    inside a lineup max.
+  - Tests: 12-pt over a 9.6 FLEX → ½ × 2.4 per playoff week (team strength, roster score, perceived view, trade
+    level with a 10-pt starter → ½ × 2); a returner who starts at any rate → ½ × his rate; depth weighting; k = 3 / 4
+    inside [all-½, exact]; roster score = team strength for k = 1–3; confirmed return 77 (unchanged); season over 0.
+* **Owner import after fix round 2 (snapshot, team 4)**: the owner's example (a healthy RB + an injured RB with return
+  unconfirmed for two RBs) +2.8 → +2.0/wk in weeks 15–17 (season +2.5 → +2.0; Yahoo view "you" −6.3 → −11.7): his
+  12-pt back scenario starts in my playoff lineup, so giving him away now costs ~0.8/wk. Still 18 suggestions; with an
+  injured piece 13 → 12; where I give an unconfirmed-return player 11 → 11 (the set changed: pairs of two unconfirmed
+  pieces now appear, single-for-single swaps of them dropped); the top gains fell 0.4–1.4/wk (my kept returners now fill some of the slots an incoming player would). trades2 first call
+  0.77–0.79 s (same run, old code 0.75 s; budget 1.2 s): `weekLineup` now reads each player's points once, which paid
+  for the 2–4 lineups per affected week (1.21 s before that).
 * Known gaps: the later roster crunch when an IR-slot player returns (someone must be cut) is not modelled; our rate
   for the perception gap (`ourRate`) still excludes an unconfirmed return's expected weeks. Yahoo's IR-slot
   eligibility list is not verified (docs not checked); the set above is the conservative one.
