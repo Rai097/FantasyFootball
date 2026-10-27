@@ -959,16 +959,19 @@ Owner-specific worked cases live outside the repo (public).
 
 **Release (d) implemented (2026-10-26) — Yahoo projections in the import + Trades v4** (overrides section 5 and
 "Trade finder v3" on acceptance, partner checks, ranking, pitch and labels)
-* **Import v3 (enabler)**: the bookmarklet (box and button "Trade Desk import v3": old bookmarks keep old code) reads
+* **Import v3 (enabler)**: the bookmarklet (box and button now "Trade Desk import v4": old bookmarks keep old code) reads
   this week's Yahoo projection from the roster page's "Proj" column on the team pages it already fetches, and Yahoo's
-  rest-of-season projection from candidate stat-view URLs tried in order — team pages `?stat1=P&stat2=PSR`, then
-  `?stat1=S_PSR`, then the taken-players list `players?status=T&pos=O&stat1=S_PSR` (then `status=ALL`), ≤ 12 pages.
-  These parameters are GUESSES from Yahoo's stat-view conventions; a value counts only when the page shows the projected
-  rest-of-season view as selected (a selected `<option>` / active tab naming "remaining / rest of season" + "proj",
-  `rosViewIndicator`) AND a points column is found by header ("Proj…", else "Fan Pts" in that view). Every attempt is a
-  `step: "projections"` diagnostics entry (url, headers, column, viewIndicator, rows read, note); the overlay says
-  "Yahoo projections: N of M players rest of season, W this week". Free agents are not read (trades need rostered
-  players only). Fixture `yahoo-web-roster-proj-ros.html` is RECONSTRUCTED; verified on the owner's next import.
+  rest-of-season projection (import v4, 2026-10-26, path verified on the owner's real Yahoo pages): on each team page
+  it follows the link whose text is "Projected Stats", then that page's "Remaining Games" link (found by anchor text,
+  never by URL params; links outside `/f1/<league>/` are rejected; 2 extra fetches per team). A value counts only when
+  the "Remaining Games" nav `li` carries the class token "Selected" ("Week N" Default-selected is ignored); points =
+  "Fan Pts" from every stat table that has it (legend table skipped; K and DEF tables too). "Remaining Games" includes
+  the current unplayed week (the stored projWeek), which is what perception divides by. Every step is a
+  `step: "projections"` diagnostics entry naming a failure ("no Projected Stats link", "no Remaining Games link",
+  "view not selected", "no Fan Pts column", "fetch failed"); yahooProj stays absent on failure, never 0. The overlay
+  says "Yahoo projections: N of M players rest of season, W this week". Free agents are not read (trades need rostered
+  players only). Fixtures `yahoo-web-team-nav.html`, `yahoo-web-team-proj.html`, `yahoo-web-team-proj-remaining.html`
+  are reconstructed from the verified page structure; body-cell alignment is checked on the owner's next import.
 * **Payload**: per player optional `yahooProj` (0–450) and `yahooProjWeekly` (0–60), finite numbers, dropped alone when
   invalid (never a guessed 0); old imports unchanged. `buildImportLeague` copies them onto the player override, so
   `Player.yahooProj` reaches every ValuedPlayer.

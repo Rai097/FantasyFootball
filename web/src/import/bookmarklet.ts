@@ -74,8 +74,8 @@ async function run(): Promise<void> {
    * "Projected Stats" link, then that page's "Remaining Games" link — both found by anchor text, never by guessed
    * query params; at most 2 fetches per team. A value counts only when that view shows as selected and a "Fan Pts"
    * column is found (parseProjectionHtml). Any missing step is a diagnostics note naming it; yahooProj stays absent.
-   * Assumption: Yahoo's "Remaining Games" runs from the week AFTER the current scoring week through week 17 (the
-   * fantasy season's end); the server stamps the import's projWeek and the valuation spreads it from there.
+   * Assumption: Yahoo's "Remaining Games" runs from the first week with an unplayed game (the server's projWeek stamp)
+   * through week 17 (the fantasy season's end); the valuation spreads it over that span.
    */
   const readRos = async (teamUrl: string, teamHtml: string, players: ScrapedPlayer[]) => {
     const fail = (url: string | undefined, note: string, extra: Record<string, unknown> = {}) =>
