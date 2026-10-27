@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MODE_WEIGHTS, combine, depthCount, parseMode, rosterParts, rosterScore, weeklyPoints } from "./rosterScore.js";
-import { riskAdjusted, riskStatus } from "./injuryRisk.js";
-import { league, team, vp, SMALL_SLOTS } from "./testkit.js";
+import { league, vp, SMALL_SLOTS } from "./testkit.js";
 import type { ValuedPlayer } from "./types.js";
 
 // Week 4 of a season whose regular season ends in week 14 and playoffs run 15–17.
@@ -88,19 +87,4 @@ test("mode weights: one config object, parseMode defaults to balanced", () => {
   assert.equal(parseMode("PLAYOFFS"), "playoffs");
   assert.equal(parseMode(undefined), "balanced");
   assert.equal(parseMode("bogus"), "balanced");
-});
-
-test("injury risk haircut: Q 0.85 / D 0.70 / O 0.55, healthy players unchanged", () => {
-  const q = vp("q", "WR", 10, 10, { injury: { status: "Q", week: 4 } });
-  const d = vp("d", "WR", 10, 10, { injury: { status: "Doubtful", week: 4 } });
-  const o = vp("o", "WR", 10, 10, { injury: { status: "Out", detail: "Hamstring", week: 4 } });
-  const h = vp("h", "WR", 10, 10);
-  assert.equal(riskStatus(q), "questionable");
-  assert.equal(riskAdjusted(q).ppg, 8.5);
-  assert.ok(Math.abs(riskAdjusted(d).ppg - 7) < 1e-9);
-  assert.equal(riskAdjusted(o).ppg, 5.5);
-  assert.equal(riskAdjusted(o).value, 10, "value unchanged");
-  assert.equal(riskAdjusted(h), h);
-  assert.equal(riskAdjusted(q), riskAdjusted(q), "stable clone");
-  void team;
 });

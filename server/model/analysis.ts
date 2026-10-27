@@ -84,7 +84,8 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
   const base = league.teams.map((team) => {
     const roster = rosterOf(team, players);
     const ir = irSet(team);
-    // This week's lineup: Questionable / Doubtful / Out starters are discounted (injuryRisk.ts), value is not.
+    // Lineup on v4 lineup pts/game (its next-game availability already applied); Q / D / Out starters whose game is
+    // this week are only marked (`riskFactor`, the "check status" chip).
     // IR-slotted players never start (they stay on `bench` for display) and are not bench depth.
     const { lineup, bench, starterPpg } = optimalLineup(S.slots, roster, { injuryRisk: true, irIds: ir });
     const active = bench.filter((p) => !ir.has(p.id));
@@ -93,7 +94,7 @@ export function analyzeTeams(league: League, players: Map<string, ValuedPlayer>,
       const g = groupOf(l.slot);
       if (!g) continue;
       groups[g] ??= { ppg: 0, rank: 0, count: 0, leagueAvg: 0 };
-      groups[g].ppg += effPpg(l.player) * (l.riskFactor ?? 1);
+      groups[g].ppg += effPpg(l.player);
       groups[g].count += 1;
     }
     const benchValue = bench.reduce((a, p) => a + p.value, 0);

@@ -443,11 +443,11 @@ Why: the owner uses waivers to find players who can *become* starters, not only 
     before spending priority, or add him after waivers clear"). As a free agent it stays a claim (no priority cost).
   * stash: not an upgrade today, breakout score ≥ 50 and ≥ 4.5 expected pts/g (`STASH`); otherwise pass.
   * Rows tie-break on breakout score after rankScore. The breakout thesis is appended to `why`.
-* **Lineup**: `optimalLineup(slots, roster, { injuryRisk: true })` ranks and totals starters on the injury-risk rate
-  (`injuryRisk.ts`: Q 0.85 / D 0.70 / O 0.55, shared with trades). Used by team analysis (My Team, power ranks, group
-  ranks) for every team; IR-slotted players (`Team.irPlayerIds`) never start (`LineupOptions.irIds`, see "Power score
-  v2"). `LineupSlot.riskFactor` marks discounted starters; the UI shows "×0.85 · check status".
-  Trade and waiver lineups are unchanged; `value` is unchanged.
+* **Lineup** (superseded in Model v4 (b) fix round 1: the whole-season haircut `injuryRisk.ts` is deleted, v4's
+  next-game availability is the only injury discount): `optimalLineup(slots, roster, { injuryRisk: true })` ranks and
+  totals starters on v4 lineup pts/game and only marks a starter whose game THIS week v4 discounts
+  (`ValuedPlayer.availThisWeek`: Q 0.85 / D 0.7 / Out 0) with `LineupSlot.riskFactor`; the UI shows "×0.85 · check
+  status" or "out this week". IR-slotted players (`Team.irPlayerIds`) never start (`LineupOptions.irIds`).
 
 ## Waivers v3: rows + free agents (2026-10-26) — overrides "Waivers", "Waivers v2" and the waivers API line where they differ
 
@@ -866,8 +866,7 @@ Owner-specific worked cases live outside the repo (public).
     scoring (6 h memo, refreshed with the player DB).
 * Known gaps: the 2026 cache has DAL@PHI week 7 unplayed, so `currentWeek` = 7 and most teams show week 7 as "no game";
   `getNflState` caches the current week for the process lifetime (a long-running server does not advance it);
-  `riskAdjusted` (trades, lineups) still haircuts a Q / D / O player's whole rest of season on top of v4's this-week
-  availability; the Trade Finder `mode` (now / balanced / playoffs roster score) is separate from the value mode;
+the Trade Finder `mode` (now / balanced / playoffs roster score) is separate from the value mode;
   `/values` without `?team=` uses the league default team's mode (the UI always sends its team); Trade Finder v3's
   "out 4+ weeks" rule counts bye-only weeks while v4 counts scheduled games (off by one in the week-7 data state);
   `rosterScore.weeklyPoints` still derives weekly points from ppg for hand-built players without `weekly` (fixtures).

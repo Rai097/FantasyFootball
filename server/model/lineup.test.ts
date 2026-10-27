@@ -60,25 +60,21 @@ test("lineup selection and starterPpg use availability-adjusted effPpg", () => {
   assert.equal(outQb.ppg, 20, "ppg unchanged");
 });
 
-test("injuryRisk: a Questionable starter is discounted ×0.85 and loses a close call; off by default", () => {
-  // WR2 at 10 ppg is Questionable (→ 8.5) vs a healthy 9 ppg WR3.
-  const q = roster.map((p) => (p.id === "wr2" ? { ...p, injury: { status: "Q", week: 4 } } : p));
-  const plain = optimalLineup(SMALL_SLOTS, q);
-  assert.ok(plain.lineup.some((l) => l.player?.id === "wr2"), "default ignores injury status");
-  assert.ok(plain.lineup.every((l) => l.riskFactor === undefined));
-
-  const adj = optimalLineup(SMALL_SLOTS, q, { injuryRisk: true });
-  const ids = adj.lineup.map((l) => l.player?.id);
-  assert.ok(ids.includes("wr3") && !ids.includes("wr2"), "healthy 9 ppg beats Q 10 × 0.85");
-  assert.equal(adj.starterPpg, 20 + 15 + 12 + 14 + 9 + 8 + 11 + 8 + 7);
-
-  // A clear Q starter still starts, flagged and totalled at the discounted rate; the player object is untouched.
-  const star = roster.map((p) => (p.id === "wr1" ? { ...p, injury: { status: "Questionable", week: 4 } } : p));
+test("injuryRisk: marks a starter whose game this week v4 discounts; ranking and starterPpg unchanged (no second haircut)", () => {
+  // v4 already shaded his next game into effPpg; the lineup only flags it (the "check status" chip).
+  const star = roster.map((p) => (p.id === "wr1" ? { ...p, injury: { status: "Questionable", week: 4 }, availThisWeek: 0.85 } : p));
+  const plain = optimalLineup(SMALL_SLOTS, star);
+  assert.ok(plain.lineup.every((l) => l.riskFactor === undefined), "off by default");
   const s = optimalLineup(SMALL_SLOTS, star, { injuryRisk: true });
   const slot = s.lineup.find((l) => l.player?.id === "wr1")!;
   assert.equal(slot.riskFactor, 0.85);
-  assert.equal(slot.player!.ppg, 14);
-  assert.ok(Math.abs(s.starterPpg - (20 + 15 + 12 + 14 * 0.85 + 10 + 8 + 11 + 8 + 7)) < 0.01);
+  assert.equal(s.starterPpg, plain.starterPpg);
+  assert.deepEqual(s.lineup.map((l) => l.player?.id), plain.lineup.map((l) => l.player?.id));
+  // A Q tag without a discounted game this week (next game later, or a bye) gets no chip; Out this week → 0.
+  const later = roster.map((p) => (p.id === "wr1" ? { ...p, injury: { status: "Q", week: 4 } } : p));
+  assert.equal(optimalLineup(SMALL_SLOTS, later, { injuryRisk: true }).lineup.find((l) => l.player?.id === "wr1")!.riskFactor, undefined);
+  const out = roster.map((p) => (p.id === "wr1" ? { ...p, injury: { status: "O", week: 4 }, availThisWeek: 0 } : p));
+  assert.equal(optimalLineup(SMALL_SLOTS, out, { injuryRisk: true }).lineup.find((l) => l.player?.id === "wr1")!.riskFactor, 0);
 });
 
 test("irIds: an IR-slotted healthy player never starts, stays on the bench, adds nothing to starterPpg", () => {

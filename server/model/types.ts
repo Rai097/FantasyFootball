@@ -141,6 +141,11 @@ export interface ValuedPlayer extends Player {
   luckTd?: number;
   /** buy-low (luck ≥ +2) / sell-high (luck ≤ −2, TD-driven), see labels.ts. */
   label?: "buy-low" | "sell-high";
+  /**
+   * Availability v4 applied to his game in the CURRENT week when an injury report discounts it (Questionable 0.85 /
+   * Doubtful 0.7 / Out 0). Unset when healthy, on a bye, or when his next game is in a later week.
+   */
+  availThisWeek?: number;
 }
 
 export type SlotKind = "QB" | "RB" | "WR" | "TE" | "K" | "DEF" | "FLEX" | "SFLEX" | "RFLEX" | "WRRB" | "BN" | "IR";
@@ -220,7 +225,10 @@ export interface League {
 export interface LineupSlot {
   slot: SlotKind;
   player: ValuedPlayer | null;
-  /** Injury-risk multiplier used to pick and total this starter (< 1 only for Q / D / O; absent when healthy). */
+  /**
+   * Projection v4's availability for this starter's game THIS week when it is discounted (Questionable 0.85 /
+   * Doubtful 0.7 / Out 0); absent otherwise. Display only ("check status" chip): weekly / effPpg already include it.
+   */
   riskFactor?: number;
 }
 

@@ -85,6 +85,12 @@ export function injuryKind(inj: Player["injury"]): InjuryKind | null {
   return null;
 }
 
+/** Injury report status Questionable (Yahoo "Q" or nflverse "Questionable"). */
+export function isQuestionable(inj: Player["injury"]): boolean {
+  const st = inj?.status.trim().toUpperCase();
+  return st === "Q" || st === "QUESTIONABLE";
+}
+
 /** Replacement rank (1-based) per position for a league's starting slots. */
 export function replacementRanks(slots: SlotKind[], numTeams: number): Record<Position, number> {
   const out = {} as Record<Position, number>;

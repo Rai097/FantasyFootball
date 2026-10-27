@@ -3,8 +3,7 @@ import type { Availability, DetailItem, Position, ValuedPlayer, WaiverBreakout, 
 import { eligible, optimalLineup, slotLabels } from "./lineup.js";
 import { irSet, rosterOf } from "./analysis.js";
 import type { TradeContext } from "./tradeKit.js";
-import { riskStatus } from "./injuryRisk.js";
-import { injuryKind } from "./projection.js";
+import { injuryKind, isQuestionable } from "./projection.js";
 import { luckText } from "./labels.js";
 
 export interface FreeAgentInput {
@@ -241,7 +240,7 @@ export function rankWaivers(
     }
     // An injured player is never worth rolling-list priority sight unseen: hold him as a stash until his status is known.
     // "DNP" = did not practice, no game status yet: treated like Questionable here.
-    const hurt = riskStatus(fa) ?? (fa.injury?.status.trim().toUpperCase() === "DNP" ? "dnp" : null);
+    const hurt = kind === "out" || kind === "return" || kind === "doubtful" || isQuestionable(fa.injury) || fa.injury?.status.trim().toUpperCase() === "DNP";
     if (recommendation === "claim" && hurt && onWaivers && !S.usesFaab) {
       recommendation = "stash";
       rule = `${rule}, but injured: hold until his status is known`;

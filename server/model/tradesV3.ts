@@ -5,7 +5,6 @@ import { FLEX_SLOTS, effPpg, eligible, optimalLineup, slotLabels, usable, type L
 import { applyTrade, combos, fmtSigned, lineupChanges, names, teamState, tradeDeadlinePassed, type TradeContext } from "./tradeKit.js";
 import { irSet } from "./analysis.js";
 import { MODE_WEIGHTS, activeRoster, combine, partsDelta, rosterParts, type ScoreParts, type TradeMode } from "./rosterScore.js";
-import { riskAdjusted } from "./injuryRisk.js";
 import { injuryKind } from "./projection.js";
 import { edgeOf, marketOf, trueOf, type ValueSource } from "./market.js";
 import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";
@@ -364,7 +363,7 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
       const o = overlapFactor(p, myCore, myStart);
       if (o.tag) tags31.push(o.f < 1 ? `${p.name} ${o.tag}` : `stack: ${p.name} + ${o.tag.replace(/^stack with /, "")}`);
       if (o.f < 1) overlap = true;
-      myAfter.push(scaledPlayer(riskAdjusted(p), o.f));
+      myAfter.push(scaledPlayer(p, o.f));
     }
     const theirAfter: ValuedPlayer[] = [];
     for (const p of their.roster) if (!get.includes(p)) theirAfter.push(p);
@@ -543,7 +542,7 @@ export function qbItems(my: TeamV3, their: TeamV3, give: ValuedPlayer[], get: Va
 export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: TeamV3, mode: TradeMode): Trade {
   const S = ctx.league.settings;
   const { give, get } = j;
-  const meAfter = applyTrade(S.slots, my.roster, give, get.map(riskAdjusted), my.irIds);
+  const meAfter = applyTrade(S.slots, my.roster, give, get, my.irIds);
   const themAfter = applyTrade(S.slots, their.roster, get, give, their.irIds);
   const me = sideOf(my.team.id, give, my.base, meAfter, j.myParts, j.myDelta, j.marketGive);
   const them = sideOf(their.team.id, get, their.base, themAfter, j.theirParts, combine(j.theirParts, MODE_WEIGHTS.balanced), j.marketGet);

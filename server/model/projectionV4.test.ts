@@ -96,6 +96,12 @@ test("Out = 0 for his next game only; IR = 0 rest of season; designated to retur
   assert.equal(g("ok").ppg, g("out").ppg, "ppg is the healthy rate");
   assert.ok(g("out").effPpg! < g("ok").effPpg!, "lineup pts/game include the missed week");
   assert.ok(g("ir").whyItems!.some((d) => d.label === "Availability" && /return unconfirmed/.test(d.value)));
+  // availThisWeek (the My Team "check status" chip) carries v4's factor for this week's game only.
+  assert.equal(g("q").availThisWeek, V4.questionable);
+  assert.equal(g("d").availThisWeek, V4.doubtful);
+  assert.equal(g("out").availThisWeek, 0);
+  assert.equal(g("ok").availThisWeek, undefined);
+  assert.equal(g("ir").availThisWeek, undefined, "long-term: no weekly chip, the season is 0");
 });
 
 test("scoring.rec 1.0 vs 0.5: a 6-catch receiver gains ~3 pts/game", () => {
@@ -232,4 +238,5 @@ test("injury availability applies to his NEXT game, even when the current week i
   assert.equal(g("out")[1], 0, "Out for the week-9 game");
   assert.equal(g("out")[2], g("ok")[2], "full after");
   assert.ok(Math.abs(g("q")[1] - g("ok")[1] * V4.questionable) < 0.06);
+  assert.equal(val.players.get("q")!.availThisWeek, undefined, "no game this week: no 'check status' chip");
 });

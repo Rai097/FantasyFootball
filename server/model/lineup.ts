@@ -1,6 +1,5 @@
 // Optimal lineup + slot eligibility. See docs/DESIGN.md "Lineup".
 import type { LineupSlot, Position, SlotKind, ValuedPlayer } from "./types.js";
-import { riskAdjusted, riskFactor } from "./injuryRisk.js";
 
 export const SLOT_ELIGIBILITY: Record<SlotKind, Position[]> = {
   QB: ["QB"],
@@ -43,8 +42,9 @@ const byStrength = (a: ValuedPlayer, b: ValuedPlayer) =>
 
 export interface LineupOptions {
   /**
-   * Rank and total starters on the injury-risk-adjusted rate (Q 0.85 / D 0.70 / O 0.55, see injuryRisk.ts).
-   * The lineup keeps the original player objects; affected slots carry `riskFactor`.
+   * Mark starters whose game THIS week projection v4 discounts (Questionable 0.85 / Doubtful 0.7 / Out 0, from
+   * `ValuedPlayer.availThisWeek`) with `riskFactor`. Display only: v4 already applied the factor to that game in
+   * `weekly` / `effPpg`, so ranking and starterPpg are unchanged (no second haircut).
    */
   injuryRisk?: boolean;
   /**
@@ -61,9 +61,8 @@ export interface LineupOptions {
  */
 export function optimalLineup(slots: SlotKind[], roster: ValuedPlayer[], opts: LineupOptions = {}): LineupResult {
   const starting = slots.map((s, i) => ({ s, i })).filter((x) => isStartingSlot(x.s));
-  const rate = (p: ValuedPlayer) => (opts.injuryRisk ? riskAdjusted(p) : p);
   const ir = opts.irIds;
-  const sorted = (ir?.size ? roster.filter((p) => !ir.has(p.id)) : [...roster]).sort((a, b) => byStrength(rate(a), rate(b)));
+  const sorted = (ir?.size ? roster.filter((p) => !ir.has(p.id)) : [...roster]).sort(byStrength);
   const used = new Set<string>();
   const assigned: (ValuedPlayer | null)[] = new Array(slots.length).fill(null);
   for (const kind of FILL_ORDER) {
@@ -78,11 +77,11 @@ export function optimalLineup(slots: SlotKind[], roster: ValuedPlayer[], opts: L
   }
   const lineup: LineupSlot[] = starting.map(({ s, i }) => {
     const player = assigned[i];
-    const f = opts.injuryRisk && player ? riskFactor(player) : 1;
-    return f < 1 ? { slot: s, player, riskFactor: f } : { slot: s, player };
+    const f = opts.injuryRisk ? player?.availThisWeek : undefined;
+    return f !== undefined && f < 1 ? { slot: s, player, riskFactor: f } : { slot: s, player };
   });
   const bench = roster.filter((p) => !used.has(p.id)).sort((a, b) => b.value - a.value || b.ppg - a.ppg);
-  const starterPpg = lineup.reduce((a, l) => a + effPpg(l.player && rate(l.player)), 0);
+  const starterPpg = lineup.reduce((a, l) => a + effPpg(l.player), 0);
   return { lineup, bench, starterPpg: Math.round(starterPpg * 100) / 100 };
 }
 

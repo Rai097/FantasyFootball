@@ -11,7 +11,7 @@ import type { DetailItem, League, Player, Position, ValuedPlayer } from "./types
 import { SKILL_POSITIONS } from "./types.js";
 import { recFormat, score } from "./scoring.js";
 import { clampItem } from "./details.js";
-import { CONVEXITY, KDEF_CURVE, POSITIONS, curveAt, ecrCurve, injuryKind, replacementRanks, valuationNotes } from "./projection.js";
+import { CONVEXITY, KDEF_CURVE, POSITIONS, curveAt, ecrCurve, injuryKind, isQuestionable, replacementRanks, valuationNotes } from "./projection.js";
 import { computePlayerSignals } from "./signals/index.js";
 import type { PlayerSignalInput, PlayerSignals, SkillPos } from "./signals/types.js";
 import { luckLabel, luckText } from "./labels.js";
@@ -139,7 +139,7 @@ function availKind(p: Player, sig: PlayerSignals | null, currentWeek: number): A
   if (k === "return") return "return";
   if (k === "out") return "out";
   if (k === "doubtful") return "doubtful";
-  if (st === "Q" || st === "QUESTIONABLE") return "questionable";
+  if (isQuestionable(p.injury)) return "questionable";
   return "healthy";
 }
 
@@ -440,6 +440,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     }
     if (label) out.label = label;
     if (x.sig?.trend?.rising) out.riser = true;
+    const now = x.weeks[0];
+    if (now?.game && now.avail < 1 && (x.availKind === "out" || x.availKind === "doubtful" || x.availKind === "questionable")) out.availThisWeek = now.avail;
     return out;
   };
 

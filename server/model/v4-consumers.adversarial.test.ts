@@ -5,7 +5,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { riskAdjusted } from "./injuryRisk.js";
 import { optimalLineup } from "./lineup.js";
 import { analyzeTeams, actualPpg, powerScore } from "./analysis.js";
 import { teamStrength } from "./teamStrength.js";
@@ -30,17 +29,23 @@ const qWeekly = (pts: number) => [0.85 * pts, ...flat(pts).slice(1)];
 const oWeekly = (pts: number) => [0, ...flat(pts).slice(1)];
 const S = league([], SLOTS, { currentWeek: CW }).settings;
 
-test("double haircut: riskAdjusted must not scale a Questionable player's weeks 9–17 (v4 already shaded his next game)", () => {
-  const q = v4p("q", "WR", qWeekly(10), { injury: { status: "Q", week: CW } });
-  const adj = riskAdjusted(q);
-  assert.deepEqual(adj.weekly!.slice(1), q.weekly!.slice(1), `weeks 9-17 ${adj.weekly!.slice(1).map((x) => x.toFixed(2))} (×0.85 again)`);
+// (Corrected by the developer: riskAdjusted was deleted with the whole-season haircut, as the fix requires; these
+// two tests now assert that the haircut path is gone and that trade / lineup math reads v4's weekly as is.)
+test("double haircut: the whole-season injury haircut module is gone and nothing imports it", () => {
+  assert.equal(fs.existsSync(path.join(ROOT, "server/model/injuryRisk.ts")), false);
+  const bad = [...walk(path.join(ROOT, "server")), ...walk(path.join(ROOT, "web/src"))]
+    .filter((f) => !f.endsWith(".adversarial.test.ts"))
+    .filter((f) => /injuryRisk\.js|riskAdjusted|INJURY_RISK/.test(fs.readFileSync(f, "utf8")))
+    .map((f) => path.relative(ROOT, f));
+  assert.deepEqual(bad, []);
 });
 
 test("double haircut: an Out player (0 next game in v4) keeps his weeks 9–17 in trade / lineup math", () => {
-  const o = v4p("o", "RB", oWeekly(12), { injury: { status: "O", week: CW } });
-  const adj = riskAdjusted(o);
-  const lost = 1 - adj.weekly!.reduce((a, b) => a + b, 0) / o.weekly!.reduce((a, b) => a + b, 0);
-  assert.ok(lost < 0.01, `rest-of-season points cut by ${(lost * 100).toFixed(0)}% on top of v4's next-game 0`);
+  const o = v4p("o", "RB", oWeekly(12), { injury: { status: "O", week: CW }, availThisWeek: 0 });
+  const roster = [v4p("qb", "QB", flat(18)), v4p("rb", "RB", flat(5)), o, v4p("w", "WR", flat(9))];
+  const r = optimalLineup(SLOTS, roster, { injuryRisk: true });
+  assert.ok(r.lineup.some((l) => l.player?.id === "o" && l.riskFactor === 0), "starts on rest-of-season points, flagged out this week");
+  assert.ok(Math.abs(r.starterPpg - optimalLineup(SLOTS, roster).starterPpg) < 0.01, "no haircut on top of v4's next-game 0");
 });
 
 test("double haircut: lineup starterPpg for a Questionable starter equals his v4 effPpg (no second ×0.85)", () => {
