@@ -885,3 +885,55 @@ Owner-specific worked cases live outside the repo (public).
   `/values` without `?team=` uses the league default team's mode (the UI always sends its team); Trade Finder v3's
   "out 4+ weeks" rule counts bye-only weeks while v4 counts scheduled games (off by one in the week-7 data state);
   `rosterScore.weeklyPoints` still derives weekly points from ppg for hand-built players without `weekly` (fixtures).
+
+**Release (c) implemented (2026-10-26) — returns and Stash watch** (overrides section 4 and the (b) availability rules)
+* **Data reality** (2026 cache, week 7): the injuries file has ONE row per player-week (the week's final practice
+  participation + game status), so the "DNP → limited → full" trend is read week over week, not day by day; practice
+  strings are matched by prefix (`Full…` / `Limited…` / `Did Not…`). Players on IR are absent from the report until a
+  practice window opens: 8 of 110 RES skill players have a week-7 row. Roster `status_description_abbr` is now kept
+  (`RosterInfo.statusCode`, `PlayerSignals.rosterCode`): R48 = injured, designated to return (verified: R48 players
+  practise in the report and one is ACT again after his window), R01 = injured reserve, R04 = PUP. No suspension code
+  exists in the cache: a suspension is detectable only from a Yahoo "SUSP" tag, and its length never is. Skill players
+  without a game but on a reserve list or the injury report now get a signal input (empty games) so their code and
+  practice series reach the estimator; `ProjectionTables.playedWeeks` (games.csv rows with a result) gives games missed.
+* **Return estimator** (`server/model/returns.ts`, pure): input = absence (reserve / designated to return / ruled out /
+  suspended / season over), roster status + code, practice series, the team's remaining game weeks ("next game" = the
+  first unplayed one, never a bye), games missed, last game week. Rules, in order:
+  - full practice this week and not ruled out ⇒ next game, high; full but ruled out ⇒ the game after next, medium;
+  - limited this week ⇒ next game (Questionable / Doubtful / no status) or the game after next (Out), medium;
+  - designated to return without a full/limited row this week ⇒ inside the 21-day window (start = first practice row
+    of this absence, else this week; estimate = 2 weeks after the start, capped at the window end), medium (low with a
+    did-not-practise row this week);
+  - ruled out of one game, not on a reserve list ⇒ the game after next, medium (low after ≥ 2 missed games);
+  - reserve list without a practice signal, suspension, season-ending detail ⇒ unknown ("return unconfirmed"), never a week;
+  - IR minimum (4 games, IR / PUP / roster RES) is a floor: an earlier estimate moves to the first eligible game and
+    loses "high"; an unknown return still reports "wk N at the earliest". A practice row older than his last game is ignored.
+* **Projection v4**: absent ⇒ 0 before the return week, × 0.85 for the first game back after a reserve-list absence
+  (not after a one-game "Out"), then 1; unknown ⇒ 0 every week (lineups, value). Replaces "designated to return = 0
+  for 4 games" and "RES = 0 for the rest of the season". `ValuedPlayer.ret` = { week | null, confidence, reasons,
+  absent, practiceUp, earliestWeek?, healthyRate?, healthySource?, playoffPts?, stashScore?, returnValue?, tradeValue? }.
+  - Healthy-role rate = the pre-anchor model rate with ≥ 2 unflagged games (the ECR rank already prices the absence,
+    so anchoring would count the injury twice), else last season's expected points per game (≥ 4 games), else unknown.
+  - Unknown return: `returnValue` = healthy rate × matchup over his games from current week + 4 × 0.5 (stash ranking
+    and the IR "hold" line only); `tradeValue` = the same weekly points on the 0–100 value scale (trades only).
+  - Stash score = Σ from the return week of healthy rate × matchup × ramp, playoff weeks × 1.0, earlier × 0.33, × the
+    confidence weight (high 1, medium 0.85, low 0.7; unknown: the 0.5 already applied). `playoffPts` = weeks 15–17 part.
+* **Stash watch** (`server/model/stash.ts`, GET /waivers `stash`, Waivers tab section): unrostered skill players with
+  `ret` (absent, or not listed but 0 snaps in his team's last 2 games), an NFL team, a healthy-role rate ≥ the
+  position's flex level (healthy rate at the trend's FLEX_RANK — RB30 / WR40 / TE14 — QB at league size; a points
+  version of release (b)'s flex level, which is defined on the opportunity metric and needs ≥ 3 games), ranked by
+  stash score, max 10. Calls: free agent "Add now while free", on waivers "On waivers — claim only if priority is
+  cheap" (FAAB: "bid only a little"), not captured "Status unknown — add only if he is a free agent". Flag "practice
+  upgrade: about to become a waiver fight" when this week's participation beats last week's (limited or full).
+  Availability comes from the free-agent input (import / Yahoo / demo list); a player outside it is "status unknown".
+* **My Team**: an IR / Out / reserve player shows "hold: back ~wk N (conf)" or "hold: return unconfirmed" with playoff
+  points on return and a "?" with the evidence. The analysis payload carries `ret` for the request team only.
+* **Trades v3**: `tradeValueOf(p) = max(value, ret.tradeValue)` feeds true value (`trueOf`), the market quantile
+  mapping and `marketOf`'s fallback, so an injured star is not worth 0; the card adds "Injured, you give / get".
+  Finder eligibility is unchanged (IR / out 4+ weeks are still not suggested); the evaluate route values them.
+* **Counts (2026 cache, demo league 42, week 7)**: 128 absent players with an estimate — 2 high, 24 medium, 2 low,
+  100 return unconfirmed; 1 flex-level 0-snap player; flex levels QB 19.1 / RB 10.2 / WR 8.6 / TE 8.0 pts/game;
+  3 Stash watch candidates (the demo's 12 full rosters hold most injured starters).
+* Known gaps: practice is one row per week (no Wednesday→Friday trend); suspension length is never known; the 0-snap
+  rule uses his current team's games (a traded player's old team is not consulted); Finder suggestions still skip
+  injured players; the 21-day window start is a guess when the practice row is missing.
