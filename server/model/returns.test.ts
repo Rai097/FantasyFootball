@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { estimateReturn, practiceLevel, returnText, type ReturnInput } from "./returns.js";
+import { estimateReturn, mergeStatusWeeks, practiceLevel, returnText, type ReturnInput } from "./returns.js";
 
 const FULL = "Full Participation in Practice";
 const LTD = "Limited Participation in Practice";
@@ -103,4 +103,32 @@ test("practice upgrade only after a real absence: hurt in last week's game, limi
   assert.equal(back.practiceUp, true, "missed a game, now practising: an upgrade");
   const none = estimateReturn(base({ rosterStatus: "RES", lastGameWeek: undefined, gamesMissed: 7 }));
   assert.ok(none.reasons.some((r) => r.label === "Missed" && /all 7 of his team's games this season/.test(r.value)));
+});
+
+test("duplicate rows for one week merge to the most severe (lowest known practice, worst game status), in any order", () => {
+  const a = { week: 8, practice: FULL };
+  const b = { week: 8, practice: LTD, report: "Questionable" };
+  const c = { week: 8, report: "Out" };
+  for (const rows of [[a, b, c], [c, b, a], [b, c, a]]) assert.deepEqual(mergeStatusWeeks(rows), [{ week: 8, practice: LTD, report: "Out" }]);
+  assert.deepEqual(mergeStatusWeeks([{ week: 9 }, { week: 7, practice: DNP }]).map((s) => s.week), [7, 9]);
+});
+
+test("designated to return past his 21-day window, not practising this week ⇒ unknown, the window stays visible", () => {
+  const r = estimateReturn(base({ absence: "dtr", rosterStatus: "RES", rosterCode: "R48", lastGameWeek: 1, status: [{ week: 3, practice: LTD }] }));
+  assert.equal(r.returnWeek, null);
+  assert.equal(r.confidence, "unknown");
+  assert.ok(r.reasons.some((d) => d.label === "Designated to return" && /wk 3–6/.test(d.value)));
+  assert.ok(r.reasons.some((d) => d.label === "Return" && /window closed after wk 6/.test(d.value)));
+});
+
+test("IR minimum with no eligible game left: the bullet says so in words", () => {
+  const r = estimateReturn(base({ currentWeek: 16, gameWeeks: [16, 17], rosterStatus: "RES", gamesMissed: 0, lastGameWeek: 15 }));
+  assert.equal(r.returnWeek, null);
+  assert.equal(r.reasons.find((d) => d.label === "IR minimum")?.value, "4 games: missed 0, no eligible game left this season");
+});
+
+test("absent on the league source's word only (import IR tag, nflverse active): unknown, says the league lists him on IR", () => {
+  const r = estimateReturn(base({ leagueOnly: true, rosterStatus: "ACT", gamesMissed: 1, lastGameWeek: 6 }));
+  assert.equal(r.returnWeek, null);
+  assert.equal(r.reasons.find((d) => d.label === "Return")?.value, "league lists him on IR, no practice signal: return unconfirmed");
 });

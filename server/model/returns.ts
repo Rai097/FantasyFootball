@@ -44,6 +44,8 @@ export interface ReturnInput {
   rosterCode?: string;
   /** On IR / PUP per the league source (Yahoo "IR", "PUP-…") even when nflverse has not caught up. */
   onIr?: boolean;
+  /** The absence comes from the league source only (e.g. a Yahoo import: Out in an IR slot), nflverse lists him active. */
+  leagueOnly?: boolean;
   /** Injury report + practice participation per week (any order). */
   status: StatusWeek[];
   /** The week whose games are next (league settings). */
@@ -78,9 +80,39 @@ export function practiceLevel(s: string | undefined): number {
 
 const LEVEL_TEXT = ["no practice listed", "did not practice", "limited", "full"];
 
+/** Game-status severity: Out 3, Doubtful 2, Questionable 1, anything else 0. */
+function reportSeverity(r: string | undefined): number {
+  const s = (r ?? "").trim().toLowerCase();
+  return s === "out" ? 3 : s === "doubtful" ? 2 : s === "questionable" ? 1 : 0;
+}
+
+/**
+ * One row per week, whatever the input order: duplicate rows for a week (a traded player listed by both teams) merge
+ * to the most severe — the lowest known practice level and the most severe game status.
+ */
+export function mergeStatusWeeks(status: StatusWeek[]): StatusWeek[] {
+  const byWeek = new Map<number, StatusWeek>();
+  for (const s of status) {
+    const cur = byWeek.get(s.week);
+    if (!cur) {
+      byWeek.set(s.week, { ...s });
+      continue;
+    }
+    const a = practiceLevel(cur.practice);
+    const b = practiceLevel(s.practice);
+    const practice = a === 0 ? s.practice : b === 0 ? cur.practice : b < a ? s.practice : cur.practice;
+    const report = reportSeverity(s.report) > reportSeverity(cur.report) ? s.report : cur.report;
+    const merged: StatusWeek = { week: s.week };
+    if (practice) merged.practice = practice;
+    if (report) merged.report = report;
+    byWeek.set(s.week, merged);
+  }
+  return [...byWeek.values()].sort((a, b) => a.week - b.week);
+}
+
 export function estimateReturn(x: ReturnInput): ReturnEstimate {
   const { items: reasons, add } = detailBuilder();
-  const sorted = [...x.status].sort((a, b) => a.week - b.week);
+  const sorted = mergeStatusWeeks(x.status);
   const thisWeek = sorted.find((s) => s.week === x.currentWeek);
   const prevWeek = sorted.find((s) => s.week === x.currentWeek - 1);
   const lvl = practiceLevel(thisWeek?.practice);
@@ -103,7 +135,8 @@ export function estimateReturn(x: ReturnInput): ReturnEstimate {
   // IR minimum: games he still has to miss (a floor, never an estimate on its own).
   const irLeft = ir && x.gamesMissed !== null && x.gamesMissed < RETURNS.irMinGames ? RETURNS.irMinGames - x.gamesMissed : 0;
   const earliestWeek = irLeft ? x.gameWeeks[irLeft] : undefined;
-  if (irLeft) add("IR minimum", `${RETURNS.irMinGames} games: missed ${x.gamesMissed}, eligible from wk ${earliestWeek ?? "—"}`);
+  if (irLeft)
+    add("IR minimum", `${RETURNS.irMinGames} games: missed ${x.gamesMissed}, ${earliestWeek !== undefined ? `eligible from wk ${earliestWeek}` : "no eligible game left this season"}`);
   if (x.gamesMissed !== null && x.gamesMissed > 0 && !irLeft)
     add("Missed", x.lastGameWeek === undefined ? `all ${x.gamesMissed} of his team's games this season` : `${x.gamesMissed} of his team's games since his last game`);
   if (thisWeek && lvl > 0) {
@@ -131,13 +164,16 @@ export function estimateReturn(x: ReturnInput): ReturnEstimate {
     idx = x.gameWeeks.length ? i : null;
     conf = lvl === 1 ? "low" : "medium";
     add("Designated to return", `21-day practice window wk ${start}–${end}`);
+    // Past the window without practising this week he reverts to season-ending IR: no evidence of a return.
+    if (end < x.currentWeek) return unknown(`practice window closed after wk ${end}: return unconfirmed`);
   } else if (x.absence === "out") {
     // Ruled out of his next game only (not on a reserve list): back the game after.
     idx = 1;
     conf = x.gamesMissed !== null && x.gamesMissed >= 2 ? "low" : "medium";
     add("Read", "ruled out of his next game, not on IR");
   } else {
-    return { ...unknown("on a reserve list, not practising: return unconfirmed"), ...(earliestWeek !== undefined ? { earliestWeek } : {}) };
+    const why = x.leagueOnly ? "league lists him on IR, no practice signal: return unconfirmed" : "on a reserve list, not practising: return unconfirmed";
+    return { ...unknown(why), ...(earliestWeek !== undefined ? { earliestWeek } : {}) };
   }
 
   if (idx !== null && idx < irLeft) {
