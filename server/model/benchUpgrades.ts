@@ -85,6 +85,8 @@ export function findBenchUpgrades(ctx: TradeContext, myTeamId: string, opts: { m
         if (!ok(m, g, Infinity, partner.id)) continue; // eligibility / QB rule / real assets before simulating
         const j = J([m], [g]);
         if (j.fairness < BENCH.minFairness || j.myDelta <= 0.05) continue;
+        // Same rule as the main list: a swap the partner's Yahoo-style view shows as a loss is never suggested.
+        if (j.perceivedLoss) continue;
         if (!ok(m, g, j.myParts.season, partner.id)) continue;
         scored.push({ j, their, m, g });
       }
