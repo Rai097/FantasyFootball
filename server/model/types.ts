@@ -78,8 +78,11 @@ export interface Player {
   headshot?: string;
   /** Yahoo's projected fantasy points for the rest of the season (league scoring), captured by the import bookmarklet. */
   yahooProj?: number;
-  /** Yahoo's projected fantasy points for the current week, captured by the import bookmarklet. */
+  /** Yahoo's projected fantasy points for the current week, captured by the import bookmarklet (set only while the
+   *  capture week is the current NFL week: a stale weekly number is dropped). */
   yahooProjWeekly?: number;
+  /** NFL week the rest-of-season total starts at (the capture week); unset = the current week (unknown age). */
+  yahooProjWeek?: number;
 }
 
 /** Player + league-specific numbers. */

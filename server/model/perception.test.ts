@@ -77,3 +77,40 @@ test("perceived lineup total: Yahoo-style optimal lineup per week on perceived p
   assert.equal(perceivedLineupTotal(S2, [a, b, q], new Set(["a"])), 60, "IR-slot players never start");
   assert.deepEqual(yahooCoverage([a, b, vp("c", "RB", 5, 1), vp("k", "K", 8, 1)]), { captured: 2, total: 3 });
 });
+
+// ---------------------------------------------------------------- fix round 1 (release (d))
+
+const ret = { week: 10, confidence: "medium" as const, reasons: [], absent: true, practiceUp: false };
+const hot = [wk(5, 120, 1), wk(6, 100, 1), wk(7, 90, 1)];
+
+test("captured: weeks our model has an injured player out are 0 on Yahoo's view too, and Yahoo's total spreads over his games back", () => {
+  // Out weeks 8–9, back from week 10 (no bye in 8..17): 8 games back, Yahoo projects 40 → 5 per game.
+  const p = vp("o", "WR", 5, 10, { weekly: [0, 0, 5, 5, 5, 5, 5, 5, 5, 5], weeklyFrom: 8, yahooProj: 40, ret });
+  const pc = perceive(p, S);
+  assert.equal(pc.base, 5);
+  assert.deepEqual(pc.weekly.slice(0, 3), [0, 0, 5]);
+  assert.equal(pc.total, 40);
+  // The estimate shows the same weeks out.
+  const est = perceive(vp("e", "WR", 5, 10, { weekly: [0, 0, 5, 5, 5, 5, 5, 5, 5, 5], weeklyFrom: 8, ecrPts: 5, ret }), S);
+  assert.deepEqual(est.weekly.map((v) => v > 0), pc.weekly.map((v) => v > 0));
+});
+
+test("captured: Yahoo projecting 0 stays 0 even when our model has him healthy and he was hot (no recency resurrection)", () => {
+  const pc = perceive(vp("z", "WR", 12, 20, { weekly: flat(12), weeklyFrom: 8, yahooProj: 0, weeks: hot }), S);
+  assert.equal(pc.rate, 0);
+  assert.equal(pc.total, 0);
+});
+
+test("captured last week: Yahoo's total also covered the game since played, so the per-game base divides by it", () => {
+  // Captured in week 7, now week 8, bye week 10: games 8..17 minus the bye = 9, plus week 7 = 10 → 130 / 10 = 13.
+  const pc = perceive(vp("c", "WR", 10, 20, { bye: 10, yahooProj: 130, yahooProjWeek: 7 }), S);
+  assert.equal(pc.base, 13);
+  assert.equal(pc.total, 13 * 9);
+  // Captured this week: unchanged rule (9 games → 130 / 9).
+  assert.equal(perceive(vp("d", "WR", 10, 20, { bye: 10, yahooProj: 117, yahooProjWeek: 8 }), S).base, 13);
+});
+
+test("coverage counts a this-week-only capture too (the headline never says 'not captured' while Yahoo numbers are used)", () => {
+  const wkOnly = vp("w", "WR", 10, 20, { yahooProjWeekly: 14 });
+  assert.deepEqual(yahooCoverage([wkOnly, vp("n", "RB", 8, 10)]), { captured: 1, total: 2 });
+});

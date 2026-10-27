@@ -1,12 +1,14 @@
 // Perceived value (Model v4 release (d), docs/DESIGN.md "Model v4" section 5): how the OTHER manager sees a player.
 // Managers judge trades by Yahoo's evaluator (Yahoo's projections in weekly optimal lineups) and by recent box
 // scores, not by market values. Their view of a player:
-//   base   = Yahoo's rest-of-season projection ÷ his remaining games (captured by the bookmarklet), else the
-//            FantasyPros rest-of-season rank read as points (projection v4's ECR curve), else our own rate;
+//   base   = Yahoo's rest-of-season projection ÷ the games it covers (captured by the bookmarklet: his games from the
+//            capture week, minus weeks our model has an injured / missing player out), else the FantasyPros
+//            rest-of-season rank read as points (projection v4's ECR curve), else our own rate;
 //   rate   = 0.7 × base + 0.3 × his last 3 games' actual points (recency bias; games in the last 4 weeks only);
-//   weekly = rate in every remaining week he has a game (estimate: only weeks our model has him available —
-//            the experts' rank does not price a week he is out); Yahoo's own weekly projection, when captured,
-//            replaces this week on either source.
+//            a Yahoo projection of 0 stays 0 (recency never resurrects a player Yahoo shows as done);
+//   weekly = rate in every remaining week he has a game, except weeks our model has him out (both sources: the
+//            captured view and the estimate agree on an out player); Yahoo's own weekly projection, when captured
+//            this NFL week, replaces this week on either source.
 //   gap    = our playoff-weighted rate − perceived rate (+ = they underrate him).
 // Pure. The weekly arrays are cached per player object (never serialised: the Values payload stays small).
 import type { LeagueSettings, ValuedPlayer } from "./types.js";
@@ -87,7 +89,6 @@ export function perceive(p: ValuedPlayer, S: LeagueSettings, hasGame: GameCheck 
   const n = Math.max(0, S.finalWeek - S.currentWeek + 1);
   const games: boolean[] = [];
   for (let i = 0; i < n; i++) games.push(hasGame(p, S.currentWeek + i));
-  const gameCount = games.filter(Boolean).length;
 
   // Our playoff-weighted rate over the weeks he has a game.
   const playoffStart = S.regularSeasonEnd + 1;
@@ -102,11 +103,21 @@ export function perceive(p: ValuedPlayer, S: LeagueSettings, hasGame: GameCheck 
   }
   const ourRate = den > 0 ? num / den : 0;
 
+  // Weeks he is shown playing: a game, and (for a player our model flags injured / missing) our model has him back.
+  // The estimate follows our availability for everyone (the experts' rank does not price a week he is out).
+  const flagged = !!p.ret;
+  const plays: boolean[] = games.map((g, i) => g && (ourWeek(p, S, i) > 0 || !flagged));
+
   let source: PerceptionSource;
   let base: number;
   if (p.yahooProj !== undefined && Number.isFinite(p.yahooProj)) {
     source = "yahoo";
-    base = gameCount ? p.yahooProj / gameCount : 0;
+    // Yahoo's total covers his games from the week it was captured (an older capture also covers games since played:
+    // counted by bye week); the weeks we have him out are not his games.
+    const from = Math.min(p.yahooProjWeek ?? S.currentWeek, S.currentWeek);
+    let covered = plays.filter(Boolean).length;
+    for (let w = from; w < S.currentWeek; w++) if (byeOnly(p, w)) covered++;
+    base = covered ? p.yahooProj / covered : 0;
   } else if (p.ecrPts !== undefined && Number.isFinite(p.ecrPts)) {
     source = "ecr";
     base = p.ecrPts;
@@ -118,17 +129,13 @@ export function perceive(p: ValuedPlayer, S: LeagueSettings, hasGame: GameCheck 
 
   const recent = recentGames(p, S);
   const recentMean = recent.length ? recent.reduce((a, g) => a + g.pts, 0) / recent.length : undefined;
-  const rate = Math.max(0, recentMean !== undefined ? (1 - PERCEPTION.recencyWeight) * base + PERCEPTION.recencyWeight * recentMean : base);
+  const yahooZero = source === "yahoo" && base <= 0;
+  const rate = yahooZero ? 0 : Math.max(0, recentMean !== undefined ? (1 - PERCEPTION.recencyWeight) * base + PERCEPTION.recencyWeight * recentMean : base);
 
   const weekly: number[] = [];
   for (let i = 0; i < n; i++) {
     let v = 0;
-    if (games[i]) {
-      // Yahoo's rest-of-season total already prices his absences; the experts' rank does not, so the estimate
-      // follows our availability (an IR player is not shown starting for them).
-      if (source === "yahoo") v = rate;
-      else v = ourWeek(p, S, i) > 0 ? rate : 0;
-    }
+    if (games[i]) v = (source === "yahoo" ? plays[i] : ourWeek(p, S, i) > 0) ? rate : 0;
     // Yahoo's own number for this week wins whenever captured (also when the rest-of-season view was not found).
     if (i === 0 && p.yahooProjWeekly !== undefined && Number.isFinite(p.yahooProjWeekly)) v = games[0] ? Math.max(0, p.yahooProjWeekly) : 0;
     weekly.push(r2(v));
@@ -187,8 +194,8 @@ export function perceivedLineupTotal(S: LeagueSettings, roster: ValuedPlayer[], 
   return total;
 }
 
-/** How many rostered skill players carry a captured Yahoo projection (for "captured" vs "estimate" labels). */
+/** How many rostered skill players carry a captured Yahoo projection, rest of season or this week ("captured" vs "not captured yet"). */
 export function yahooCoverage(players: ValuedPlayer[]): { captured: number; total: number } {
   const skill = players.filter((p) => p.pos !== "K" && p.pos !== "DEF");
-  return { captured: skill.filter((p) => p.yahooProj !== undefined).length, total: skill.length };
+  return { captured: skill.filter((p) => p.yahooProj !== undefined || p.yahooProjWeekly !== undefined).length, total: skill.length };
 }
