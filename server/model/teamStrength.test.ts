@@ -40,3 +40,34 @@ test("IR-slot players never count; after the season everything is 0", () => {
   const late = league([], SLOTS, { currentWeek: 18 }).settings;
   assert.deepEqual(teamStrength(late, roster), { lineup: 0, depth: 0, total: 0, weeks: [] });
 });
+
+// Injured trade pieces fix round 1 (owner 2026-10-26): a returner counts at his expected availability in the playoffs.
+const back = (id: string, pts: number, week: number) =>
+  P(id, "WR", pts, Array.from({ length: week - 8 }, (_, i) => 8 + i));
+test("IR slot: a player back ~wk 12 counts in the playoff lineup from his return (he leaves the IR slot); out for the season or no return estimate never", () => {
+  const base = [P("qb", "QB", 20), P("rb", "RB", 15), P("wr", "WR", 14), P("wr2", "WR", 10)];
+  const star = back("star", 30, 12);
+  star.ret = { week: 12, confidence: "medium", reasons: [], absent: true, practiceUp: false };
+  const ir = new Set(["star"]);
+  // Playoff lineup: QB 20 + RB 15 + WR star 30 + FLEX wr 14 = 79 (wr2 to the bench).
+  assert.equal(teamStrength(S, [...base, star], ir).lineup, 79);
+  const done = { ...star, ret: { ...star.ret, seasonOver: true as const } };
+  assert.equal(teamStrength(S, [...base, done], ir).lineup, 59, "out for the season: never");
+  const { ret: _r, ...noRet } = star;
+  assert.equal(teamStrength(S, [...base, noRet], ir).lineup, 59, "no return estimate: never");
+});
+
+test("return unconfirmed: ½ × healthy rate from week current + 4 (ret.expWeekly), in or out of the IR slot", () => {
+  const base = [P("qb", "QB", 20), P("rb", "RB", 15), P("wr", "WR", 14), P("wr2", "WR", 10)];
+  const unk = vp("unk", "WR", 0, 0, {
+    remainingGames: 0, weeklyFrom: 8, weekly: Array(10).fill(0),
+    ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false, healthyRate: 28, tradeValue: 30, expWeekly: [0, 0, 0, 0, 14, 14, 14, 14, 14, 14] },
+  });
+  // Playoffs: unk 14 beats wr2 10 at FLEX → +4 per week.
+  assert.equal(teamStrength(S, [...base, unk]).lineup, 63);
+  assert.equal(teamStrength(S, [...base, unk], new Set(["unk"])).lineup, 63);
+  // Fixture without expWeekly: the same convention from the healthy rate (byes 0).
+  const { expWeekly: _e, ...ret } = unk.ret!;
+  assert.equal(teamStrength(S, [...base, { ...unk, ret }]).lineup, 63);
+  assert.equal(teamStrength(S, [...base, { ...unk, ret: { ...ret, seasonOver: true as const } }]).lineup, 59);
+});

@@ -2,6 +2,7 @@
 import type { LeagueSettings, Position, SlotKind, ValuedPlayer } from "./types.js";
 import { effPpg, isStartingSlot, SLOT_ELIGIBILITY, usable } from "./lineup.js";
 import { floorFactor } from "./signals.js";
+import { RETURNS } from "./returns.js";
 
 export type TradeMode = "now" | "balanced" | "playoffs";
 export const TRADE_MODES: TradeMode[] = ["now", "balanced", "playoffs"];
@@ -60,6 +61,23 @@ export function scoreWeeks(S: LeagueSettings): { weeks: number[]; playoff: boole
 const weeklyCache = new WeakMap<LeagueSettings, WeakMap<ValuedPlayer, Float64Array>>();
 
 /**
+ * Expected points in remaining week index i (weeks currentWeek..finalWeek) of a player whose return is unconfirmed
+ * (owner 2026-10-26, injured trade pieces fix round 1): `ret.expWeekly` (projection v4: healthy rate × matchup × 0.5
+ * from current week + 4 — the convention behind ret.returnValue / playoffPts). Fixtures without it: healthy rate × 0.5
+ * outside the bye from current week + 4. undefined = not an unconfirmed return, out for the season, or no healthy rate.
+ */
+export function unconfirmedWeek(p: ValuedPlayer, S: LeagueSettings, i: number): number | undefined {
+  const r = p.ret;
+  if (!r || r.week !== null || !r.absent || r.seasonOver || r.healthyRate === undefined) return undefined;
+  if (r.expWeekly) {
+    const v = r.expWeekly[i];
+    return v !== undefined && Number.isFinite(v) && v > 0 ? v : 0;
+  }
+  const w = S.currentWeek + i;
+  return w < S.currentWeek + RETURNS.unknownOffset || p.bye === w ? 0 : r.healthyRate * RETURNS.unknownWeight;
+}
+
+/**
  * Expected points per remaining week (weeks currentWeek..finalWeek): projection v4's `weekly` (bye / no game = 0,
  * availability and matchups applied). Hand-built players without a projection (test fixtures) derive it from ppg:
  * 0 on the bye, healthy ppg otherwise, with the games the injury model removed (weeksLeft − remainingGames) taken
@@ -89,6 +107,8 @@ export function weeklyPoints(p: ValuedPlayer, S: LeagueSettings): Float64Array {
       out[i] = p.ppg * (1 - miss);
     }
   }
+  // Return unconfirmed: projection v4 has him at 0; lineups count his expected points (healthy × 0.5 from week + 4).
+  if (p.ret && p.ret.week === null) for (let i = 0; i < n; i++) if (!(out[i] > 0)) out[i] = unconfirmedWeek(p, S, i) ?? 0;
   byS.set(p, out);
   return out;
 }
@@ -270,9 +290,31 @@ export function rosterParts(S: LeagueSettings, roster: ValuedPlayer[], replaceme
   };
 }
 
-/** Roster without a team's IR-slotted players: what rosterParts scores for that team (IR adds no lineup or depth points). */
+const irViews = new WeakMap<ValuedPlayer, ValuedPlayer>();
+const NO_WEEKS: number[] = [];
+
+/**
+ * A player in his team's IR slot as that team's lineups see him (owner 2026-10-26, injured trade pieces fix round 1):
+ * never a starter or bench depth this week (effPpg 0); from his return week his weekly points count — he leaves the
+ * IR slot when healthy (projection v4 has him at 0 before it; an unconfirmed return counts ret.expWeekly). Without a
+ * return estimate (no `ret`) or out for the season he never plays. Cached per player object (one view each).
+ */
+export function irSlotView(p: ValuedPlayer): ValuedPlayer {
+  let v = irViews.get(p);
+  if (!v) {
+    if (p.ret && !p.ret.seasonOver) v = { ...p, effPpg: 0 };
+    else {
+      const { ret: _ret, ...rest } = p;
+      v = { ...rest, effPpg: 0, remainingGames: 0, weekly: NO_WEEKS, weeklyFrom: 0 };
+    }
+    irViews.set(p, v);
+  }
+  return v;
+}
+
+/** The roster a team's lineups score: IR-slot players as irSlotView (back from their return week, never this week). */
 export function activeRoster(roster: ValuedPlayer[], irIds: ReadonlySet<string>): ValuedPlayer[] {
-  return irIds.size ? roster.filter((p) => !irIds.has(p.id)) : roster;
+  return irIds.size ? roster.map((p) => (irIds.has(p.id) ? irSlotView(p) : p)) : roster;
 }
 
 /** Score any roster under league settings (no drops). */

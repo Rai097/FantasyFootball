@@ -188,6 +188,13 @@ export interface ReturnInfo {
   stashScore?: number;
   /** 0–100 trade value from returnValue (week null, absent only): what trades use instead of 0. */
   tradeValue?: number;
+  /**
+   * Only when week is null (absent, not out for the season, healthy rate known): expected points per remaining week
+   * (weeks currentWeek..finalWeek, 0.1-rounded) = healthy rate × matchup × 0.5 from current week + 4, 0 before and on
+   * byes — the weeks behind returnValue / playoffPts. Lineups, team strength and the partner's view count these
+   * (owner 2026-10-26, injured trade pieces fix round 1); `weekly` stays 0 (value is not discounted twice).
+   */
+  expWeekly?: number[];
 }
 
 export type SlotKind = "QB" | "RB" | "WR" | "TE" | "K" | "DEF" | "FLEX" | "SFLEX" | "RFLEX" | "WRRB" | "BN" | "IR";

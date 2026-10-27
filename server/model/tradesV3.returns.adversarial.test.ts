@@ -102,3 +102,37 @@ test("market edge: a 'return unconfirmed' player is never pitched as 'market und
   const tag = ev.tags.find((t) => /market undervalues: tIR/.test(t));
   assert.equal(tag, undefined, `tag "${tag}" on a player whose return is unconfirmed (edge ${c.players.get("tIR")!.edge})`);
 });
+
+// Injured trade pieces fix round 1 (owner 2026-10-26): an injured piece is never free — giving him away costs my
+// playoff lineup his expected points (unconfirmed: ½ × healthy rate from week current + 4; back ~wk N: from wk N).
+const playoffGain = (t: { details?: { label: string; value: string }[] }) => {
+  const d = t.details!.find((x) => x.label === "Playoff lineup")!;
+  return Number(d.value.replace("−", "-").match(/^[-+][\d.]+/)![0]);
+};
+test("an unconfirmed-return sweetener is not free: adding him to my side lowers my playoff gain (in or out of my IR slot)", () => {
+  for (const inIr of [false, true]) {
+    const { mine, theirs } = rosters();
+    // Healthy 30 pts/g → 15/wk expected from week 12 (½ × healthy): he would start at WR in my playoff weeks.
+    mine.find((p) => p.id === "mIR")!.ret = UNK(70, 30);
+    const c = ctxFor(league([team("me", mine, inIr ? { irPlayerIds: ["mIR"] } : {}), team("them", theirs)], undefined, { currentWeek: 8 }), [...mine, ...theirs]);
+    const plain = evaluateTradeV3(c, "me", "them", ["mRB4"], ["tWR1"]);
+    const sweet = evaluateTradeV3(c, "me", "them", ["mRB4", "mIR"], ["tWR1"]);
+    // After either deal tWR1 and he start at WR in the playoffs (15/wk); without him mWR1 (10) does: giving him costs
+    // ≈ 15 − 10 = 5 per week (+ a little depth) — before fix round 1 he counted 0 and rode along for free.
+    const cost = playoffGain(plain) - playoffGain(sweet);
+    assert.ok(cost >= 4.9 && cost <= 6, `IR slot ${inIr}: with the injured piece ${playoffGain(sweet)} vs without ${playoffGain(plain)}`);
+  }
+});
+
+test("IR slot: a player back ~wk 12 that I give costs my playoff lineup his points; out for the season costs nothing", () => {
+  const run = (seasonOver: boolean) => {
+    const { mine, theirs } = rosters();
+    const star = mine.find((p) => p.id === "mIR")!;
+    Object.assign(star, { ppg: 18, remainingGames: 6, weeklyFrom: 8, weekly: [0, 0, 0, 0, 18, 18, 18, 18, 18, 18], ret: { week: 12, confidence: "medium", reasons: [], absent: true, practiceUp: false, ...(seasonOver ? { seasonOver: true } : {}) } });
+    const c = ctxFor(league([team("me", mine, { irPlayerIds: ["mIR"] }), team("them", theirs)], undefined, { currentWeek: 8 }), [...mine, ...theirs]);
+    return playoffGain(evaluateTradeV3(c, "me", "them", ["mIR"], ["tWR5"]));
+  };
+  // Back for the playoffs at 18/wk: trading him for an 11-pt WR loses playoff points; out for the season: a free gain.
+  assert.ok(run(false) < 0, `back ~wk 12 given away: ${run(false)}`);
+  assert.ok(run(true) > 0, `out for the season given away: ${run(true)}`);
+});

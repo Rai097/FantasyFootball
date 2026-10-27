@@ -114,3 +114,27 @@ test("coverage counts a this-week-only capture too (the headline never says 'not
   const wkOnly = vp("w", "WR", 10, 20, { yahooProjWeekly: 14 });
   assert.deepEqual(yahooCoverage([wkOnly, vp("n", "RB", 8, 10)]), { captured: 1, total: 2 });
 });
+
+// Injured trade pieces fix round 1 (owner 2026-10-26).
+const UNC = { week: null, confidence: "unknown" as const, reasons: [], absent: true, practiceUp: false, healthyRate: 20, tradeValue: 25, expWeekly: [0, 0, 0, 0, 10, 10, 10, 10, 10, 10] };
+test("return unconfirmed: the partner sees our expected points (½ × healthy from week + 4) on both sources — estimate and captured Yahoo agree", () => {
+  const est = perceive(vp("u1", "WR", 0, 0, { remainingGames: 0, ecrPts: 6, weekly: flat(0), weeklyFrom: 8, ret: UNC }), S);
+  const yah = perceive(vp("u2", "WR", 0, 0, { remainingGames: 0, yahooProj: 0, weekly: flat(0), weeklyFrom: 8, ret: UNC }), S);
+  assert.deepEqual(est.weekly, UNC.expWeekly);
+  assert.deepEqual(yah.weekly, est.weekly, "Yahoo's ~0 for an IR player does not erase the bet on his recovery");
+  const over = perceive(vp("u3", "WR", 0, 0, { remainingGames: 0, ecrPts: 6, weekly: flat(0), weeklyFrom: 8, ret: { ...UNC, seasonOver: true as const } }), S);
+  assert.equal(over.total, 0, "out for the season: 0");
+});
+
+test("perceived lineup: an IR-slot player counts from his return week, never this week; without a return estimate never", () => {
+  const S2 = league([], ["QB", "WR", "BN", "IR"], { currentWeek: 8 }).settings;
+  const qb = vp("qb", "QB", 18, 20, { weekly: flat(18), weeklyFrom: 8 });
+  const wr = vp("wr", "WR", 8, 5, { weekly: flat(8), weeklyFrom: 8 });
+  const star = vp("star", "WR", 20, 40, { weekly: [0, 0, 0, 0, 20, 20, 20, 20, 20, 20], weeklyFrom: 8, yahooProjWeekly: 5, ret: { week: 12, confidence: "medium", reasons: [], absent: true, practiceUp: false } });
+  const ir = new Set(["star"]);
+  const before = perceivedLineupTotal(S2, [qb, wr], ir);
+  // Weeks 12-17 (6 weeks): star 20 replaces wr 8 → +72; week 8's Yahoo number (5) never starts an IR player.
+  assert.equal(perceivedLineupTotal(S2, [qb, wr, star], ir) - before, 72);
+  const { ret: _r, ...noRet } = star;
+  assert.equal(perceivedLineupTotal(S2, [qb, wr, noRet], ir), before);
+});

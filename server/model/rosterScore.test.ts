@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MODE_WEIGHTS, combine, depthCount, parseMode, rosterParts, rosterScore, weeklyPoints } from "./rosterScore.js";
+import { MODE_WEIGHTS, activeRoster, combine, depthCount, parseMode, rosterParts, rosterScore, weeklyPoints } from "./rosterScore.js";
 import { league, vp, SMALL_SLOTS } from "./testkit.js";
 import type { ValuedPlayer } from "./types.js";
 
@@ -87,4 +87,23 @@ test("mode weights: one config object, parseMode defaults to balanced", () => {
   assert.equal(parseMode("PLAYOFFS"), "playoffs");
   assert.equal(parseMode(undefined), "balanced");
   assert.equal(parseMode("bogus"), "balanced");
+});
+
+test("injured pieces fix round 1: weeklyPoints adds an unconfirmed return's expected weeks; an IR-slot returner never counts this week, counts from his return", () => {
+  // Week 4: 14 weeks 4..17. Unconfirmed, healthy 20: 0 for weeks 4-7, then 10 (byes 0).
+  const unk = vp("U", "WR", 0, 0, { remainingGames: 0, bye: 10, ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false, healthyRate: 20 } });
+  const w = [...weeklyPoints(unk, S)];
+  assert.deepEqual(w.slice(0, 4), [0, 0, 0, 0]);
+  assert.equal(w[4], 10);
+  assert.equal(w[10 - 4], 0, "bye");
+  assert.equal(weeklyPoints({ ...unk, ret: { ...unk.ret!, seasonOver: true } }, S).every((x) => x === 0), true, "out for the season: 0");
+  // IR slot, back in week 15 at 18/wk: no "now" points, playoff points count.
+  const star = vp("STAR", "WR", 18, 40, { weeklyFrom: 4, weekly: Array.from({ length: 14 }, (_, i) => (4 + i >= 15 ? 18 : 0)), ret: { week: 15, confidence: "high", reasons: [], absent: true, practiceUp: false } });
+  const roster = [...base(), star];
+  const ir = new Set(["STAR"]);
+  const withIr = rosterParts(S, activeRoster(roster, ir), repl).parts;
+  const without = rosterParts(S, base(), repl).parts;
+  assert.equal(withIr.now, without.now, "never starts this week from the IR slot");
+  assert.equal(withIr.depth, without.depth, "no bench depth credit while in the IR slot");
+  assert.ok(withIr.playoffs > without.playoffs, `playoffs ${withIr.playoffs} vs ${without.playoffs}`);
 });

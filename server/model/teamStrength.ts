@@ -1,12 +1,12 @@
 // Team strength (docs/DESIGN.md "Model v4" section 3, release (b)): what a roster is worth in the fantasy playoffs.
-//  - lineup: expected points per week of the optimal starting lineup in the playoff weeks (projection v4 weekly
-//    points; players in the team's IR slot excluded);
+//  - lineup: expected points per week of the optimal starting lineup in the playoff weeks (rosterScore.weeklyPoints:
+//    projection v4 weekly, an unconfirmed return's expected points; IR-slot players from their return week, irSlotView);
 //  - depth: the points the bench recovers, per week, when one random starter is out (mean over starters and weeks of
 //    lineup-without-him − (lineup − his points));
 //  - total = lineup + DEPTH_WEIGHT × depth. Pure: rosters in, numbers out.
 import type { LeagueSettings, ValuedPlayer } from "./types.js";
 import { SLOT_ELIGIBILITY } from "./lineup.js";
-import { fillOrder, weeklyPoints } from "./rosterScore.js";
+import { activeRoster, fillOrder, weeklyPoints } from "./rosterScore.js";
 
 /** Weight of the depth term (calibration value; the roster score's depth weight in playoffs mode is also 0.25). */
 export const DEPTH_WEIGHT = 0.25;
@@ -42,7 +42,7 @@ export function weekLineup(order: ReturnType<typeof fillOrder>, roster: ValuedPl
 export function teamStrength(S: LeagueSettings, roster: ValuedPlayer[], irIds: ReadonlySet<string> = new Set()): TeamStrength {
   const weeks: number[] = [];
   for (let w = Math.max(S.currentWeek, S.regularSeasonEnd + 1); w <= S.finalWeek; w++) weeks.push(w);
-  const active = roster.filter((p) => !irIds.has(p.id));
+  const active = activeRoster(roster, irIds);
   if (!weeks.length || !active.length) return { lineup: 0, depth: 0, total: 0, weeks };
   const order = fillOrder(S.slots);
   let lineupSum = 0;
