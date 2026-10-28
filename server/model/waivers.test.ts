@@ -309,6 +309,7 @@ test("K/DEF streaming: both have Yahoo's week projection → gain = their differ
   assert.deepEqual(best.weekStream, { proj: 7.1, mine: 4, gain: 3.1, best: true, opponent: "@ NYJ" });
   assert.equal(best.summary, "Best DEF stream this week (@ NYJ): Yahoo proj 7.1 vs your 4.0. Free agent, add any time.");
   assert.ok(best.details.some((d) => d.label === "This week (Yahoo)" && d.value === "proj 7.1 vs your 4.0 (+3.1)"));
+  assert.ok(best.details.some((d) => d.label === "Lineup" && d.value === "Starts at DEF this week over yours"));
   const ok = byId(r, "D_ok");
   assert.equal(ok.recommendation, "optional", "+1.2 ≥ the 1.0 minimum");
   assert.equal(ok.weekStream!.best, false);
@@ -384,4 +385,5 @@ test("K/DEF streaming: with no DEF of mine the gain is his whole projection and 
   const t = byId(r, "D_best");
   assert.deepEqual(t.weekStream, { proj: 7.1, mine: null, gain: 7.1, best: true });
   assert.match(t.summary, /^Best DEF stream this week: Yahoo proj 7\.1 vs no DEF of yours\./);
+  assert.ok(t.details.some((d) => d.label === "Lineup" && d.value === "Starts at DEF this week"), "never 'Bench depth' next to a weekly gain");
 });

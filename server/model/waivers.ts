@@ -187,7 +187,7 @@ export function rankWaivers(
     const free = !onWaivers;
     const cost = costText(S.usesFaab, team.faabRemaining ?? S.faabBudget, w, n, onWaivers, rankScore);
     const replaced = best.slot >= 0 ? base.lineup[best.slot]?.player : undefined;
-    const startsText =
+    let startsText =
       best.slot >= 0 ? `Starts at ${labels[best.slot]}${replaced && replaced.id !== drop?.id ? ` over ${replaced.name}` : ""}` : "Bench depth";
 
     let recommendation: WaiverTarget["recommendation"];
@@ -203,6 +203,8 @@ export function rankWaivers(
       // This week's Yahoo projections on both sides: the streaming gain is their difference (the lineup gain this week).
       gain = stream.gain;
       rankScore = Math.max(gain * 3, benchGain / 10);
+      // Season numbers may bench him (open roster spot); this week he would start when Yahoo projects him higher.
+      if (stream.gain > 0) startsText = `Starts at ${fa.pos} this week${stream.mine === null ? "" : " over yours"}`;
       const vs = `Yahoo proj ${stream.proj.toFixed(1)} vs ${stream.mine === null ? `no ${fa.pos} of yours` : `your ${stream.mine.toFixed(1)}`}`;
       const opp = stream.opponent ? ` (${stream.opponent})` : "";
       if (stream.gain >= KDEF_STREAM.minGain && free) {
