@@ -1347,3 +1347,11 @@ over a role for good. Decisions (coordinator):
   (11.4 vs your FLEX1 14.6 ppg)." The "Better TE cover than X" call above is removed.
 * **Weak-position line**: one measure for both sides — Yahoo's week projection when every starter there and a free
   agent have one, else pts/game — and the weakest starter is picked on that same measure.
+
+### Fix round 2 (2026-10-28) — overrides "Fix round 1" where they differ
+
+* **Settled before the spike**: the settled-role exemption (mean known snap share ≥ `SPIKE.settledSnap` over the last
+  `SPIKE.settledGames` games, ≥ 2 known) is judged on the games BEFORE the candidate spike game (the first elevated game
+  of the window), never on a window that includes it: a part-timer whose snaps rose in the spike week cannot exempt
+  himself with it. Fewer than 2 known games before it = not settled. QBs stay exempt; the climb rule (`climbStep`) is
+  unchanged.

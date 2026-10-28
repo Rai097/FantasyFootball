@@ -67,7 +67,13 @@ SHIPPED 2026-10-27 (live 5db1266): one playoff engine (floor factor out of seaso
    QBs and the top RB unchanged in ppg; the lead RB's one-game cap is gone (settled role: 13.55 = pre-release; the TD
    regression is what remains); acceptance players within ±0.05 ppg of pre-release; waivers 0 claims / 0 stashes, TE
    bench add now "Trade chip only"; trades2 counts (main/smaller/near) Now 0/0/5, Balanced 2/2/4, Playoffs 2/2/4,
-   0.16–0.20 s. Next: tester re-run + advisor pass, then deploy. Residuals: breakouts' borrowed-role check has no prior
+   0.16–0.20 s. FIX ROUND 2 BUILT, not deployed (DESIGN "Fix round 2"): the settled-role spike exemption is judged on
+   the 4 games before the spike game. Data copy vs round 1: starting QBs, top RBs/WRs and acceptance players unchanged
+   in ppg; the lead RB stays 13.55 by the CLIMB rule (exp pts 7.7 → 9.7 → 25.9; snaps 53/48/76/75%: he was never
+   "settled"), not the settled rule; 7 part-time players moved −0.01 to −0.54 ppg; waivers 0 claims / 0 stashes
+   unchanged; trades2 lists unchanged (Now 0/0/5, Balanced 2/2/4, Playoffs 2/2/4). Next: tester re-run + advisor
+   pass, then deploy. Residual: early in a season (< 2 known games before the jump) a settled starter's big game is
+   capped. Residuals: breakouts' borrowed-role check has no prior
    opportunities (one-game teammate = unknown there); a starter whose prior-season role beat the teammate's can still
    read "borrowed" when his own baseline is one game. Still open:
    "buy the high" acceptance (partner sees a sell-high: perception ×0.7 only) — backlog. Unverified: 390 px layout of

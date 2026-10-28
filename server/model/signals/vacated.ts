@@ -38,7 +38,8 @@ export const SPIKE = {
   peakShare: 0.5,
   /** An isolated spike game's recency weight is capped at this (as if it were 2 games old). */
   maxRecency: 0.5,
-  /** A settled role never spikes (fix round 1): mean known snap share over his last `settledGames` games ≥ this
+  /** A settled role never spikes (fix round 1): mean known snap share over his last `settledGames` games BEFORE the
+   *  candidate spike game (fix round 2) ≥ this
    *  (≥ 2 known), and QBs (no role to borrow or spike). */
   settledSnap: 0.65,
   settledGames: 4,
@@ -196,7 +197,11 @@ export interface ShapeOpts {
   snaps?: readonly (number | undefined)[];
 }
 
-/** A settled role (SPIKE.settledSnap over the last SPIKE.settledGames games, ≥ 2 known) or a QB: never a spike. */
+/**
+ * A settled role (SPIKE.settledSnap over the last SPIKE.settledGames games of `snaps`, ≥ 2 known) or a QB: never a
+ * spike. usageShape passes only the games BEFORE the candidate spike game (fix round 2): a player cannot settle his
+ * role with the spike week itself.
+ */
 export function settledRole(pos: Position | string | undefined, snaps: readonly (number | undefined)[] | undefined): boolean {
   if (pos === "QB") return true;
   // A game he left early (< VACATED.leftEarlyLast snaps) says nothing about his role.
@@ -211,7 +216,8 @@ export function settledRole(pos: Position | string | undefined, snaps: readonly 
  * max(ratio × base, base + minGain, peakShare × the best EARLIER game of the window): a climb (3 → 5 → 12) is two
  * elevated games, a trend, and so is any climb (both steps of the last 3 up ≥ climbStep, the latest elevated); a
  * higher game followed by a game below the base did not hold. `weights` (default 1) discount games in the count (vacated-role games while the teammate
- * is back). A settled role (QB, or ≥ 65% snaps) never spikes: variance in a settled role is not a role jump.
+ * is back). A settled role (QB, or ≥ 65% snaps over the games before the candidate spike) never spikes: variance in a
+ * settled role is not a role jump.
  */
 export function usageShape(us: number[], weights?: number[], opts: ShapeOpts = {}): UsageShape {
   const n = us.length;
@@ -244,7 +250,10 @@ export function usageShape(us: number[], weights?: number[], opts: ShapeOpts = {
     win.every((u, i) => i === 0 || (u - win[i - 1] >= SPIKE.climbStep - 1e-9 && (weights?.[from + i] ?? 1) >= 1));
   const sustained = climbing || count >= SPIKE.minGames - 1e-9;
   const nElev = elevated.filter(Boolean).length;
-  const settled = settledRole(opts.pos, opts.snaps);
+  // Settled is judged on the games before the candidate spike (the first elevated game of the window), never a window
+  // that includes it (fix round 2): a part-timer whose snaps rose with his spike week is not a settled starter.
+  const firstElev = elevated.indexOf(true);
+  const settled = settledRole(opts.pos, firstElev < 0 ? opts.snaps : opts.snaps?.slice(0, from + firstElev));
   const spike = !settled && elevated.some(Boolean) && !sustained && (jump || nElev === 1);
   const spikeIdx = !settled && !sustained && nElev === 1 ? [from + elevated.indexOf(true)] : [];
   return { base, bar: floor, elevated, count, jump, sustained, spike, spikeIdx };

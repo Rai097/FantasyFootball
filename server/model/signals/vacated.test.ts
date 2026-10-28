@@ -200,3 +200,55 @@ describe("fix round 1: a known bigger role, his current team, one spike definiti
     assert.equal(usageShape(exp, undefined, { pos: "TE", snaps: snaps.map((x) => Math.min(x, 0.5)).map((x, i) => (i === 4 ? 0.03 : x)) }).sustained, true);
   });
 });
+
+describe("fix round 2: a settled role is established on the games BEFORE the candidate spike", () => {
+  /** An RB game whose expected points are `pts` (rushing, 0.1/yd) on `snap` of the snaps. */
+  const rb = (week: number, pts: number, snap: number): PlayerGame => {
+    const ex = line({ rushYd: pts * 10 });
+    return { week, gameId: `g${week}`, team: "AAA", targets: 0, carries: Math.round(pts), airYards: 0, passAttempts: 0, actual: ex, expected: ex, snapShare: snap };
+  };
+  const sigOf = (id: string, pos: SkillPos, games: PlayerGame[]) =>
+    computeAllSignals([{ id, name: id, pos, team: "AAA", games, status: [] }], { season: 2026, scoring: PPR, asOf: ASOF }).get(id)!;
+
+  test("a part-time RB whose snaps rose to ~76% only in the last games (48% → 76% → 75%) with one huge game is capped", () => {
+    const pts = [8, 8, 8, 8, 8, 8, 24];
+    const snaps = [0.42, 0.4, 0.44, 0.48, 0.76, 0.75, 0.8];
+    // The window that includes the spike week would call him settled (0.48, 0.76, 0.75, 0.80 = 70%)...
+    assert.equal(settledRole("RB", snaps), true, "control: the spike week lifts the old window over 65%");
+    // ...the 4 games before it do not (0.40, 0.44, 0.48 … 0.76, 0.75: 61%): he cannot self-exempt with his spike.
+    assert.equal(settledRole("RB", snaps.slice(0, 6)), false);
+    const shape = usageShape(pts, undefined, { pos: "RB", snaps });
+    assert.equal(shape.spike, true);
+    assert.deepEqual(shape.spikeIdx, [6]);
+    const s = sigOf("rbP", "RB", pts.map((p, i) => rb(i + 1, p, snaps[i])));
+    assert.deepEqual(s.weeks.filter((w) => w.flags.spike).map((w) => w.week), [7], "projection caps the spike week");
+    assert.ok(s.weeks[6].weight <= SPIKE.maxRecency + 1e-9);
+  });
+
+  test("a spike in the middle of the window is judged on the games before IT, not the games after", () => {
+    // Settled games after the spike (80%) do not exempt a spike that came out of a 40% role.
+    const pts = [8, 8, 8, 8, 24, 8, 8];
+    const snaps = [0.4, 0.4, 0.4, 0.4, 0.8, 0.8, 0.8];
+    assert.deepEqual(usageShape(pts, undefined, { pos: "RB", snaps }).spikeIdx, [4]);
+  });
+
+  test("a long-settled every-down RB / WR with one big game stays exempt; QBs stay exempt without snaps", () => {
+    const pts = [12, 13, 12, 14, 12, 13, 30];
+    for (const pos of ["RB", "WR"] as const) {
+      const snaps = pts.map(() => 0.85);
+      const shape = usageShape(pts, undefined, { pos, snaps });
+      assert.equal(shape.spike, false, `${pos}: settled before the spike`);
+      assert.deepEqual(shape.spikeIdx, []);
+      // Spike game in the middle of the window, settled before it.
+      assert.deepEqual(usageShape([12, 13, 12, 14, 30, 12, 13], undefined, { pos, snaps }).spikeIdx, [], `${pos}: mid-window`);
+    }
+    const s = sigOf("rbS", "RB", pts.map((p, i) => rb(i + 1, p, 0.85)));
+    assert.deepEqual(s.weeks.filter((w) => w.flags.spike).map((w) => w.week), []);
+    assert.equal(usageShape(pts, undefined, { pos: "QB" }).spike, false, "QB, no snaps known");
+  });
+
+  test("no known snaps before the spike (fewer than 2 games) is not a settled role", () => {
+    // Base = the lowest window game with < 4 games; the spike is game 2, with one known game before it.
+    assert.equal(usageShape([4, 20, 5], undefined, { pos: "RB", snaps: [0.9, 0.9, 0.9] }).spike, true);
+  });
+});
