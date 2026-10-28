@@ -33,10 +33,19 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
   // Vacated-role games weigh VACATED.weight; an isolated one-game jump in the last 3 games has its recency capped
   // (DESIGN "Fix: vacated role, spikes, depth and roster need").
   const vacW = flags.map((f) => (f.vacated ? VACATED.weight : 1));
+  // Over all his games (a low flagged game still shows his usage level), oldest first.
   const shape = usageShape(
     games.map((g) => score(ctx.scoring, g.expected, p.pos)),
     vacW,
   );
+  // A climbing opportunity share (WOPR / weighted touches up 3 straight unflagged games, slope ≥ his own weekly noise:
+  // trend.ts without the flex-level bar) is a breakout, not a spike: no cap.
+  const opps = games.map((g) => weekOpportunity(g, p.pos, ctx.scoring));
+  const climbing = trendOf(games.map((g, i) => ({ week: g.week, flagged: flagged[i], wopr: opps[i].wopr, weightedOpp: opps[i].weightedOpp })), p.pos, -Infinity)?.rising ?? false;
+  if (climbing) {
+    shape.spikeIdx = [];
+    shape.spike = false;
+  }
   const capped = new Set(shape.spikeIdx);
   const fullWeights = recencyWeights(flagged, { capped, cap: SPIKE.maxRecency });
   const weights = fullWeights.map((w, i) => w * vacW[i]);
@@ -45,7 +54,7 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
     week: g.week,
     gameId: g.gameId,
     team: g.team,
-    ...weekOpportunity(g, p.pos, ctx.scoring),
+    ...opps[i],
     flags: flags[i],
     flagged: flagged[i],
     weight: weights[i],

@@ -1272,7 +1272,8 @@ big game valued as a breakout).
   * Signals: `GameFlags.vacated` (not part of `isFlagged`: still a real game in the sample and the trend); the game
     weighs `VACATED.weight` (0.4) in the rates; `PlayerSignals.vacated` keeps the weeks, who was out and the full-weight
     expected rate. The role-change exemption (`isRoleUp`) ignores vacated games.
-  * Projection v4: per remaining week, × min(2, full ÷ settled rate) while the teammate is out (his return week from
+  * Projection v4: per remaining week, × min(2, full ÷ settled rate) while the teammate is out (the full rate is the
+    same model, prior and ECR anchor with the borrowed games at full weight, so it never exceeds the old rate) (his return week from
     `returns.ts`; unknown return / no team = out for good → every week), 1 after: the projection reverts to the
     pre-absence role once he is back. Why-lines "Borrowed role: usage rose while X was out (wk 7): counts 40%" and
     "While he is out: ×1.25 for 3 games (X back wk 10)".
@@ -1280,7 +1281,9 @@ big game valued as a breakout).
   (none: the lowest of the window), that mean + 1.5, 0.5 × the window's best game). Sustained = elevated in ≥ 2 of the
   last 3 (a borrowed game counts 0.4 while its teammate is back or due back); a spike = a jump that is not sustained.
   Projection: an isolated elevated game in the last 3 has its recency capped at `SPIKE.maxRecency` (0.5, as if 2 games
-  old); why-line "One-game jump: wk 7 counts like a game 2 weeks old".
+  old); why-line "One-game jump: wk 7 counts like a game 2 weeks old". Exempt: a climbing opportunity share (trend.ts
+  steps + slope rule without the flex-level bar: WOPR / weighted touches up 3 straight unflagged games) is a breakout,
+  not a spike (acceptance: a WR whose target share rose 3 games then broke out keeps his value).
 * **Role check** (`roleCheck.ts`, `RoleCheck` on every breakout target and `WaiverBreakout.role`): sustained / spike,
   borrowed role (+ back?), depth-chart rank (chart order) and effective rank (minus players ahead who are Out / D / IR
   / PUP / suspended: the chart "moved him up"), share with the starters healthy (targets, RB touches; last 4 games

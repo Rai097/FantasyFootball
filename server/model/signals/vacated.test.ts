@@ -119,3 +119,16 @@ test("vacatedGames: an absence that started before a quiet game of his does not 
   const two = vacatedGames([vp("te2", "TE", [2, 2, 2, 2, 6, 6]), vp("te1", "TE", [5, 6, 5, 5, null, null])]);
   assert.deepEqual([...two.get("te2")!.keys()], [5, 6]);
 });
+
+test("a climbing opportunity share (WOPR up 3 straight games) is a breakout, not a spike: no cap", () => {
+  // WOPR needs team totals: 35 targets / 250 air yards a game.
+  const withTotals = (t: number[]) => {
+    const p = input("wr", "WR", t);
+    p.games = p.games.map((g) => ({ ...g, teamTotals: { targets: 35, airYards: 250, carries: 25 } }));
+    return computeAllSignals([p], { season: 2026, scoring: PPR, asOf: ASOF }).get("wr")!;
+  };
+  const rising = withTotals([6, 6, 6, 6, 7, 9, 14]);
+  assert.equal(rising.weeks.some((w) => w.flags.spike), false, "climbing share: not capped");
+  const flat = withTotals([6, 6, 6, 6, 6, 6, 14]);
+  assert.equal(flat.weeks[6].flags.spike, true, "one jump after a flat role: capped");
+});

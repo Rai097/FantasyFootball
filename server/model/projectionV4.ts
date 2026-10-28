@@ -232,6 +232,8 @@ interface Base {
   priorW: number;
   /** His role grew since last season (isRoleUp): the prior keeps the base weight only. */
   roleUp: boolean;
+  /** Model rate with the borrowed-role games at full weight (signals `vacated.fullExpPts`); null = none. */
+  modelFull: number | null;
   /** Expected-TD regression (null = not applied: no expected TD data, actual-points fallback, K / DEF). */
   td: TdShrink | null;
   games: number;
@@ -330,7 +332,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       ppg25: hasPrior ? score(scoring, p.prior!.line, p.pos) / p.prior!.games : 0,
       trend: weeks.length >= 3 ? mean(exp.slice(-2)) - mean(exp) : 0,
     };
-    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorW: 0, roleUp: false, td: null };
+    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorW: 0, roleUp: false, td: null, modelFull: null };
     const sig = sigOf(p);
     // Missing expected data (ffopportunity has no usage for him while he scores): rate on recency-weighted actual
     // points, with the usual prior / ECR shrinkage, instead of ~0 usage.
@@ -371,7 +373,13 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       const cur = (expRate - (td?.ptsDelta ?? 0)) * eff;
       model = priorRate !== null ? (sampleGames * cur + priorW * priorRate) / (sampleGames + priorW) : cur;
     } else if (priorRate !== null) model = priorRate;
-    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorW, roleUp, td };
+    // The same model with the borrowed-role games at full weight: the rate while the teammate he replaced stays out.
+    let modelFull: number | null = null;
+    if (sig?.vacated && !missingExp && expRate !== null && sampleGames > 0) {
+      const cur = (sig.vacated.fullExpPts - (td?.ptsDelta ?? 0)) * eff;
+      modelFull = priorRate !== null ? (sampleGames * cur + priorW * priorRate) / (sampleGames + priorW) : cur;
+    }
+    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorW, roleUp, td, modelFull };
   };
   const bases = all.map(makeBase);
   const baseById = new Map(bases.map((b) => [b.p.id, b]));
@@ -439,11 +447,10 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     return availMemo.get(b)!;
   };
   /** Borrowed role: × (full rate ÷ settled rate) in the weeks the teammate(s) he replaced stay out; 1 otherwise. */
-  const vacatedFactor = (b: Base): { factor: number; outAt: (w: number) => boolean; by: string[]; until: number | null } | null => {
+  const vacatedFactor = (b: Base, rate: number, rateFull: number | null): { factor: number; outAt: (w: number) => boolean; by: string[]; until: number | null } | null => {
     const v = b.sig?.vacated;
-    const settled = b.sig?.rates.expPts ?? null;
-    if (!v || !settled || settled <= 0 || b.missingExp) return null;
-    const factor = Math.min(VACATED.maxFactor, Math.max(1, v.fullExpPts / settled));
+    if (!v || rateFull === null || !(rate > 0)) return null;
+    const factor = Math.min(VACATED.maxFactor, Math.max(1, rateFull / rate));
     const mates = v.by.map((t) => baseById.get(t.id)).filter((t): t is Base => !!t);
     if (factor <= 1.0001 || !mates.length) return null;
     const info = mates.map((t) => ({ name: t.p.name, a: availInfo(t) }));
@@ -503,7 +510,10 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     if (!b.kdef && b.unflagged >= 2 && b.model !== null) [healthyRate, healthySource] = [rate, "season"];
     else if (!b.kdef && b.sig?.talent.priorExpPpg != null && b.sig.talent.priorGames >= V4.priorMinGames) [healthyRate, healthySource] = [rate, "prior"];
     // A borrowed role (vacated.ts): the full rate while the teammate he replaced stays out, the settled rate after.
-    const roleF = b.kdef ? null : vacatedFactor(b);
+    // Same anchoring as `rate`, on the full-weight model.
+    const rateFull =
+      b.kdef || b.modelFull === null || b.model === null ? null : ecrPts !== undefined && !anchorSkipped ? (1 - wAnchor) * b.modelFull + wAnchor * ecrPts : b.modelFull;
+    const roleF = b.kdef ? null : vacatedFactor(b, rate, rateFull);
     const ramp = absence !== "out";
     const weeks: WeekProj[] = [];
     let gameIdx = 0;

@@ -52,6 +52,9 @@ describe("projection v4: borrowed role", () => {
     const back = value([TE(), WR()]).get("te2")!;
     assert.ok(out.ppg > back.ppg + 0.5, `${out.ppg} vs ${back.ppg}`);
     assert.match(item(out, "While he is out") ?? "", /return unknown/);
+    // The full-rate weeks never value him above the same player with no borrowed-role detection at all.
+    const alone = value([TE()]).get("te2")!;
+    assert.ok(out.ppg <= alone.ppg + 0.05, `${out.ppg} vs ${alone.ppg}`);
   });
   test("teammate out with a known return week: full rate before it, settled after", () => {
     const v = value([TE(), WR({ status: "O", detail: "Ankle", week: 8 })]).get("te2")!;
