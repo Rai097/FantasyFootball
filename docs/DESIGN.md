@@ -1216,3 +1216,42 @@ the season. `ineligibleReason` (tradesV3.ts), K/DEF and the QB rule unchanged:
   * Evaluate's "<Mode> bar" bullet is green only when the verdict is Accept, else neutral (it is one bar of several).
   * Win now help: the "now" part is the lineup's average points per game from now on (missed games counted, the
     availability-weighted rate), plus a little bench depth — not literally this week's points.
+
+## Available-player projections (2026-10-28) — import v6; overrides "Waivers v3" on K / DEF streaming
+
+Before: available players carried no Yahoo projection, so K / DEF streaming fell back to season numbers and called
+almost every K / DEF "pass".
+
+* **Bookmarklet** (`web/src/import/bookmarklet.ts` `readListProj`): after the available-player lists (K, DEF first,
+  then offense), the first page of each list is searched for the players page's "Stats" control by visible text
+  (`yahooHtml.ts` `findStatsView`, `LIST_VIEW`): "Week N (proj)" (seen on the real site: owner screenshot, DEF list,
+  column "Fan Pts") and, only if present, "Remaining/Rest of Season (proj)" ("Season (proj)" includes played weeks
+  and is never read). Several projected weeks → the lowest N (the current week). The URL comes only from the markup:
+  an `<a href>`; an `<option>` whose value / data-url is a same-league URL; or a named `<select>` inside a GET
+  `<form>` → the form's action with the list page's own params, the form's other fields and `<select name>=<value>`
+  (what submitting the form sends). POST form, no form, unnamed select, other league → a note, nothing fetched.
+  Paging repeats the list's own `count=` param, at most as many pages as the list showed players on: ≤ 2 extra fetches
+  (week + rest of season) per list page, so ~2 each for K and DEF and up to ~12 for a full offense list.
+* **Fail closed**: `parseListProjectionHtml` reads "Fan Pts" only when the fetched page shows exactly that view as
+  selected (`<option selected>` or a selected link); otherwise "Fan Pts" might be actual points and nothing is kept.
+  Week ≤ 60, rest of season ≤ 450, plain numbers only. A Yahoo markup change degrades to "absent", never to wrong
+  numbers. Each step writes a `faProjections` diagnostics entry (`candidates`, `view`, `how`, `field` / `value`,
+  `url`, `viewIndicator`, `note`); a summary entry counts `week` / `ros` and names the view read. The overlay says
+  "N available players with this week's projection". Rostered defenses now get this week's "Proj" too (by team).
+* **Payload / server**: `freeAgents[].yahooProjWeekly` / `yahooProj` optional; `validateImport` keeps them under the
+  rostered-player bounds and drops an unusable one with a `{ step: "validate", level: "warning" }` diagnostics entry
+  (never 0). `importFreeAgents` applies `projectionsFor` (same rule as rosters: this week's number only while the
+  server's capture week `projWeek` is the current week). The week N the bookmarklet read is not sent; verify it
+  equals the stored `projWeek` on the owner's re-import (diagnostics `view` vs `projWeek`).
+* **Waivers** (`waivers.ts` `KDEF_STREAM`, `WeekStream`): when the free agent and every non-IR K / DEF of mine carry
+  this week's Yahoo projection, `gain` = his projection − my best one (none of mine → his projection) and the row
+  carries `weekStream { proj, mine, gain, best, opponent? }` (`weekOpponent` from the weekly consensus file).
+  Free agent with gain ≥ `KDEF_STREAM.minGain` (1.0) → optional ("Best DEF stream this week (@ NYJ): Yahoo proj 7.1
+  vs your 4.0."); on waivers or unknown → pass (never priority); smaller → pass "Not a streaming upgrade this week".
+  The best free stream per position (highest projection) is `best`, named in the advice line ("stream X (DEF) this
+  week") and in the rules ("Best DEF this week"). The same constant gates the call and the name. Missing on either
+  side → the season-number call as before, with "(no weekly projection)" and a "This week (Yahoo)" detail.
+* **UI**: K / DEF rows show a "wk 7.1" chip ("wk —" when not captured) with a why tooltip; the tapped details show a
+  "This week" tile. Rows stay one line.
+* **Unverified**: the real players-page markup (form vs links, option values, selected marker). Check on the owner's
+  next v6 import: the `faProjections` entries' `how`, `url`, `viewIndicator` and `note`.

@@ -21,7 +21,7 @@ You do this once:
 2. Find **Import from Yahoo (browser)**. Make sure your browser's bookmarks
    bar is visible (Chrome/Edge: Ctrl+Shift+B, Mac: Cmd+Shift+B; Firefox: View
    → Toolbars → Bookmarks Toolbar; Safari: View → Show Favorites Bar).
-3. Drag the blue **Trade Desk import v3** button onto the bookmarks bar (delete any older "Trade Desk import" bookmark first: old bookmarks keep their old code, and v2 lacks Yahoo projections). (Clicking it
+3. Drag the blue **Trade Desk import v6** button onto the bookmarks bar (delete any older "Trade Desk import" bookmark first: old bookmarks keep their old code, and v2 lacks Yahoo projections). (Clicking it
    on the Trade Desk page does nothing; it only works on Yahoo.)
 
 Each time you want fresh data:
@@ -30,7 +30,7 @@ Each time you want fresh data:
    **football.fantasysports.yahoo.com**. Any page of the league works: the
    address must contain `/f1/` followed by your league number, for example
    `https://football.fantasysports.yahoo.com/f1/1405188`.
-2. Click **Trade Desk import v3** on your bookmarks bar.
+2. Click **Trade Desk import v6** on your bookmarks bar.
 3. Wait 10–30 seconds. A dark box appears in the top-right corner listing
    the teams it found and how many players each has.
 4. Click **Copy to clipboard** (or **Download JSON** and open the file in a
@@ -80,6 +80,14 @@ in `.data/import-<id>-history.json`) for this comparison.
   one whether he is a free agent ("FA", add any time) or on waivers ("W", needs a
   claim). Imports made before 2026-10-26 do not have this or K/DEF: re-import once
   to see free agents vs waivers and kicker/defense streaming advice.
+* Yahoo's **projected points for those available players** (from v6, 2026-10-28):
+  the players page's **Stats** menu "Week N (proj)" view, and a rest-of-season
+  projected view if the menu has one. The bookmark finds the menu entry by its
+  text and reads the "Fan Pts" column only when Yahoo shows that view as
+  selected. The box says "N available players with this week's projection".
+  Waivers then names the best kicker and defense to stream this week (Yahoo's
+  projection vs yours). If it says 0, click **Copy diagnostics** and look for
+  the `faProjections` entries: each says which step failed.
 * The **Standings** page (else the league home page): each team's record, points
   for/against, rank and streak, plus the waiver order. Re-import once (from
   2026-10-26) to see records and "Waiver priority #N"; columns Yahoo does not

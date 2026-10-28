@@ -756,7 +756,23 @@ export function parseProjectionHtml(html: string, kind: "ros" | "week"): Project
     if (vi) diag.viewIndicator = vi;
     diag.tables = 0;
   }
-  const want = kind === "week" ? WEEK_PROJ_HEADER : PTS_HEADER;
+  readPointsColumn(html, kind === "week" ? WEEK_PROJ_HEADER : PTS_HEADER, PROJ_MAX[kind], diag, values, defValues);
+  if (diag.column === undefined) diag.note = `no ${kind === "week" ? "Proj" : "Fan Pts"} column`;
+  else if (kind === "ros" && !diag.viewIndicator) {
+    diag.note = `${NAV_TEXT.remaining} view not shown as selected: values ignored`;
+    values.clear();
+    defValues.clear();
+    diag.read = 0;
+    delete diag.sample;
+  } else if (!diag.read) diag.note = "column found but no numeric values";
+  return { values, defValues, diag };
+}
+
+/**
+ * Every table's column headed `want`: player rows (a /nfl/players/<id> link) into `values`, defense rows (a team link,
+ * row says DEF) into `defValues` by team. Plain numbers 0..max only; "-" / "" / out of range are skipped (absent).
+ */
+function readPointsColumn(html: string, want: RegExp, max: number, diag: ProjectionParse["diag"], values: Map<string, number>, defValues: Map<string, number>): void {
   const link = /\/nfl\/players\/(\d+)/;
   for (const t of stripMarkupAttrs(html).matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
     let col: number | undefined;
@@ -787,7 +803,7 @@ export function parseProjectionHtml(html: string, kind: "ros" | "week"): Project
       const raw = cells[col]?.text.replace(/,/g, "").trim() ?? "";
       if (!/^\d{1,3}(?:\.\d{1,2})?$/.test(raw)) continue;
       const v = Number(raw);
-      if (v > PROJ_MAX[kind]) continue;
+      if (v > max) continue;
       const into = id ? values : defValues;
       const key = (id ?? def)!;
       if (!into.has(key)) {
@@ -797,9 +813,191 @@ export function parseProjectionHtml(html: string, kind: "ros" | "week"): Project
       }
     }
   }
-  if (diag.column === undefined) diag.note = `no ${kind === "week" ? "Proj" : "Fan Pts"} column`;
-  else if (kind === "ros" && !diag.viewIndicator) {
-    diag.note = `${NAV_TEXT.remaining} view not shown as selected: values ignored`;
+}
+
+
+// ------------------------------------------------------------------ available-player projections (import v6, 2026-10-28)
+/**
+ * Visible texts of the players page's "Stats" views read for available players. The week view was seen on the real site
+ * (owner screenshot 2026-10-28: Stats = "Week 8 (proj)", column "Fan Pts"); the rest-of-season text is an assumption
+ * and only read when an option with such a text exists ("Season (proj)" covers played weeks too and is never read).
+ */
+export const LIST_VIEW = {
+  week: /^week\s+(\d{1,2})\s*\(proj(?:ected)?\.?\)$/i,
+  ros: /^(?:remaining|rest[ -]of)[ -](?:season|games)\s*\(proj(?:ected)?\.?\)$/i,
+} as const;
+
+export interface StatsView {
+  /** The control's visible text, e.g. "Week 8 (proj)". */
+  text: string;
+  /** Absolute same-league URL that shows this view. */
+  url: string;
+  /** Where the URL came from: an <a href>; an <option> whose value is a URL; or a GET <form> holding the named <select>. */
+  how: "link" | "option-url" | "form";
+  /** form: the <select name> and the <option value> submitted. */
+  field?: string;
+  value?: string;
+}
+export interface StatsViewFind {
+  view?: StatsView;
+  /** Every matching control text found (links and options), to check on a real import. */
+  candidates: string[];
+  note?: string;
+}
+
+const OPTION = /<option\b([^>]*)>([\s\S]{0,300}?)<\/option>/gi;
+const attrOf = (tag: string, name: string): string | undefined => {
+  const m = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>"']+))`, "i").exec(tag);
+  const v = m?.[1] ?? m?.[2] ?? m?.[3];
+  return v === undefined ? undefined : decodeEntities(v);
+};
+const hasBoolAttr = (attrs: string, name: string) => new RegExp(`(?:^|\\s)${name}(?:\\s|=|/|$)`, "i").test(attrs);
+
+/** `raw` resolved against `pageUrl`, kept only when it is same-origin and inside the same league (/f1/<league>/…). */
+function sameLeagueUrl(raw: string, pageUrl: string): URL | undefined {
+  if (!raw || raw.startsWith("#") || /^javascript:/i.test(raw)) return undefined;
+  const page = new URL(pageUrl);
+  const league = /^\/f1\/\d+\//.exec(page.pathname.endsWith("/") ? page.pathname : `${page.pathname}/`)?.[0];
+  let u: URL;
+  try {
+    u = new URL(raw, page);
+  } catch {
+    return undefined;
+  }
+  return u.origin === page.origin && league && `${u.pathname}/`.startsWith(league) ? u : undefined;
+}
+
+/**
+ * The URL that shows the Stats view whose visible text matches `test`, found in the players page's own markup — never
+ * a guessed query param. Tried in order: an <a href> with that text; an <option> whose value (or data-url / data-href)
+ * is a same-league URL; an <option> inside a named <select> inside a GET <form> — then the URL is the form's action
+ * with the page URL's own params (status / pos / sort / count, so the same list is shown), the form's other fields and
+ * `<select name>=<option value>`, exactly what submitting the form sends. Several matching texts (e.g. two projected
+ * weeks): the lowest week number for the week view (Yahoo's current week comes first), else the first. Nothing usable
+ * → `view` undefined and `note` says which step failed.
+ */
+export function findStatsView(html: string, test: RegExp, pageUrl: string): StatsViewFind {
+  type Cand = { text: string; at: number; kind: "a" | "option"; attrs: string };
+  const cands: Cand[] = [];
+  for (const m of html.matchAll(ANCHOR)) {
+    const text = oneLine(m[2]);
+    if (test.test(text)) cands.push({ text, at: m.index ?? 0, kind: "a", attrs: m[1] });
+  }
+  for (const m of html.matchAll(OPTION)) {
+    const text = oneLine(m[2]);
+    if (test.test(text)) cands.push({ text, at: m.index ?? 0, kind: "option", attrs: m[1] });
+  }
+  const candidates = [...new Set(cands.map((c) => c.text))];
+  if (!cands.length) return { candidates, note: "no matching Stats option or link on the players page" };
+  const weekNo = (t: string) => Number(LIST_VIEW.week.exec(t)?.[1] ?? Infinity);
+  const chosen = [...candidates].sort((a, b) => weekNo(a) - weekNo(b))[0];
+  const notes: string[] = [];
+  for (const c of cands.filter((x) => x.text === chosen).sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "a" ? -1 : 1))) {
+    if (c.kind === "a") {
+      const u = sameLeagueUrl(attrOf(c.attrs, "href")?.trim() ?? "", pageUrl);
+      if (u) return { candidates, view: { text: c.text, url: u.href, how: "link" } };
+      notes.push("link without a same-league href");
+      continue;
+    }
+    const value = attrOf(c.attrs, "value")?.trim();
+    const dataUrl = attrOf(c.attrs, "data-url") ?? attrOf(c.attrs, "data-href");
+    for (const raw of [dataUrl, value]) {
+      if (raw && /^(?:\/|https?:|\?)/i.test(raw.trim())) {
+        const u = sameLeagueUrl(raw.trim(), pageUrl);
+        if (u) return { candidates, view: { text: c.text, url: u.href, how: "option-url" } };
+      }
+    }
+    if (value === undefined) {
+      notes.push("option without a value");
+      continue;
+    }
+    const sel = enclosing(html, c.at, "select", 40000);
+    const selTag = sel ? /^<select\b[^>]*>/i.exec(html.slice(sel[0], sel[1]))?.[0] : undefined;
+    const field = selTag ? attrOf(selTag.slice(7), "name") : undefined;
+    if (!sel || !field) {
+      notes.push("option not inside a named <select>");
+      continue;
+    }
+    const form = enclosing(html, c.at, "form", 200000);
+    const formHtml = form ? html.slice(form[0], form[1]) : undefined;
+    const formTag = formHtml ? /^<form\b[^>]*>/i.exec(formHtml)?.[0] : undefined;
+    if (!formHtml || !formTag) {
+      notes.push(`<select name="${field}"> is not inside a <form>`);
+      continue;
+    }
+    const method = (attrOf(formTag.slice(5), "method") ?? "get").toLowerCase();
+    if (method !== "get") {
+      notes.push(`form method is ${method}, not get`);
+      continue;
+    }
+    const action = sameLeagueUrl(attrOf(formTag.slice(5), "action")?.trim() || pageUrl, pageUrl);
+    if (!action) {
+      notes.push("form action is not a same-league URL");
+      continue;
+    }
+    const url = new URL(action.pathname, action);
+    for (const [k, v] of new URL(pageUrl).searchParams) url.searchParams.set(k, v);
+    for (const [k, v] of formFields(formHtml)) url.searchParams.set(k, v);
+    url.searchParams.set(field, value);
+    return { candidates, view: { text: c.text, url: url.href, how: "form", field, value } };
+  }
+  return { candidates, note: `"${chosen}" found but no usable URL (${[...new Set(notes)].join("; ")})` };
+}
+
+/** Name → value of what a GET form submits: text / hidden inputs, checked boxes, each select's selected (else first) option. */
+function formFields(formHtml: string): [string, string][] {
+  const out: [string, string][] = [];
+  for (const m of formHtml.matchAll(/<input\b([^>]*)>/gi)) {
+    const name = attrOf(m[1], "name");
+    const type = (attrOf(m[1], "type") ?? "text").toLowerCase();
+    if (!name || ["submit", "button", "image", "reset", "file"].includes(type)) continue;
+    if ((type === "checkbox" || type === "radio") && !hasBoolAttr(m[1], "checked")) continue;
+    out.push([name, attrOf(m[1], "value") ?? (type === "checkbox" || type === "radio" ? "on" : "")]);
+  }
+  for (const m of formHtml.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/gi)) {
+    const name = attrOf(m[1], "name");
+    if (!name) continue;
+    const opts = [...m[2].matchAll(OPTION)];
+    const pick = opts.find((o) => hasBoolAttr(o[1], "selected")) ?? opts[0];
+    if (pick) out.push([name, attrOf(pick[1], "value") ?? oneLine(pick[2])]);
+  }
+  return out;
+}
+
+/**
+ * The Stats view the page shows as selected, among those matching `test`: an <option selected>, or an <a> marked
+ * selected (or inside a selected <li>). Undefined = not shown, so the page's "Fan Pts" may be actual points.
+ */
+export function selectedStatsView(html: string, test: RegExp): string | undefined {
+  for (const m of html.matchAll(OPTION)) {
+    const text = oneLine(m[2]);
+    if (test.test(text) && hasBoolAttr(m[1], "selected")) return text;
+  }
+  for (const m of html.matchAll(ANCHOR)) {
+    const text = oneLine(m[2]);
+    if (!test.test(text)) continue;
+    const li = enclosing(html, m.index ?? 0, "li", 4000);
+    const liTag = li ? /^<li\b[^>]*>/i.exec(html.slice(li[0], li[1]))?.[0] : undefined;
+    if (tagSelected(`<a ${m[1]}>`) || tagSelected(liTag)) return text;
+  }
+  return undefined;
+}
+
+/**
+ * Projected points of available players from one players-page view ("Week 8 (proj)" or a rest-of-season view): the
+ * "Fan Pts" column, read only when the page shows exactly the `view` text as selected — otherwise "Fan Pts" could be
+ * actual points and nothing is returned (`diag.note` says why). Bounds as parseProjectionHtml (week ≤ 60, ros ≤ 450).
+ */
+export function parseListProjectionHtml(html: string, kind: "ros" | "week", view: string): ProjectionParse {
+  const values = new Map<string, number>();
+  const defValues = new Map<string, number>();
+  const diag: ProjectionParse["diag"] = { kind, headers: [], rows: 0, read: 0 };
+  const shown = selectedStatsView(html, LIST_VIEW[kind]);
+  if (shown) diag.viewIndicator = shown;
+  readPointsColumn(html, PTS_HEADER, PROJ_MAX[kind], diag, values, defValues);
+  if (diag.column === undefined) diag.note = "no Fan Pts column";
+  else if (shown?.toLowerCase() !== view.toLowerCase()) {
+    diag.note = `"${view}" not shown as selected${shown ? ` (shows "${shown}")` : ""}: values ignored`;
     values.clear();
     defValues.clear();
     diag.read = 0;

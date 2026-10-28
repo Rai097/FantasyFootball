@@ -4,7 +4,7 @@
 // pages while the user is logged in, reads the league's own pages with
 // same-origin fetches, and shows the result for the user to copy/download.
 // It never sends data anywhere else.
-import { NAV_TEXT, navLink, parseMyTeamId, parsePlayersHtml, parseProjectionHtml, parseSettingsHtml, parseStandingsHtml, playerKey, waiverGroupOf, waiverStatusOf, type ScrapedPlayer, type StandingsRecord, type WaiverGroup, type WaiverGroupList, type WaiverList } from "./yahooHtml";
+import { LIST_VIEW, NAV_TEXT, findStatsView, navLink, parseListProjectionHtml, parseMyTeamId, parsePlayersHtml, parseProjectionHtml, parseSettingsHtml, parseStandingsHtml, playerKey, waiverGroupOf, waiverStatusOf, type ScrapedPlayer, type StandingsRecord, type WaiverGroup, type WaiverGroupList, type WaiverList } from "./yahooHtml";
 
 const DEFAULT_SLOTS = ["QB", "WR", "WR", "RB", "RB", "TE", "FLEX", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN", "IR"];
 const HALF_PPR = { passYd: 0.04, passTd: 4, passInt: -1, rushYd: 0.1, rushTd: 6, rec: 0.5, recYd: 0.1, recTd: 6, twoPt: 2, fumLost: -2, teRec: 0 };
@@ -124,7 +124,7 @@ async function run(): Promise<void> {
     // This week's Yahoo projection: the roster page's "Proj" column (header-matched, never guessed).
     const wk = parseProjectionHtml(page.html, "week");
     for (const p of r.players) {
-      const v = p.yahooId ? wk.values.get(p.yahooId) : undefined;
+      const v = p.yahooId ? wk.values.get(p.yahooId) : p.pos === "DEF" && p.team ? wk.defValues.get(p.team) : undefined;
       if (v !== undefined) p.yahooProjWeekly = v;
     }
     if (n === 1 || !wk.diag.read) diagnostics.push({ step: "projections", url, ...wk.diag });
@@ -188,7 +188,7 @@ async function run(): Promise<void> {
   // says which ("FA" / "W (Wed)"); a separate status=W list is read too, as a fallback and a cross-check.
   const freeAgents: ScrapedPlayer[] = [];
   /** What goes into the payload: one entry per free agent, `onWaivers` only when known. */
-  const faOut: (Pick<ScrapedPlayer, "yahooId" | "name" | "pos" | "team" | "status"> & { onWaivers?: boolean })[] = [];
+  const faOut: (Pick<ScrapedPlayer, "yahooId" | "name" | "pos" | "team" | "status" | "yahooProj" | "yahooProjWeekly"> & { onWaivers?: boolean })[] = [];
   const seen = new Set<string>();
   /**
    * Read up to `max` players of one list into `into` (de-duplicated by `seenSet`). `failed` = a page did not load
@@ -198,6 +198,9 @@ async function run(): Promise<void> {
     let total = 0;
     let full = false;
     let failed = false;
+    /** Pages that listed players (the projected-view pass reads at most this many), and the first page's markup. */
+    let pages = 0;
+    let first: { url: string; html: string } | undefined;
     for (let start = 0; start < 2 * max + 25; start += 25) {
       const url = `${base}/players?status=${status}&pos=${pos}&sort=${sort}&count=${start}`;
       let added = 0;
@@ -205,6 +208,8 @@ async function run(): Promise<void> {
         const page = await getPage(url);
         if (!page.ok) failed = true;
         const r = page.ok ? parsePlayersHtml(page.html) : undefined;
+        if (page.ok) first ??= { url: page.finalUrl || url, html: page.html };
+        if (r?.players.length) pages++;
         for (const p of r?.players ?? []) {
           const k = playerKey(p);
           if (seenSet.has(k)) continue;
@@ -224,22 +229,83 @@ async function run(): Promise<void> {
       }
       if (!added || full || total >= max) break;
     }
-    return { total, full: full || total >= max, failed };
+    return { total, full: full || total >= max, failed, pages, first };
   };
 
+  /**
+   * Yahoo's projected points for the available players of one list (offense / K / DEF): the players page's Stats
+   * control "Week N (proj)" (and a rest-of-season projected view when the control has one), found by its visible text
+   * in that list's first page (findStatsView: link, option URL or GET form — never a guessed param), then the same
+   * pages again in that view (`count` as the list itself used), at most as many pages as the list read. A value counts
+   * only when the fetched page shows that view as selected and has a "Fan Pts" column (parseListProjectionHtml). Each
+   * failed step is a "faProjections" diagnostics entry naming it; the projection then stays absent, never 0.
+   */
+  const readListProj = async (pos: string, list: Awaited<ReturnType<typeof readList>>, players: ScrapedPlayer[]) => {
+    if (!list.first || !players.length) return;
+    for (const kind of ["week", "ros"] as const) {
+      const found = findStatsView(list.first.html, LIST_VIEW[kind], list.first.url);
+      const base = { step: "faProjections", kind, pos, candidates: found.candidates.slice(0, 8) };
+      if (!found.view) {
+        diagnostics.push({ ...base, url: list.first.url, note: found.note });
+        continue;
+      }
+      const { view } = found;
+      for (let i = 0; i < list.pages; i++) {
+        const u = new URL(view.url);
+        u.searchParams.set("count", String(i * 25));
+        const url = u.href;
+        try {
+          const page = await getPage(url);
+          if (!page.ok) {
+            diagnostics.push({ ...base, url, status: page.status, view: view.text, how: view.how, note: "projected view page not ok" });
+            break;
+          }
+          const r = parseListProjectionHtml(page.html, kind, view.text);
+          let added = 0;
+          for (const p of players) {
+            const v = p.yahooId ? r.values.get(p.yahooId) : p.pos === "DEF" && p.team ? r.defValues.get(p.team) : undefined;
+            if (v === undefined) continue;
+            if (kind === "week" ? p.yahooProjWeekly === undefined : p.yahooProj === undefined) added++;
+            if (kind === "week") p.yahooProjWeekly ??= v;
+            else p.yahooProj ??= v;
+          }
+          diagnostics.push({ ...base, url, status: page.status, view: view.text, how: view.how, ...(view.field ? { field: view.field, value: view.value } : {}), ...r.diag, set: added });
+          if (!r.diag.read) break;
+        } catch (e) {
+          diagnostics.push({ ...base, url, view: view.text, note: `fetch failed: ${(e as Error).message}` });
+          break;
+        }
+      }
+      if (kind === "week") faWeekView ??= view.text;
+    }
+  };
+  let faWeekView: string | undefined;
+
   let sortUsed = "AR";
+  const aLists: { pos: string; list: Awaited<ReturnType<typeof readList>>; players: ScrapedPlayer[] }[] = [];
   for (const sort of ["AR", "PTS"]) {
     say(`reading free agents…`);
-    await readList("A", "O", sort, MAX_FA, freeAgents, seen, "freeAgents");
+    const from = freeAgents.length;
+    const list = await readList("A", "O", sort, MAX_FA, freeAgents, seen, "freeAgents");
     if (freeAgents.length) {
       sortUsed = sort;
+      aLists.push({ pos: "O", list, players: freeAgents.slice(from) });
       break;
     }
   }
   if (freeAgents.length) {
     for (const pos of ["K", "DEF"]) {
       say(`reading free agents (${pos})…`);
-      await readList("A", pos, sortUsed, MAX_KDEF, freeAgents, seen, `freeAgents ${pos}`);
+      const from = freeAgents.length;
+      const list = await readList("A", pos, sortUsed, MAX_KDEF, freeAgents, seen, `freeAgents ${pos}`);
+      aLists.push({ pos, list, players: freeAgents.slice(from) });
+    }
+    // Yahoo projections for available players: K and DEF first (weekly streaming), then offense.
+    for (const pos of ["K", "DEF", "O"]) {
+      const a = aLists.find((x) => x.pos === pos);
+      if (!a) continue;
+      say(`reading Yahoo projections for available players (${pos === "O" ? "offense" : pos})…`);
+      await readListProj(pos, a.list, a.players);
     }
     // Waivers lists, one per position group (fallback + cross-check for the owner column). Each group is judged on
     // its own: a failed or truncated page makes that group's list partial (non-members unknown, never free agents).
@@ -263,9 +329,28 @@ async function run(): Promise<void> {
     diagnostics.push({ step: "waiverStatus", ...ws.diag, listSize: all.size, lists: groupDiag });
     for (const p of freeAgents) {
       const onWaivers = ws.onWaivers.get(playerKey(p));
-      faOut.push({ yahooId: p.yahooId, name: p.name, pos: p.pos, team: p.team, status: p.status, ...(onWaivers !== undefined ? { onWaivers } : {}) });
+      faOut.push({
+        yahooId: p.yahooId,
+        name: p.name,
+        pos: p.pos,
+        team: p.team,
+        status: p.status,
+        ...(onWaivers !== undefined ? { onWaivers } : {}),
+        ...(p.yahooProjWeekly !== undefined ? { yahooProjWeekly: p.yahooProjWeekly } : {}),
+        ...(p.yahooProj !== undefined ? { yahooProj: p.yahooProj } : {}),
+      });
     }
   }
+  const faWeek = faOut.filter((f) => f.yahooProjWeekly !== undefined).length;
+  const faRos = faOut.filter((f) => f.yahooProj !== undefined).length;
+  diagnostics.push({
+    step: "faProjections",
+    note: faWeek ? `this week via the players page Stats view "${faWeekView}"` : "no projected week view read: available players' yahooProjWeekly not captured",
+    available: faOut.length,
+    week: faWeek,
+    ros: faRos,
+    ...(faWeekView ? { view: faWeekView } : {}),
+  });
 
   const payload = {
     source: "yahoo-bookmarklet",
@@ -288,14 +373,15 @@ async function run(): Promise<void> {
 
   // ---- summary
   box.textContent = "";
-  box.appendChild(el("div", "Trade Desk import v5", "font-weight:700;font-size:15px;margin-bottom:6px"));
+  box.appendChild(el("div", "Trade Desk import v6", "font-weight:700;font-size:15px;margin-bottom:6px"));
   const summary = el("div");
   const noPos = diagnostics.reduce((a, d) => a + (Array.isArray(d.noPos) ? d.noPos.length : 0), 0);
   summary.textContent =
     `${teams.length} team${teams.length === 1 ? "" : "s"} found · ${teams.reduce((a, t) => a + t.players.length, 0)} rostered players · ` +
     `standings: ${standingsTeams ? `${standingsTeams} of ${teams.length} teams` : "NOT found"} · waiver order: ${waiverRanks ? `${waiverRanks} of ${teams.length} teams` : "NOT found"} · ` +
     `Yahoo projections: ${projRos ? `${projRos} of ${rostered} players rest of season` : "rest of season NOT found"}, ${projWeek} this week · ` +
-    `${faOut.length} available players (${faOut.filter((f) => f.onWaivers === true).length} on waivers, ${faOut.filter((f) => f.onWaivers === undefined).length} unknown) · settings: ${settingsSource === "page" ? "read from Yahoo" : settingsSource === "partial" ? "partly read (check them after import)" : "NOT found, Yahoo defaults used (check them after import)"}` +
+    `${faOut.length} available players (${faOut.filter((f) => f.onWaivers === true).length} on waivers, ${faOut.filter((f) => f.onWaivers === undefined).length} unknown) · ` +
+    `${faWeek} available player${faWeek === 1 ? "" : "s"} with this week's projection${faRos ? `, ${faRos} rest of season` : ""} · settings: ${settingsSource === "page" ? "read from Yahoo" : settingsSource === "partial" ? "partly read (check them after import)" : "NOT found, Yahoo defaults used (check them after import)"}` +
     (noPos ? ` · ${noPos} player link(s) without a position were skipped` : "");
   box.appendChild(summary);
   const list = el("ol", undefined, "margin:8px 0;padding-left:20px;max-height:180px;overflow:auto");

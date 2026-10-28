@@ -259,6 +259,45 @@ test("free agents keep onWaivers per player (booleans only); missing = unknown, 
   ]);
 });
 
+test("import v6: free agents' Yahoo projections pass through (bounded, else dropped with a warning) and follow the capture-week rule", () => {
+  const s = validateImport({
+    ...body(),
+    teams: [{ id: "1", name: "A", players: [{ yahooId: "30123", name: "Patrick Mahomes", pos: "QB", team: "KC" }] }],
+    myTeamId: "1",
+    diagnostics: [{ step: "team" }],
+    freeAgents: [
+      { yahooId: "34496", name: "Ja'Marr Chase", pos: "WR", team: "Cin", onWaivers: false, yahooProjWeekly: 17.456, yahooProj: 160.2 },
+      { name: "Christian McCaffrey", pos: "RB", team: "SF", onWaivers: true, yahooProjWeekly: 61, yahooProj: "lots" },
+      { name: "Buffalo", pos: "DEF", team: "Buf", onWaivers: false, yahooProjWeekly: 7.05 },
+    ],
+  });
+  assert.equal(s.freeAgents![0].yahooProjWeekly, 17.46);
+  assert.equal(s.freeAgents![0].yahooProj, 160.2);
+  assert.equal(s.freeAgents![1].yahooProjWeekly, undefined, "above 60 a week: dropped, never clamped or 0");
+  assert.equal(s.freeAgents![1].yahooProj, undefined);
+  assert.equal(s.freeAgents![2].yahooProjWeekly, 7.05);
+  const warn = (s.diagnostics as any[]).find((d) => d.step === "validate");
+  assert.equal(warn.level, "warning");
+  assert.match(warn.note, /2 free-agent projection\(s\) dropped/);
+  assert.deepEqual(warn.dropped, ["free agent 2 yahooProj", "free agent 2 yahooProjWeekly"]);
+  assert.equal((s.diagnostics as any[])[0].step, "team", "the payload's own diagnostics are kept");
+  // An old import (no projections) stays valid and gets no warning.
+  const old = validateImport({ ...body(), freeAgents: [{ name: "Buffalo", pos: "DEF", team: "Buf", onWaivers: false }] });
+  assert.equal(old.freeAgents![0].yahooProjWeekly, undefined);
+  assert.ok(!((old.diagnostics as any[] | undefined) ?? []).some((d) => d.step === "validate"));
+
+  const fdb = { ...db, players: new Map(PLAYERS.map((p) => [p.id, p])) } as unknown as PlayerDb;
+  const at = (projWeek: number | undefined, week: number) => {
+    const st = { ...s, ...(projWeek !== undefined ? { projWeek } : {}) };
+    const l = buildImportLeague(db, st, { season: 2026, currentWeek: week });
+    return Object.fromEntries(importFreeAgents(l, fdb, st, week).freeAgents.map((f) => [f.player.id, [f.player.yahooProjWeekly, f.player.yahooProj]]));
+  };
+  assert.deepEqual(at(8, 8), { P2: [17.46, 160.2], P3: [undefined, undefined], "DEF:BUF": [7.05, undefined] });
+  assert.deepEqual(at(8, 9)["DEF:BUF"], [undefined, undefined], "a later week never serves last week's number");
+  assert.deepEqual(at(undefined, 8)["DEF:BUF"], [undefined, undefined], "unknown capture week: the weekly number is dropped");
+  assert.equal(PLAYERS.find((p) => p.id === "DEF:BUF")!.yahooProjWeekly, undefined, "the shared db entry is never mutated");
+});
+
 test("league-name prefix is stripped from team names when every team shares it", () => {
   const L = "Kingshot Gridiron Chumps - ";
   const t = (n: string) => ({ name: n });

@@ -2,6 +2,10 @@
 
 ## Resume here
 Owner (2026-10-26): Claude is the architect; work the queue autonomously, stop only for critical issues.
+AVAILABLE-PLAYER PROJECTIONS (2026-10-28, import v6, DESIGN "Available-player projections"): BUILT, not deployed. Bookmarklet
+   reads "Week N (proj)" (+ rest-of-season if offered) for available K / DEF / offense; Waivers streams K / DEF on Yahoo's
+   week projection (≥ +1.0, free agents only). Pending: adversarial test + review, deploy, owner drags "Trade Desk import
+   v6" and re-imports; then check the `faProjections` diagnostics (how / url / viewIndicator / note) and view N = projWeek.
 Release plan (in order; each = build → adversarial test → review → deploy to the Mac → smoke check):
 1–4 SHIPPED 2026-10-26 (live 993c6d9): Waivers rows + FA/waivers + K/DEF; league-name prefix stripped; import captures
    standings + waiver order (needs the owner's re-import; Yahoo markup unverified — check the import diagnostics);

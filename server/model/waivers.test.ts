@@ -1,6 +1,7 @@
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { capRows, claimThreshold, makeSummary, rankWaivers, snapTrendOf, thesisItems } from "./waivers.js";
+import { capRows, claimThreshold, KDEF_STREAM, makeSummary, rankWaivers, snapTrendOf, thesisItems, toWaiverRow } from "./waivers.js";
 import { analyzeTeams } from "./analysis.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { TradeContext } from "./tradeKit.js";
@@ -276,4 +277,111 @@ test("waiver details explain luck (+ = due for more) and rising usage", () => {
   const l = r.freeAgents.find((t) => t.id === "FA_lucky")!;
   assert.ok(l.details.some((x) => x.label === "Luck" && /sell-high/.test(x.value)), txt(l));
   assert.deepEqual(detailProblems(d.details), []);
+});
+
+// ------------------------------------------------------------------ import v6: K / DEF streaming on Yahoo's week projections
+/** My roster with this week's Yahoo projection on my K (7.5) and DEF (4.0); null = not captured. */
+function streamCtx(myK: number | null = 7.5, myDef: number | null = 4.0) {
+  const roster = mine.map((p) =>
+    p.id === "K" ? { ...p, ...(myK !== null ? { yahooProjWeekly: myK } : {}) } : p.id === "DEF" ? { ...p, ...(myDef !== null ? { yahooProjWeekly: myDef } : {}) } : p,
+  );
+  const L = league([team("me", roster, { irPlayerIds: ["IRGUY"] }), team("o", other)], undefined, { numTeams: 12 });
+  const players = new Map([...roster, ...other].map((p) => [p.id, p]));
+  return { league: L, players, teams: analyzeTeams(L, players, REPL) } as TradeContext;
+}
+const DEFS = () => [
+  // Lower season numbers than my DEF (ppg 7): on season numbers alone each would be "pass".
+  vp("D_best", "DEF", 6, 1, { yahooProjWeekly: 7.1, weekOpponent: "@ NYJ" }),
+  vp("D_ok", "DEF", 6.5, 1, { yahooProjWeekly: 5.2 }),
+  vp("D_small", "DEF", 6.8, 1, { yahooProjWeekly: 4.6 }),
+  vp("D_wv", "DEF", 6, 1, { yahooProjWeekly: 9.0 }),
+  vp("D_none", "DEF", 6.9, 1),
+];
+const run = (ctx: TradeContext, fas: ValuedPlayer[], waivers: string[] = ["D_wv"]) =>
+  rankWaivers(ctx, "me", fas.map((p) => ({ player: p, onWaivers: waivers.includes(p.id) })), { myPriority: 3, limit: 50, perPosition: 10 });
+const byId = (r: ReturnType<typeof rankWaivers>, id: string) => r.freeAgents.find((t) => t.id === id)!;
+
+test("K/DEF streaming: both have Yahoo's week projection → gain = their difference; the best free DEF is named", () => {
+  const r = run(streamCtx(), [...DEFS(), vp("K_free", "K", 6, 1, { yahooProjWeekly: 8.9 })]);
+  const best = byId(r, "D_best");
+  assert.equal(best.recommendation, "optional");
+  assert.equal(best.gain, 3.1);
+  assert.deepEqual(best.weekStream, { proj: 7.1, mine: 4, gain: 3.1, best: true, opponent: "@ NYJ" });
+  assert.equal(best.summary, "Best DEF stream this week (@ NYJ): Yahoo proj 7.1 vs your 4.0. Free agent, add any time.");
+  assert.ok(best.details.some((d) => d.label === "This week (Yahoo)" && d.value === "proj 7.1 vs your 4.0 (+3.1)"));
+  const ok = byId(r, "D_ok");
+  assert.equal(ok.recommendation, "optional", "+1.2 ≥ the 1.0 minimum");
+  assert.equal(ok.weekStream!.best, false);
+  assert.match(ok.summary, /^Streaming DEF this week: Yahoo proj 5\.2 vs your 4\.0\./);
+  const small = byId(r, "D_small");
+  assert.equal(small.recommendation, "pass", `+0.6 < ${KDEF_STREAM.minGain}`);
+  assert.equal(small.summary, "Not a streaming upgrade this week: Yahoo proj 4.6 vs your 4.0.");
+  // A bigger projection on waivers is never worth priority (and is never the named pick).
+  const wv = byId(r, "D_wv");
+  assert.equal(wv.recommendation, "pass");
+  assert.equal(wv.weekStream!.best, false);
+  assert.match(wv.summary, /^DEF on waivers \(Yahoo proj 9\.0 vs your 4\.0\): not worth your priority\./);
+  // The kicker: +1.4 over my 7.5, free → named too.
+  assert.equal(byId(r, "K_free").weekStream!.best, true);
+  assert.equal(byId(r, "K_free").recommendation, "optional");
+  // Named in the advice line and the rules; sorted above the smaller stream.
+  assert.match(r.advice, /stream D_best \(DEF\), K_free \(K\) this week/);
+  assert.ok(r.rules.some((x) => x.label === "Best DEF this week" && x.value === "D_best: Yahoo proj 7.1 vs your 4.0"));
+  assert.ok(r.freeAgents.indexOf(best) < r.freeAgents.indexOf(ok));
+  for (const t of r.freeAgents) {
+    assert.deepEqual(summaryProblems(t.summary), [], t.summary);
+    assert.deepEqual(detailProblems(t.details), [], t.id);
+  }
+  // The slim row carries the week numbers for the tab.
+  const row = toWaiverRow(best);
+  assert.deepEqual(row.weekStream, best.weekStream);
+  assert.equal(row.yahooProjWeekly, 7.1);
+  assert.equal(toWaiverRow(byId(r, "D_none")).yahooProjWeekly, undefined);
+});
+
+test("K/DEF streaming: a missing projection (his or mine) keeps the season-number call, labelled 'no weekly projection'", () => {
+  const r = run(streamCtx(), DEFS());
+  const none = byId(r, "D_none");
+  assert.equal(none.weekStream, undefined);
+  assert.equal(none.recommendation, "pass");
+  assert.equal(none.summary, "Not an upgrade on your current DEF (no weekly projection).");
+  assert.ok(none.details.some((d) => d.label === "This week (Yahoo)" && /^No weekly projection: re-import/.test(d.value)));
+  // My DEF without a week projection: nobody is compared on it, nobody is named; rows say mine is missing.
+  const r2 = run(streamCtx(7.5, null), DEFS());
+  for (const t of r2.freeAgents.filter((x) => x.pos === "DEF")) {
+    assert.equal(t.weekStream, undefined, t.id);
+    assert.equal(t.recommendation, "pass", `${t.id}: season numbers say no upgrade`);
+  }
+  assert.ok(byId(r2, "D_best").details.some((d) => d.value === "No weekly projection for your DEF"));
+  assert.ok(!r2.rules.some((x) => x.label === "Best DEF this week"));
+  assert.doesNotMatch(r2.advice, /stream/);
+});
+
+test("K/DEF streaming: never a claim — unknown availability counts as on waivers and is never the named pick", () => {
+  const ctx = streamCtx();
+  const d = vp("D_unk", "DEF", 6, 1, { yahooProjWeekly: 12 });
+  const r = rankWaivers(ctx, "me", [{ player: d, onWaivers: true, availability: "unknown" }], { myPriority: 12 });
+  const t = byId(r, "D_unk");
+  assert.equal(t.recommendation, "pass");
+  assert.equal(t.weekStream!.best, false);
+  assert.ok(!r.freeAgents.some((x) => (x.pos === "K" || x.pos === "DEF") && x.recommendation === "claim"));
+});
+
+test("Waivers tab: K/DEF rows show this week's projection with a why tooltip ('—' when not captured)", () => {
+  const src = readFileSync(new URL("../../web/src/tabs/WaiversTab.tsx", import.meta.url), "utf8");
+  assert.match(src, /function WeekProj\(/);
+  assert.match(src, /title=\{proj === undefined \? TIPS\.noWeek : TIPS\.week\}/);
+  assert.match(src, /<WeekProj p=\{p\} \/>/);
+  assert.match(src, /week: "Yahoo's projected points for him this week/);
+});
+
+test("K/DEF streaming: with no DEF of mine the gain is his whole projection and the text says so", () => {
+  const roster = mine.filter((p) => p.id !== "DEF");
+  const L = league([team("me", roster, { irPlayerIds: ["IRGUY"] }), team("o", other)], undefined, { numTeams: 12 });
+  const players = new Map([...roster, ...other].map((p) => [p.id, p]));
+  const ctx = { league: L, players, teams: analyzeTeams(L, players, REPL) } as TradeContext;
+  const r = run(ctx, [vp("D_best", "DEF", 6, 1, { yahooProjWeekly: 7.1 })], []);
+  const t = byId(r, "D_best");
+  assert.deepEqual(t.weekStream, { proj: 7.1, mine: null, gain: 7.1, best: true });
+  assert.match(t.summary, /^Best DEF stream this week: Yahoo proj 7\.1 vs no DEF of yours\./);
 });

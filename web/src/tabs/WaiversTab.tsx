@@ -15,7 +15,20 @@ const TIPS = {
   value: "Trade value on a 0–100 scale; 0 means no better than a typical free agent.",
   gain: "How many points per game your best starting lineup gains if you add him (and drop the player shown in details).",
   call: "What to do: claim, optional, stash, wait or pass. Tap the row for the reasons.",
+  week: "Yahoo's projected points for him this week, read from Yahoo by the import; K / DEF streams compare it with yours.",
+  noWeek: "No weekly projection from Yahoo for him: the call uses season numbers. Re-import with the latest bookmark.",
 };
+
+/** K / DEF only: this week's Yahoo projection as a small chip ("wk 7.1", "—" when not captured). */
+function WeekProj({ p }: { p: WaiverRow }) {
+  if (p.pos !== "K" && p.pos !== "DEF") return null;
+  const proj = p.weekStream?.proj ?? p.yahooProjWeekly;
+  return (
+    <span className="tag small-tag" title={proj === undefined ? TIPS.noWeek : TIPS.week}>
+      wk {proj === undefined ? "—" : f1(proj)}
+    </span>
+  );
+}
 
 export function WaiversTab({ analysis, active }: { analysis: Analysis; active: Active & { team: string } }) {
   const [pos, setPos] = useState("");
@@ -236,6 +249,7 @@ function WaiverRow({ p }: { p: WaiverRow }) {
             <span className="muted small">{p.team}</span>
             <InjuryDot player={p} />
             <AvailBadge p={p} />
+            <WeekProj p={p} />
           </span>
           <span className="w-summary">{p.summary}</span>
           <span className="num w-stat" title={TIPS.ppg}>
@@ -266,6 +280,12 @@ function WaiverRow({ p }: { p: WaiverRow }) {
           <span className="stat-label">Gain</span>
           <b className={`delta ${deltaClass(p.gain)}`}>{signed(p.gain)}</b>
         </span>
+        {(p.pos === "K" || p.pos === "DEF") && (
+          <span className="stat-tile" title={p.weekStream || p.yahooProjWeekly !== undefined ? TIPS.week : TIPS.noWeek}>
+            <span className="stat-label">This week</span>
+            <b>{f1(p.weekStream?.proj ?? p.yahooProjWeekly)}</b>
+          </span>
+        )}
         {p.percentOwned != null && (
           <span className="stat-tile" title="Share of Yahoo leagues where he is on a roster.">
             <span className="stat-label">Rostered</span>

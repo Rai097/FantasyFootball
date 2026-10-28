@@ -446,6 +446,8 @@ export interface WaiverTarget extends Omit<ValuedPlayer, "why"> {
   rankScore: number;
   /** Breakout Targets signal for this free agent, when he is in that pool. */
   breakout?: WaiverBreakout;
+  /** K / DEF only, when both he and my K / DEF carry this week's Yahoo projection (waivers.ts WeekStream). */
+  weekStream?: { proj: number; mine: number | null; gain: number; best: boolean; opponent?: string };
 }
 
 /**
@@ -458,6 +460,9 @@ export type WaiverRow = Pick<
 > & {
   drop: { id: string; name: string; pos: Position; value: number } | null;
   breakout?: Omit<WaiverBreakout, "thesis">;
+  weekStream?: WaiverTarget["weekStream"];
+  /** This week's Yahoo projection (K / DEF rows), when captured. */
+  yahooProjWeekly?: number;
 };
 
 /** The part of a BreakoutTarget the waivers module uses. */

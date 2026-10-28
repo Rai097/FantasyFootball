@@ -146,7 +146,7 @@ export function parseSlotList(input: unknown): { slots: SlotKind[]; unknown: str
   return { slots, unknown };
 }
 
-function cleanPlayer(v: unknown, where: string): ImportPlayerRaw {
+function cleanPlayer(v: unknown, where: string, dropped?: (field: string) => void): ImportPlayerRaw {
   const o = (v ?? {}) as Record<string, unknown>;
   const name = str(o.name, 80);
   if (!name) throw new ImportError(`${where}: player without a name`);
@@ -160,11 +160,13 @@ function cleanPlayer(v: unknown, where: string): ImportPlayerRaw {
   if (status) p.status = status.toUpperCase();
   const slot = str(o.slot, 10);
   if (slot) p.slot = slot.toUpperCase();
-  // Projections: finite numbers in range or nothing (dropped silently: never a guessed 0).
+  // Projections: finite numbers in range or nothing (never a guessed 0); a value present but unusable is reported.
   const ros = projNum(o.yahooProj, PROJ_LIMITS.ros);
   if (ros !== undefined) p.yahooProj = ros;
+  else if (o.yahooProj !== undefined) dropped?.("yahooProj");
   const wk = projNum(o.yahooProjWeekly, PROJ_LIMITS.week);
   if (wk !== undefined) p.yahooProjWeekly = wk;
+  else if (o.yahooProjWeekly !== undefined) dropped?.("yahooProjWeekly");
   return p;
 }
 
@@ -332,9 +334,12 @@ export function validateImport(body: unknown, now = new Date()): StoredImport {
   // The importer's own waiver priority: given explicitly, else their team's place in the captured waiver order.
   const wp = int(o.waiverPriority, 1, MAX_TEAMS) ?? teams.find((t) => t.id === out.myTeamId)?.waiverRank;
   if (wp) out.waiverPriority = wp;
+  // Available players' projections (import v6): kept like a rostered player's; an unusable one is dropped with a
+  // warning in the stored diagnostics (step "validate"), never stored as 0.
+  const faDropped: string[] = [];
   if (fa)
     out.freeAgents = fa.map((v, j) => {
-      const { slot: _s, ...p } = cleanPlayer(v, `free agent ${j + 1}`);
+      const { slot: _s, ...p } = cleanPlayer(v, `free agent ${j + 1}`, (field) => faDropped.push(`free agent ${j + 1} ${field}`));
       const onWaivers = (v as Record<string, unknown> | null)?.onWaivers;
       return typeof onWaivers === "boolean" ? { ...p, onWaivers } : p;
     });
@@ -342,6 +347,10 @@ export function validateImport(body: unknown, now = new Date()): StoredImport {
   if (Array.isArray(o.diagnostics)) {
     const d = JSON.stringify(o.diagnostics);
     if (d.length < 200_000) out.diagnostics = o.diagnostics;
+  }
+  if (faDropped.length) {
+    const warning = { step: "validate", level: "warning", note: `${faDropped.length} free-agent projection(s) dropped: not a number in range`, dropped: faDropped.slice(0, 10) };
+    out.diagnostics = [...(out.diagnostics ?? []), warning];
   }
   return out;
 }
@@ -580,7 +589,10 @@ export function importFreeAgents(
       if (rostered.has(p.id) || seen.has(p.id)) continue;
       seen.add(p.id);
       const availability: Availability = raw.onWaivers === undefined ? "unknown" : raw.onWaivers ? "waivers" : "fa";
-      out.push({ player: withYahooStatus(p, entryOf(raw), week) ?? p, onWaivers: raw.onWaivers ?? true, availability });
+      // Yahoo projections under the same staleness rule as rostered players (this week's only in the capture week).
+      const proj = projectionsFor(raw, s.projWeek, week);
+      const player = withYahooStatus(p, entryOf(raw), week) ?? p;
+      out.push({ player: proj ? { ...player, ...proj } : player, onWaivers: raw.onWaivers ?? true, availability });
     }
   } else {
     for (const p of draftBoard(db.players.values())) if (!rostered.has(p.id)) out.push({ player: p, onWaivers: true, availability: "unknown" });
