@@ -50,7 +50,7 @@ export async function fetchCachedMeta(url: string, ttlHours = 6, opts: FetchOpts
     const body = await res.text();
     opts.validate?.(body);
     // Write-then-rename: a crash mid-write never leaves a truncated copy in place of the good one.
-    const tmp = `${file}.${process.pid}.tmp`;
+    const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
     await fs.writeFile(tmp, body);
     await fs.rename(tmp, file);
     return { body, source: "network", ageH: 0 };
