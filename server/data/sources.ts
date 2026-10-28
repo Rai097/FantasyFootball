@@ -21,4 +21,6 @@ export const sources = {
   ecr: `${DP}/db_fpecr_latest.csv`,
   ecrWeekly: `${DP}/fp_latest_weekly.csv`,
   dynastyValues: `${DP}/values-players.csv`,
+  /** Sleeper player listing (injury status / body part), ≈ 15 MB, at most once a day: https://docs.sleeper.com/#players */
+  sleeperPlayers: "https://api.sleeper.app/v1/players/nfl",
 };

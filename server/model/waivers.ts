@@ -179,11 +179,13 @@ export function rankWaivers(
     if (proj === undefined || !my) return undefined;
     return { proj, mine: my.mine, gain: r2(proj - (my.mine ?? 0)), ...(fa.weekOpponent ? { opponent: fa.weekOpponent } : {}) };
   };
+  /** K / DEF whose team has no game this week, from the NFL schedule (Player.bye) — never inferred from a 0.0 projection. */
+  const onByeNow = (p: ValuedPlayer) => (p.pos === "K" || p.pos === "DEF") && p.bye === S.currentWeek;
   // The named pick per position: free to add (never a claim), gain ≥ the minimum; highest projection, then gain, then id.
   const bestStream = new Map<Position, string>();
   for (const pos of ["K", "DEF"] as const) {
     const pick = freeAgents
-      .filter((f) => f.player.pos === pos && !f.onWaivers)
+      .filter((f) => f.player.pos === pos && !f.onWaivers && !onByeNow(f.player))
       .map((f) => ({ id: f.player.id, s: streamOf(f.player) }))
       .filter((x): x is { id: string; s: Omit<WeekStream, "best"> } => !!x.s && x.s.gain >= KDEF_STREAM.minGain)
       .sort((a, b) => b.s.proj - a.s.proj || b.s.gain - a.s.gain || a.id.localeCompare(b.id))[0];
@@ -234,7 +236,14 @@ export function rankWaivers(
     const ruleItems: DetailItem[] = [];
     const st0 = isKDef ? streamOf(fa) : undefined;
     const stream: WeekStream | undefined = st0 ? { ...st0, best: bestStream.get(fa.pos) === fa.id } : undefined;
-    if (isKDef && stream) {
+    const bye = onByeNow(fa);
+    if (bye) {
+      // No game this week: no streaming gain to show (the row reads "—"), and he sorts below every K / DEF who plays.
+      recommendation = "pass";
+      gain = 0;
+      rule = `Bye in week ${S.currentWeek} (NFL schedule): no game this week`;
+      lead = "On bye this week.";
+    } else if (isKDef && stream) {
       // This week's Yahoo projections on both sides: the streaming gain is their difference (the lineup gain this week).
       gain = stream.gain;
       rankScore = Math.max(gain * 3, benchGain / 10);
@@ -255,7 +264,8 @@ export function rankWaivers(
       } else {
         recommendation = "pass";
         rule = `Yahoo projects under ${fmtSigned(KDEF_STREAM.minGain)} over your ${fa.pos} this week`;
-        lead = `Not a streaming upgrade this week: ${vs}.`;
+        // 0.0 with a game this week (not a bye): Yahoo gives him no role, say so instead of a big negative gain.
+        lead = stream.proj === 0 ? `No projection role this week: ${vs}.` : `Not a streaming upgrade this week: ${vs}.`;
       }
     } else if (isKDef) {
       // Kickers / defenses are streamed: never spend rolling-list priority (or a bid) on them, and only a real
@@ -387,12 +397,14 @@ export function rankWaivers(
     const toneOf = toneOfGain;
     item("Rule", rule);
     for (const d of ruleItems) item(d.label, d.value);
-    if (stream) {
+    if (bye) item("This week", `On bye (week ${S.currentWeek}): no game`, "warn");
+    else if (stream) {
       item("This week (Yahoo)", `proj ${stream.proj.toFixed(1)} vs ${stream.mine === null ? `no ${fa.pos}` : `your ${stream.mine.toFixed(1)}`} (${fmtSigned(stream.gain)})`, toneOfGain(stream.gain));
       if (stream.opponent) item("Opponent", stream.opponent);
     } else if (isKDef) item("This week (Yahoo)", weekProjOf(fa) === undefined ? "No weekly projection: re-import with the latest bookmark" : `No weekly projection for your ${fa.pos}`);
     item("Lineup", startsText);
-    item("Lineup gain", stream ? `${fmtSigned(gain)} pts this week` : `${fmtSigned(gain)} ppg`, toneOf(gain));
+    if (bye) item("Lineup gain", "— (no game this week)");
+    else item("Lineup gain", stream ? `${fmtSigned(gain)} pts this week` : `${fmtSigned(gain)} ppg`, toneOf(gain));
     item("Drop", drop ? `${drop.name} (value ${drop.value.toFixed(1)})` : "Nobody: open roster spot");
     item("Value change", fmtSigned(benchGain), toneOf(benchGain));
     if (fa.games >= 3) item("Expected points", `${fmtSigned(fa.trend)}/g lately vs his season`, toneOf(fa.trend));
@@ -419,8 +431,9 @@ export function rankWaivers(
     else if (!ACTIONABLE.has(recommendation)) item("Availability", avail === "fa" ? "Free agent" : "On waivers");
 
     // A 0.0 next to a call reads as nonsense: say why the number is not the point (the UI shows "—" + this tooltip).
-    const gainNote =
-      !stream && Math.abs(gain) < 0.05
+    const gainNote = bye
+      ? "On bye this week: no game, so no points to gain"
+      : !stream && Math.abs(gain) < 0.05
         ? recommendation === "pass"
           ? "No lineup gain: he would not start for you"
           : recommendation === "optional"
@@ -447,6 +460,7 @@ export function rankWaivers(
       rankScore: r2(rankScore),
       ...(bo ? { breakout: bo } : {}),
       ...(stream ? { weekStream: stream } : {}),
+      ...(bye ? { byeWeek: true as const } : {}),
     };
   });
 
@@ -459,6 +473,8 @@ export function rankWaivers(
   targets.sort(
     (a, b) =>
       REC_ORDER[a.recommendation] - REC_ORDER[b.recommendation] ||
+      // A K / DEF on bye sorts below every K / DEF who plays this week (same call).
+      (a.byeWeek ? 1 : 0) - (b.byeWeek ? 1 : 0) ||
       b.rankScore - a.rankScore ||
       (b.breakout?.score ?? -1) - (a.breakout?.score ?? -1) ||
       b.gain - a.gain ||
@@ -602,6 +618,7 @@ export function toWaiverRow(t: WaiverTarget): WaiverRow {
     row.breakout = b;
   }
   if (t.weekStream) row.weekStream = t.weekStream;
+  if (t.byeWeek) row.byeWeek = true;
   if ((t.pos === "K" || t.pos === "DEF") && t.yahooProjWeekly !== undefined) row.yahooProjWeekly = t.yahooProjWeekly;
   return row;
 }

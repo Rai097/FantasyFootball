@@ -94,3 +94,35 @@ test("stash watch: 0 snaps in his team's last 2 games (no injury listed) with a 
   assert.ok(row, rows.map((r) => r.id).join(","));
   assert.ok(row.details.some((d) => d.label === "Snaps" && /last 2 games/.test(d.value)));
 });
+
+test("season-ending tear (Sleeper IR + ACL): value 0 rest of season, out of Stash watch; an IR + PCL listing stays a stash with the body part", () => {
+  const role = { rec: 8, recYd: 110, recTd: 0.3 };
+  const acl = rawPlayer("acl", "RB", { ecrPos: 30, weeks: games([1, 2, 3], { rushYd: 95, rec: 4, recYd: 30, rushTd: 0.5 }) });
+  acl.sleeperInjury = { status: "IR", bodyPart: "Knee - ACL", notes: "Surgery", rosterStatus: "Inactive" };
+  const pcl = rawPlayer("pcl", "WR", { ecrPos: 70, weeks: games([1, 2, 3], role) });
+  pcl.sleeperInjury = { status: "IR", bodyPart: "Knee - PCL", rosterStatus: "Inactive" };
+  // Same tear, but Sleeper's PUP tag with roster status Active (training-camp list): not season-ending.
+  const camp = rawPlayer("camp", "WR", { ecrPos: 75, weeks: games([1, 2, 3], role) });
+  camp.sleeperInjury = { status: "PUP", bodyPart: "Knee - ACL", rosterStatus: "Active" };
+  const sig = (p: Player) =>
+    [p.id, computePlayerSignals({ ...signalInputFromPlayer(p)!, roster: { status: "RES", statusCode: "R01" }, status: [] }, { season: 2026, scoring: PPR, asOf: ASOF })] as const;
+  const tables: ProjectionTables = { ...emptyTables(), signals: new Map([sig(acl), sig(pcl), sig(camp)]) };
+  const val = valuePlayers(L(), [...POOL, acl, pcl, camp], tables);
+  const a = val.players.get("acl")!;
+  assert.equal(a.ret?.seasonOver, true);
+  assert.equal(a.value, 0);
+  assert.equal(a.seasonPts, 0);
+  assert.equal(a.playoffPts, 0);
+  assert.ok(a.weekly!.every((x) => x === 0));
+  assert.equal(a.ret!.healthyRate, undefined);
+  assert.ok(a.whyItems!.some((d) => d.value.startsWith("Out for the season (torn ACL, on IR)")), JSON.stringify(a.whyItems));
+  const p = val.players.get("pcl")!;
+  assert.notEqual(p.ret?.seasonOver, true);
+  assert.equal(val.players.get("camp")!.ret?.seasonOver, undefined, "Active PUP: return unconfirmed, not season over");
+  const rows = stashWatch({ players: val.players.values(), rostered: new Set(), availability: new Map(), flexLevel: val.flexLevel, regularSeasonEnd: 14, finalWeek: 17 });
+  assert.ok(!rows.some((r) => r.id === "acl"), rows.map((r) => r.id).join(","));
+  const row = rows.find((r) => r.id === "pcl")!;
+  assert.ok(row, rows.map((r) => r.id).join(","));
+  assert.match(row.summary, /return unconfirmed/);
+  assert.ok(row.details.some((d) => d.label === "Injury" && d.value === "IR: Knee - PCL"), JSON.stringify(row.details));
+});

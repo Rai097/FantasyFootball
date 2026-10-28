@@ -77,9 +77,12 @@ SHIPPED 2026-10-27 (live 5db1266): one playoff engine (floor factor out of seaso
    read "borrowed" when his own baseline is one game. Still open:
    "buy the high" acceptance (partner sees a sell-high: perception ×0.7 only) — backlog. Unverified: 390 px layout of
    the weak-position line; "riser" (trend.ts) still counts borrowed-role games; calibration of ROLE_ENV.minShare / VACATED / SPIKE constants beyond one league-week.
+SEASON-ENDING INJURIES + BYE K/DEF (2026-10-28, DESIGN "Season-ending injuries + bye-week K / DEF"): BUILT, not
+   deployed. Sleeper player listing loader (once a day, ~15 MB, kept on failure); IR/PUP + ACL/Achilles (not Active
+   PUP, DTR wins) = out for the season, value 0, off Stash watch; other IR shows the body part. K/DEF on bye: "On bye
+   this week", chip "bye", gain "—", sorted below K/DEF who play. Data copy: 8 season-ending, Stash watch 4 → 3.
+   Deploy note: the first start on the Mac fetches Sleeper once (then daily). Unverified: chip at 390 px.
 NEXT (backlog, highest value first):
-- Season-ending injuries: a lead RB out for the year (on IR as R01, not in the import) shows in Stash watch as
-  "return unconfirmed"; no loaded source marks season-ending. Options: nflverse R48 vs R01 rule, or Yahoo player notes.
 - DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
   they get +16% (why they'd accept)"; pitch text must not say "you win on value" ambiguously; name the projection

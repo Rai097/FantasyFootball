@@ -1355,3 +1355,49 @@ over a role for good. Decisions (coordinator):
   of the window), never on a window that includes it: a part-timer whose snaps rose in the spike week cannot exempt
   himself with it. Fewer than 2 known games before it = not settled. QBs stay exempt; the climb rule (`climbStep`) is
   unchanged.
+
+## Season-ending injuries + bye-week K / DEF (2026-10-28) — overrides "Release (c) implemented" on season-over and "Available-player projections" on K / DEF byes
+
+**Problem.** nflverse marks a season-ending injury only when the injury detail says "season", and players on IR drop
+off the nflverse injury report, so a starter with a torn ACL showed in Stash watch as "return unconfirmed" with a
+playoff value. Separately, a K / DEF whose team is on bye has Yahoo week projection 0.0 and read "Not a streaming
+upgrade this week: Yahoo proj 0.0 vs your 7.0" (gain −7.0), sorted near the top of the K / DEF rows.
+
+**Source: Sleeper's public player listing** (`server/data/sleeper.ts`). Docs: https://docs.sleeper.com/#players —
+`GET https://api.sleeper.app/v1/players/nfl`, no key; Sleeper asks callers to fetch it at most once per day and keep
+their own copy. Fields used: `injury_status` ("IR", "PUP", "Out", "Questionable", …), `injury_body_part`
+("Knee - ACL", "Hamstring", …), `injury_notes` ("Surgery"), `status` (roster status: "Active" / "Inactive").
+* Cache: `.cache/<sha1>-nfl`, TTL 24 h (`SLEEPER_TTL_HOURS`). `fetchCachedMeta` validates the body before writing it
+  (`validateSleeperBody`: a player object with ≥ 1000 entries), writes via a temp file + rename, and on any failure
+  (HTTP error, network, invalid body) serves the previous copy untouched. With no copy at all every listing stays
+  unknown (no `sleeperInjury`), never an empty or invented one.
+* Read on every player-DB build (every 6 h, `DB_STALE_MS`) from the disk copy; one log line per build:
+  `[sleeper] refresh source=cache|network|stale ageH players injured matched seasonEnding bytes ms [error]`, or
+  `[sleeper] refresh failed source=none … listings=unknown`.
+* Matching (`attachSleeperInjuries`): Sleeper id (our id map has `sleeper_id` from the nflverse roster and the
+  DynastyProcess id map), then GSIS id (trimmed: Sleeper pads some), then Yahoo id, then normalised name + position +
+  team when unique; anything else stays unmatched (unknown). Stored as `Player.sleeperInjury`, separate from
+  `Player.injury` (the league source's fresher tag keeps winning there; import copies carry the field along).
+* Quota: 1 request per day per running copy (≈ 15 MB, measured 14.7 MB on 2026-10-28, ~12 200 players, ~270 injured
+  at fantasy positions). While Sleeper fails, the 6-hourly DB build retries, so at most 4 attempts a day.
+
+**Rule** (`returns.ts` `SEASON_ENDING`, config list): `injury_status` IR or PUP, roster status not "Active", and the
+body part matches `\bACL\b` or `Achilles` (case-insensitive; "Knee - ACL + MCL" counts, "Knee - PCL" does not) ⇒
+out for the season. An ACL or Achilles tear ends an NFL season (recovery ≈ 9–12 months). An "Active" PUP tag is the
+training-camp list (the player can still be activated), so it is never season-ending. Designated to return (Yahoo
+IR-R / nflverse R48) beats the rule: it is positive evidence of a return and Sleeper's daily copy can lag.
+* Season over ⇒ projection v4 absence `seasonOver`: 0 for every remaining week, value 0, no hold / trade value, never
+  a trade piece, never in Stash watch; the why reads "Out for the season (torn ACL, on IR): 0 for every week".
+* Any other listing with a body part keeps its current call ("return unconfirmed" for IR) and adds the evidence bullet
+  "Injury: IR: Knee - PCL" to the return reasons (Stash watch details, hold / Values why).
+* Data copy 2026-10-28: 8 players season-ending (the lead RB from the owner's report among them); Stash watch 4 → 3
+  rows; the other IR rows now show their body part (Hamstring / Knee - PCL / Shoulder). The one PUP + ACL player with
+  roster status "Active" is not marked.
+
+**Bye-week K / DEF on Waivers** (`waivers.ts`): a K / DEF whose team has no game this week — `Player.bye` from the
+NFL schedule (nflverse games.csv; Yahoo's bye column when imported), never inferred from a 0.0 projection — is
+"pass" with the row text "On bye this week.", the K / DEF chip "bye" instead of "wk 0.0", gain "—" (gainNote "On bye
+this week: no game, so no points to gain"), never the named stream, and sorts below every K / DEF who plays (same
+call). A 0.0 Yahoo projection without a bye reads "No projection role this week: Yahoo proj 0.0 vs your …" and keeps
+its real gain. With the default 5-per-position row cap the bye rows usually fall off the K / DEF chip (data copy:
+4 bye DEFs ranked 15–18 of 18 DEF rows, outside the shown 5).

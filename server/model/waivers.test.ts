@@ -391,6 +391,44 @@ test("K/DEF streaming: with no DEF of mine the gain is his whole projection and 
   assert.ok(t.details.some((d) => d.label === "Lineup" && d.value === "Starts at DEF this week"), "never 'Bench depth' next to a weekly gain");
 });
 
+test("K/DEF on bye this week (NFL schedule): 'On bye this week', bye chip, gain '—', sorted below every K/DEF who plays", () => {
+  // currentWeek 4 (testkit). A high-value DEF on bye (Yahoo 0.0) used to read "Not a streaming upgrade: 0.0 vs 4.0" (−4.0).
+  const onBye = vp("D_bye", "DEF", 9, 30, { yahooProjWeekly: 0, bye: 4 });
+  const byeNoProj = vp("K_bye", "K", 9, 30, { bye: 4 });
+  // 0.0 with a game this week (bye in another week): not a bye, Yahoo gives him no role.
+  const noRole = vp("D_zero", "DEF", 6, 1, { yahooProjWeekly: 0, bye: 9 });
+  const r = run(streamCtx(), [...DEFS(), onBye, byeNoProj, noRole]);
+  const b = byId(r, "D_bye");
+  assert.equal(b.recommendation, "pass");
+  assert.equal(b.summary, "On bye this week.");
+  assert.equal(b.byeWeek, true);
+  assert.equal(b.gain, 0);
+  assert.equal(b.gainNote, "On bye this week: no game, so no points to gain");
+  assert.equal(b.weekStream?.best, false, "never the named pick");
+  assert.ok(b.details.some((d) => d.label === "This week" && d.value === "On bye (week 4): no game"), JSON.stringify(b.details));
+  assert.ok(b.details.some((d) => d.label === "Lineup gain" && d.value.startsWith("—")));
+  assert.ok(!b.details.some((d) => d.label === "This week (Yahoo)"));
+  assert.deepEqual(detailProblems(b.details), []);
+  const k = byId(r, "K_bye");
+  assert.equal(k.byeWeek, true, "bye without a captured projection");
+  assert.equal(k.summary, "On bye this week.");
+  // Sorted below every K / DEF who plays, whatever their value or gain.
+  const kdef = r.freeAgents.filter((t) => t.pos === "K" || t.pos === "DEF");
+  const firstBye = kdef.findIndex((t) => t.byeWeek);
+  assert.ok(firstBye > 0 && kdef.slice(firstBye).every((t) => t.byeWeek), kdef.map((t) => t.id).join(","));
+  // 0.0 without a bye: no projection role, a real number (never a bye chip).
+  const z = byId(r, "D_zero");
+  assert.equal(z.byeWeek, undefined);
+  assert.equal(z.summary, "No projection role this week: Yahoo proj 0.0 vs your 4.0.");
+  assert.equal(z.gain, -4);
+  // The slim row carries the bye flag for the chip; a playing DEF does not.
+  assert.equal(toWaiverRow(b).byeWeek, true);
+  assert.equal(toWaiverRow(byId(r, "D_best")).byeWeek, undefined);
+  const src = readFileSync(new URL("../../web/src/tabs/WaiversTab.tsx", import.meta.url), "utf8");
+  assert.match(src, /if \(p\.byeWeek\)/);
+  assert.match(src, /bye: "His team has no game this week/);
+});
+
 // ---- Fix 2026-10-28: vacated role, spikes, depth and roster need (DESIGN "Fix: vacated role, spikes, depth and roster need")
 const role = (r: Partial<import("./types.js").RoleCheck> = {}) => ({ sustained: true, spike: false, ...r });
 const fut = (r?: Partial<import("./types.js").RoleCheck>) => ({ tier: "rising" as const, score: 78, situation: 0.5, oppLevel: 11, thesis: "", ...(r ? { role: role(r) } : {}) });

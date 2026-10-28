@@ -50,6 +50,18 @@ export interface PlayerIds {
   fantasypros?: string;
 }
 
+/** One player's injury listing on Sleeper (GET /v1/players/nfl). */
+export interface SleeperInjury {
+  /** injury_status: "IR", "PUP", "Out", "Questionable", "NA", "Sus", … */
+  status: string;
+  /** injury_body_part, e.g. "Knee - ACL", "Hamstring". */
+  bodyPart?: string;
+  /** injury_notes, e.g. "Surgery". */
+  notes?: string;
+  /** Sleeper's roster status ("Active", "Inactive", …): an "Active" PUP tag is the training-camp list, not a reserve list. */
+  rosterStatus?: string;
+}
+
 export interface Player {
   id: string; // internal id: gsis id when known, otherwise "fp:<id>" / "yahoo:<id>" etc.
   name: string;
@@ -61,6 +73,12 @@ export interface Player {
   /** Fantasy-eligible positions from the league provider (e.g. Yahoo "WR,RB"), when known. */
   eligible?: Position[];
   injury?: { status: string; detail?: string; week: number };
+  /**
+   * Sleeper's injury listing (server/data/sleeper.ts, refreshed at most once a day): kept apart from `injury` (the
+   * league source's fresher tag wins there). Used for the season-ending rule (returns.ts SEASON_ENDING) and the body
+   * part in the return "why". Undefined = not listed injured by Sleeper, or Sleeper unavailable (unknown).
+   */
+  sleeperInjury?: SleeperInjury;
   /** Rest-of-season expert consensus rank (FantasyPros, PPR overall). */
   ecrOverall?: number;
   ecrPos?: number;
@@ -452,6 +470,8 @@ export interface WaiverTarget extends Omit<ValuedPlayer, "why"> {
   breakout?: WaiverBreakout;
   /** K / DEF only, when both he and my K / DEF carry this week's Yahoo projection (waivers.ts WeekStream). */
   weekStream?: { proj: number; mine: number | null; gain: number; best: boolean; opponent?: string };
+  /** K / DEF whose team is on bye this week (NFL schedule): call "pass", gain shown as "—", sorted below K / DEF who play. */
+  byeWeek?: true;
 }
 
 /**
@@ -465,6 +485,7 @@ export type WaiverRow = Pick<
   drop: { id: string; name: string; pos: Position; value: number } | null;
   breakout?: Omit<WaiverBreakout, "thesis">;
   weekStream?: WaiverTarget["weekStream"];
+  byeWeek?: true;
   /** This week's Yahoo projection (K / DEF rows), when captured. */
   yahooProjWeekly?: number;
 };

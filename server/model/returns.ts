@@ -5,7 +5,7 @@
 // Data reality (2026 nflverse cache): the injuries file has ONE row per player-week (the week's final practice
 // participation + game status), so a practice trend is read week over week, not day by day. Players on IR do not
 // appear in the injury report until their practice window opens; roster code R48 = injured, designated to return.
-import type { DetailItem } from "./types.js";
+import type { DetailItem, SleeperInjury } from "./types.js";
 import type { StatusWeek } from "./signals/types.js";
 
 /** Evidence bullets ≤ 90 chars (a local builder: details.ts → waivers.ts would make an import cycle with projectionV4). */
@@ -37,8 +37,40 @@ export const RETURNS = {
   unknownWeight: 0.5,
 } as const;
 
+/**
+ * Season-ending injuries (DESIGN "Season-ending injuries (2026-10-28)"): a player on a reserve list (Sleeper
+ * injury_status IR / PUP, roster status not "Active") whose listed body part matches one of these is out for the
+ * season: an ACL or Achilles tear ends an NFL season (recovery ≈ 9–12 months). Other IR listings stay "return
+ * unconfirmed". An "Active" PUP tag is the training-camp list (he can be activated), never season-ending.
+ */
+export const SEASON_ENDING = {
+  statuses: ["IR", "PUP"] as readonly string[],
+  bodyParts: [
+    { match: /\bacl\b/i, name: "ACL" },
+    { match: /achilles/i, name: "Achilles" },
+  ] as const,
+};
+
+/** "Out for the season (torn ACL, on IR)" when Sleeper's listing meets the SEASON_ENDING rule; else null. */
+export function seasonEndingWhy(s: SleeperInjury | undefined): string | null {
+  if (!s) return null;
+  const st = s.status.trim().toUpperCase();
+  if (!SEASON_ENDING.statuses.includes(st)) return null;
+  if ((s.rosterStatus ?? "").trim().toLowerCase() === "active") return null;
+  const part = SEASON_ENDING.bodyParts.find((b) => b.match.test(s.bodyPart ?? ""));
+  return part ? `Out for the season (torn ${part.name}, on ${st})` : null;
+}
+
+/** "IR: Knee - PCL" (Sleeper status + body part); undefined without a body part. */
+export function listingText(s: SleeperInjury | undefined): string | undefined {
+  const part = s?.bodyPart?.trim();
+  return s && part ? `${s.status.trim()}: ${part}` : undefined;
+}
+
 export interface ReturnInput {
   absence: Absence;
+  /** Sleeper's injury listing (body part for the "why"; the season-ending reason when absence = seasonOver). */
+  listing?: SleeperInjury;
   /** nflverse roster status (ACT / RES / …) and transaction code (R01 / R48 / R04 …). */
   rosterStatus?: string;
   rosterCode?: string;
@@ -129,7 +161,9 @@ export function estimateReturn(x: ReturnInput): ReturnEstimate {
     return { returnWeek: null, confidence: "unknown", reasons, practiceUp };
   };
 
-  if (x.absence === "seasonOver") return unknown("out for the season per the report");
+  if (x.absence === "seasonOver") return unknown(seasonEndingWhy(x.listing) ?? "out for the season per the report");
+  const listed = listingText(x.listing);
+  if (listed) add("Injury", listed);
   if (x.absence === "suspended") return unknown("suspended: length unknown, return unconfirmed");
 
   const dtr = x.absence === "dtr" || x.rosterCode === "R48";

@@ -16,12 +16,19 @@ const TIPS = {
   gain: "How many points per game your best starting lineup gains if you add him (and drop the player shown in details).",
   call: "What to do: claim, optional, stash, wait or pass. Tap the row for the reasons.",
   week: "Yahoo's projected points for him this week, read from Yahoo by the import; K / DEF streams compare it with yours.",
+  bye: "His team has no game this week (NFL schedule), so he scores nothing: not a stream this week.",
   noWeek: "No weekly projection from Yahoo for him: the call uses season numbers. Re-import with the latest bookmark.",
 };
 
 /** K / DEF only: this week's Yahoo projection as a small chip ("wk 7.1", "—" when not captured). */
 function WeekProj({ p }: { p: WaiverRow }) {
   if (p.pos !== "K" && p.pos !== "DEF") return null;
+  if (p.byeWeek)
+    return (
+      <span className="tag small-tag" title={TIPS.bye}>
+        bye
+      </span>
+    );
   const proj = p.weekStream?.proj ?? p.yahooProjWeekly;
   return (
     <span className="tag small-tag" title={proj === undefined ? TIPS.noWeek : TIPS.week}>
@@ -286,9 +293,9 @@ function WaiverRow({ p }: { p: WaiverRow }) {
           <b className={`delta ${p.gainNote ? "" : deltaClass(p.gain)}`}>{p.gainNote ? "—" : signed(p.gain)}</b>
         </span>
         {(p.pos === "K" || p.pos === "DEF") && (
-          <span className="stat-tile" title={p.weekStream || p.yahooProjWeekly !== undefined ? TIPS.week : TIPS.noWeek}>
+          <span className="stat-tile" title={p.byeWeek ? TIPS.bye : p.weekStream || p.yahooProjWeekly !== undefined ? TIPS.week : TIPS.noWeek}>
             <span className="stat-label">This week</span>
-            <b>{f1(p.weekStream?.proj ?? p.yahooProjWeekly)}</b>
+            <b>{p.byeWeek ? "bye" : f1(p.weekStream?.proj ?? p.yahooProjWeekly)}</b>
           </span>
         )}
         {p.percentOwned != null && (

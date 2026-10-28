@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { estimateReturn, mergeStatusWeeks, practiceLevel, returnText, type ReturnInput } from "./returns.js";
+import { estimateReturn, listingText, mergeStatusWeeks, practiceLevel, returnText, seasonEndingWhy, type ReturnInput } from "./returns.js";
 
 const FULL = "Full Participation in Practice";
 const LTD = "Limited Participation in Practice";
@@ -143,4 +143,35 @@ test("ruled out of his next game wins over every path: DTR window, or an Out tag
   const tag = estimateReturn(base({ rosterStatus: "RES", status: [{ week: 8, practice: FULL }], tagOut: true }));
   assert.equal(tag.returnWeek, 9);
   assert.equal(estimateReturn(base({ rosterStatus: "RES", status: [{ week: 8, practice: FULL }] })).returnWeek, 8, "fixture: untagged = next game");
+});
+
+test("season-ending rule: IR / PUP + ACL or Achilles (case-insensitive) on a reserve list; PCL, hamstring, Active PUP are not", () => {
+  const ir = (bodyPart: string, status = "IR", rosterStatus = "Inactive") => ({ status, bodyPart, rosterStatus });
+  assert.equal(seasonEndingWhy(ir("Knee - ACL")), "Out for the season (torn ACL, on IR)");
+  assert.equal(seasonEndingWhy(ir("knee - acl + mcl")), "Out for the season (torn ACL, on IR)");
+  assert.equal(seasonEndingWhy(ir("Achilles")), "Out for the season (torn Achilles, on IR)");
+  assert.equal(seasonEndingWhy(ir("Achilles", "PUP")), "Out for the season (torn Achilles, on PUP)");
+  assert.equal(seasonEndingWhy({ status: "IR", bodyPart: "Knee - ACL" }), "Out for the season (torn ACL, on IR)", "roster status unknown: IR is enough");
+  assert.equal(seasonEndingWhy(ir("Knee - PCL")), null, "PCL is not season-ending");
+  assert.equal(seasonEndingWhy(ir("Hamstring")), null);
+  assert.equal(seasonEndingWhy(ir("Shoulder")), null);
+  assert.equal(seasonEndingWhy(ir("Knee - ACL", "PUP", "Active")), null, "an Active PUP tag is the training-camp list");
+  assert.equal(seasonEndingWhy(ir("Knee - ACL", "Out")), null, "Out is not a reserve list");
+  assert.equal(seasonEndingWhy(ir("Knee - ACL", "Questionable")), null);
+  assert.equal(seasonEndingWhy({ status: "IR" }), null, "no body part: unknown, not season-ending");
+  assert.equal(seasonEndingWhy(undefined), null);
+  assert.equal(listingText(ir("Knee - PCL")), "IR: Knee - PCL");
+  assert.equal(listingText({ status: "IR" }), undefined);
+});
+
+test("season over: the return bullet names the tear; other IR listings stay unconfirmed and show the body part", () => {
+  const over = estimateReturn(base({ absence: "seasonOver", listing: { status: "IR", bodyPart: "Knee - ACL", rosterStatus: "Inactive" } }));
+  assert.equal(over.returnWeek, null);
+  assert.deepEqual(over.reasons, [{ label: "Return", value: "Out for the season (torn ACL, on IR)", tone: "warn" }]);
+  // nflverse's own "season" detail without a Sleeper listing keeps the old wording.
+  assert.equal(estimateReturn(base({ absence: "seasonOver" })).reasons[0].value, "out for the season per the report");
+  const pcl = estimateReturn(base({ rosterStatus: "RES", rosterCode: "R01", listing: { status: "IR", bodyPart: "Knee - PCL", rosterStatus: "Inactive" } }));
+  assert.equal(pcl.returnWeek, null);
+  assert.equal(returnText(pcl.returnWeek, pcl.confidence), "return unconfirmed");
+  assert.ok(pcl.reasons.some((d) => d.label === "Injury" && d.value === "IR: Knee - PCL"), JSON.stringify(pcl.reasons));
 });

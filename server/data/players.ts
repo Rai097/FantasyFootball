@@ -4,6 +4,7 @@ import { parseCsv, num, opt } from "./csv.js";
 import { normTeam, normName, normPos, NFL_TEAM_NAMES, teamFromDefenseName } from "./names.js";
 import { computeNflState, type NflState } from "./nfl.js";
 import { staleMemo } from "./memo.js";
+import { loadSleeperInjuries } from "./sleeper.js";
 import type { Player, Position, StatLine, WeekLine } from "../model/types.js";
 
 export interface PlayerDb {
@@ -276,6 +277,9 @@ async function buildPlayerDb(generation: number): Promise<PlayerDb> {
       if (p) p.dynasty = { value1qb: num(r.value_1qb), value2qb: num(r.value_2qb) };
     }
   }
+
+  // 9. Sleeper injury listing (body part, season-ending tears): its own once-a-day cache; unknown on failure.
+  await loadSleeperInjuries({ players, bySleeper, byYahoo, byName });
 
   const db: PlayerDb = {
     season,

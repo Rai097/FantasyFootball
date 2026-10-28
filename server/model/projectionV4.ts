@@ -18,7 +18,7 @@ import { CONVEXITY, KDEF_CURVE, POSITIONS, curveAt, ecrCurve, injuryKind, isQues
 import { computePlayerSignals } from "./signals/index.js";
 import type { PlayerSignalInput, PlayerSignals, SkillPos } from "./signals/types.js";
 import { luckLabel, luckText } from "./labels.js";
-import { RETURNS, estimateReturn, returnText, type Absence, type ReturnEstimate } from "./returns.js";
+import { RETURNS, estimateReturn, returnText, seasonEndingWhy, type Absence, type ReturnEstimate } from "./returns.js";
 import { FLEX_RANK } from "./signals/trend.js";
 import { SPIKE, VACATED } from "./signals/vacated.js";
 import { HALF_LIFE_GAMES } from "./signals/recency.js";
@@ -180,6 +180,9 @@ function availKind(p: Player, sig: PlayerSignals | null): { kind: Avail; absence
   if (k === "long" && /season/i.test(p.injury?.detail ?? "")) return { kind: "absent", absence: "seasonOver" };
   // Designated to return (Yahoo IR-R or roster code R48) beats the reserve list (he is RES until activated).
   if (k === "return" || (sig?.rosterStatus === "RES" && sig.rosterCode === "R48")) return { kind: "absent", absence: "dtr" };
+  // Sleeper lists a season-ending tear on a reserve list (returns.ts SEASON_ENDING). Designated to return (above) wins:
+  // it is positive evidence of a return, and Sleeper's daily listing can lag an activation.
+  if (seasonEndingWhy(p.sleeperInjury)) return { kind: "absent", absence: "seasonOver" };
   // IR / PUP / NFI / NA / long-term detail, or nflverse roster RES even with a game last week (freshly placed on IR).
   if (k === "long" || sig?.rosterStatus === "RES") return { kind: "absent", absence: "reserve" };
   if (k === "out") return { kind: "absent", absence: "out" };
@@ -339,6 +342,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
       est = estimateReturn({
         absence,
+        ...(p.sleeperInjury ? { listing: p.sleeperInjury } : {}),
         rosterStatus: b.sig?.rosterStatus,
         rosterCode: b.sig?.rosterCode,
         onIr: onIr(p, b.sig),
@@ -785,7 +789,8 @@ const AVAIL_TEXT: Record<Exclude<Avail, "absent">, string | null> = {
 /** Availability bullet for an absent player: the return estimate and what it does to his weekly points. */
 function absentText(x: Proj): string {
   const e = x.est;
-  if (!e || e.returnWeek === null) return `${x.absence === "seasonOver" ? "out for the season" : "return unconfirmed"}: 0 for every week`;
+  if (!e || e.returnWeek === null)
+    return `${x.absence === "seasonOver" ? (seasonEndingWhy(x.p.sleeperInjury) ?? "out for the season") : "return unconfirmed"}: 0 for every week`;
   return `${returnText(e.returnWeek, e.confidence)}: 0 before${x.absence !== "out" ? `, ×${RETURNS.ramp} first game` : ""}`;
 }
 
