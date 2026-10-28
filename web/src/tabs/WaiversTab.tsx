@@ -37,7 +37,7 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
 
   if (res.error) return <ErrorBox error={res.error} onRetry={res.reload} />;
   if (!res.data) return <Loading label="Ranking free agents…" />;
-  const { freeAgents, myPriority, numTeams, advice, rules, faStatusKnown, notes, stash } = res.data;
+  const { freeAgents, myPriority, numTeams, advice, rules, faStatusKnown, notes, gaps, stash } = res.data;
   const byPos = freeAgents.filter((p) => !pos || p.pos === pos);
   const counts = { all: byPos.length, fa: byPos.filter((p) => !p.onWaivers).length, waivers: byPos.filter((p) => p.onWaivers).length };
   const rows = byPos.filter((p) => avail === "all" || !faStatusKnown || (avail === "fa" ? !p.onWaivers : p.onWaivers));
@@ -65,6 +65,11 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
           )}
         </div>
         <p className="advice">{advice}</p>
+        {gaps?.map((g) => (
+          <p key={g} className="notice small" title="Your weakest starting spot: no free agent projects above your starter there, so a trade is the way to upgrade it.">
+            {g}
+          </p>
+        ))}
         {notes?.map((n) => (
           <p key={n} className="notice warn small" title="Players in your import that we could not match by Yahoo id or name, so they are not ranked here.">
             {n}
@@ -255,11 +260,11 @@ function WaiverRow({ p }: { p: WaiverRow }) {
           <span className="num w-stat" title={TIPS.ppg}>
             {f1(p.ppg)}
           </span>
-          <span className="num w-stat" title={TIPS.value}>
-            {f1(p.value)}
+          <span className="num w-stat" title={p.valueNote ?? TIPS.value}>
+            {p.valueNote ? "—" : f1(p.value)}
           </span>
-          <span className={`num w-stat delta ${deltaClass(p.gain)}`} title={TIPS.gain}>
-            {signed(p.gain)}
+          <span className={`num w-stat delta ${p.gainNote ? "" : deltaClass(p.gain)}`} title={p.gainNote ?? TIPS.gain}>
+            {p.gainNote ? "—" : signed(p.gain)}
           </span>
           <span className="w-call" title={TIPS.call}>
             <span className={`rec rec-${p.recommendation}`}>{p.recommendation}</span>
@@ -272,13 +277,13 @@ function WaiverRow({ p }: { p: WaiverRow }) {
           <span className="stat-label">PPG</span>
           <b>{f1(p.ppg)}</b>
         </span>
-        <span className="stat-tile" title={TIPS.value}>
+        <span className="stat-tile" title={p.valueNote ?? TIPS.value}>
           <span className="stat-label">Value</span>
-          <b>{f1(p.value)}</b>
+          <b>{p.valueNote ? "—" : f1(p.value)}</b>
         </span>
-        <span className="stat-tile" title={TIPS.gain}>
+        <span className="stat-tile" title={p.gainNote ?? TIPS.gain}>
           <span className="stat-label">Gain</span>
-          <b className={`delta ${deltaClass(p.gain)}`}>{signed(p.gain)}</b>
+          <b className={`delta ${p.gainNote ? "" : deltaClass(p.gain)}`}>{p.gainNote ? "—" : signed(p.gain)}</b>
         </span>
         {(p.pos === "K" || p.pos === "DEF") && (
           <span className="stat-tile" title={p.weekStream || p.yahooProjWeekly !== undefined ? TIPS.week : TIPS.noWeek}>

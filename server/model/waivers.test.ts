@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { capRows, claimThreshold, KDEF_STREAM, makeSummary, rankWaivers, snapTrendOf, thesisItems, toWaiverRow } from "./waivers.js";
+import { capRows, claimThreshold, gapLines, KDEF_STREAM, makeSummary, rankWaivers, snapTrendOf, thesisItems, toWaiverRow, weakPositions } from "./waivers.js";
 import { analyzeTeams } from "./analysis.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
 import type { TradeContext } from "./tradeKit.js";
@@ -19,8 +19,11 @@ const mine = [
 ];
 const other = [vp("oQB", "QB", 17, 8)];
 
-function ctxFor(ps: ValuedPlayer[], irIds: string[] = []): TradeContext {
-  const L = league([team("me", mine, { irPlayerIds: irIds }), team("o", other)], undefined, { numTeams: 12 });
+/** My roster without a bench RB / WR / TE cover (bench = QBs): role claims there are not "trade chip only". */
+const mineNoCover = mine.map((p) => (p.id === "BN1" || p.id === "BN2" || p.id === "BN3" ? { ...p, pos: "QB" as const } : p));
+
+function ctxFor(ps: ValuedPlayer[], irIds: string[] = [], roster: ValuedPlayer[] = mine): TradeContext {
+  const L = league([team("me", roster, { irPlayerIds: irIds }), team("o", other)], undefined, { numTeams: 12 });
   const players = new Map(ps.map((p) => [p.id, p]));
   return { league: L, players, teams: analyzeTeams(L, players, REPL) };
 }
@@ -107,7 +110,7 @@ test("K / DEF never consume waiver priority", () => {
 });
 
 test("breakout signals: rising + open path = future-starter claim; rising role without a path = stash; stash sorts above pass", () => {
-  const ctx = ctxFor([...mine, ...other], ["IRGUY"]);
+  const ctx = ctxFor([...mineNoCover, ...other], ["IRGUY"], mineNoCover);
   // All three are below my bench on today's projection (no lineup or value gain).
   const future = vp("FA_FUT", "RB", 3.5, 0);
   const riser = vp("FA_RISE", "WR", 1.5, 0);
@@ -131,7 +134,7 @@ test("breakout signals: rising + open path = future-starter claim; rising role w
 });
 
 test("future starter needs score, path and flex-level expected points; the bar is per position", () => {
-  const ctx = ctxFor([...mine, ...other], ["IRGUY"]);
+  const ctx = ctxFor([...mineNoCover, ...other], ["IRGUY"], mineNoCover);
   const sig = (oppLevel: number, score = 70, situation = 0.5) => ({ tier: "rising" as const, score, situation, oppLevel, thesis: "" });
   const cases: [string, "RB" | "WR" | "TE", ReturnType<typeof sig>, string][] = [
     ["rb_ok", "RB", sig(10), "claim"],
@@ -386,4 +389,102 @@ test("K/DEF streaming: with no DEF of mine the gain is his whole projection and 
   assert.deepEqual(t.weekStream, { proj: 7.1, mine: null, gain: 7.1, best: true });
   assert.match(t.summary, /^Best DEF stream this week: Yahoo proj 7\.1 vs no DEF of yours\./);
   assert.ok(t.details.some((d) => d.label === "Lineup" && d.value === "Starts at DEF this week"), "never 'Bench depth' next to a weekly gain");
+});
+
+// ---- Fix 2026-10-28: vacated role, spikes, depth and roster need (DESIGN "Fix: vacated role, spikes, depth and roster need")
+const role = (r: Partial<import("./types.js").RoleCheck> = {}) => ({ sustained: true, spike: false, ...r });
+const fut = (r?: Partial<import("./types.js").RoleCheck>) => ({ tier: "rising" as const, score: 78, situation: 0.5, oppLevel: 11, thesis: "", ...(r ? { role: role(r) } : {}) });
+
+test("future starter gate: a one-game jump, a borrowed role or a TE2 is 'watch' (stash), never a claim; a real role still claims", () => {
+  const ctx = ctxFor([...mineNoCover, ...other], ["IRGUY"], mineNoCover);
+  const cases: [string, ReturnType<typeof fut>, string, RegExp][] = [
+    ["spike", fut({ sustained: false, spike: true }), "stash", /^Watch, not a claim: one strong game, not a role yet \(breakout score 78\)\./],
+    ["borrowed", fut({ sustained: false, vacated: { weeks: [7], by: ["Lead WR"], back: true } }), "stash", /usage rose while Lead WR was out/],
+    ["te2", fut({ chartRank: 2, chartEffective: 2, belowStarter: true }), "stash", /listed TE2 on the depth chart/],
+    ["share", fut({ healthyShare: 0.05, offense: { ppg: 60, rank: 31, of: 32 } }), "stash", /5.0% target share with the starters healthy on a low-scoring offense/],
+    ["real", fut({ chartRank: 1, chartEffective: 1, belowStarter: false, healthyShare: 0.2 }), "claim", /^Rising role: 11\.0 expected pts\/g/],
+    ["unchecked", fut(), "claim", /^Rising role/],
+  ];
+  const r = rankWaivers(ctx, "me", cases.map(([id]) => ({ player: vp(id, "TE", 1, 0), onWaivers: true })), { myPriority: 3, breakouts: new Map(cases.map(([id, b]) => [id, b])) });
+  for (const [id, , want, re] of cases) {
+    const t = r.freeAgents.find((x) => x.id === id)!;
+    assert.equal(t.recommendation, want, `${id}: ${txt(t)}`);
+    assert.match(t.summary, re, id);
+    assert.deepEqual(summaryProblems(t.summary), [], id);
+    assert.deepEqual(detailProblems(t.details), [], id);
+  }
+  // The role facts are in the details (depth rank, share, offense), unknown ones say so.
+  const te2 = r.freeAgents.find((x) => x.id === "te2")!;
+  assert.ok(te2.details.some((d) => d.label === "Depth chart rank" && d.value === "TE2"), txt(te2));
+  assert.ok(r.freeAgents.find((x) => x.id === "spike")!.details.some((d) => d.label === "Offense" && d.value === "Unknown"));
+});
+
+test("roster need: a role claim / stash at a position I start and cover at least as well is 'trade chip only' (pass)", () => {
+  const ctx = ctxFor([...mine, ...other], ["IRGUY"]); // RB1, RB2, FLX (RB) start; BN1 (RB, 4.0 ppg) covers
+  const r = rankWaivers(ctx, "me", [{ player: vp("FA_RB", "RB", 3.5, 0), onWaivers: true }, { player: vp("FA_RB_HI", "RB", 4.5, 0), onWaivers: true }], {
+    myPriority: 3,
+    breakouts: new Map([["FA_RB", fut()], ["FA_RB_HI", fut()]]),
+  });
+  const low = r.freeAgents.find((x) => x.id === "FA_RB")!;
+  assert.equal(low.recommendation, "pass", txt(low));
+  assert.equal(low.summary, "Trade chip only: you start 3 RBs and BN1 covers (4.0 vs his 3.5 ppg).");
+  assert.match(txt(low), /Rule: Roster need: 3 RB starters \+ BN1 as cover \(4\.0 ppg\)/);
+  // Projects above my cover: he still fills a need (better cover), the call stands.
+  assert.equal(r.freeAgents.find((x) => x.id === "FA_RB_HI")!.recommendation, "claim");
+  // A stash at a covered position is a trade chip too.
+  const s = rankWaivers(ctx, "me", [{ player: vp("FA_ST", "RB", 1, 0), onWaivers: true }], { breakouts: new Map([["FA_ST", { tier: "stash" as const, score: 55, situation: 0, oppLevel: 5, thesis: "" }]]) }).freeAgents[0];
+  assert.equal(s.recommendation, "pass", txt(s));
+});
+
+test("roster need counts FLEX starters: two TEs starting (one at FLEX) + a bench TE cover → a 4th TE is a trade chip", () => {
+  const roster = mine.map((p) => (p.id === "FLX" ? { ...p, pos: "TE" as const } : p.id === "BN3" ? { ...p, ppg: 5 } : p));
+  const ctx = ctxFor([...roster, ...other], ["IRGUY"], roster);
+  const t = rankWaivers(ctx, "me", [{ player: vp("FA_TE", "TE", 4, 0), onWaivers: false }], { breakouts: new Map([["FA_TE", fut()]]) }).freeAgents[0];
+  assert.equal(t.recommendation, "pass", txt(t));
+  assert.match(t.summary, /^Trade chip only: you start 2 TEs and BN3 covers/);
+});
+
+test("bench-only upgrade at a covered position names the real reason: a better cover than mine", () => {
+  const ctx = ctxFor([...mine, ...other], ["IRGUY"]);
+  const t = rankWaivers(ctx, "me", [{ player: vp("FA_TE", "TE", 6, 4), onWaivers: false }]).freeAgents[0];
+  assert.equal(t.recommendation, "optional", txt(t));
+  assert.match(t.summary, /^Better TE cover than BN3 \(6\.0 vs 1\.0 ppg\), dropping BN3\./);
+});
+
+test("VALUE / GAIN not meaningful for the call → a note (UI shows '—' + tooltip), never a bare 0.0", () => {
+  const ctx = ctxFor([...mineNoCover, ...other], ["IRGUY"], mineNoCover);
+  const r = rankWaivers(ctx, "me", [{ player: vp("FUT", "RB", 1, 0), onWaivers: true }, { player: vp("BIG", "WR", 10, 12), onWaivers: true }], { myPriority: 3, breakouts: new Map([["FUT", fut()]]) });
+  const f = r.freeAgents.find((x) => x.id === "FUT")!;
+  assert.equal(f.recommendation, "claim");
+  assert.match(f.gainNote ?? "", /the call is about his role/);
+  assert.match(f.valueNote ?? "", /Below replacement level/);
+  const row = toWaiverRow(f);
+  assert.equal(row.gainNote, f.gainNote);
+  assert.equal(row.valueNote, f.valueNote);
+  const big = r.freeAgents.find((x) => x.id === "BIG")!;
+  assert.equal(big.gainNote, undefined, "a real lineup gain is shown");
+  assert.equal(big.valueNote, undefined);
+  const src = readFileSync(new URL("../../web/src/tabs/WaiversTab.tsx", import.meta.url), "utf8");
+  assert.match(src, /title=\{p\.gainNote \?\? TIPS\.gain\}/);
+  assert.match(src, /\{p\.gainNote \? "—" : signed\(p\.gain\)\}/);
+  assert.match(src, /\{p\.valueNote \? "—" : f1\(p\.value\)\}/);
+  assert.match(src, /gaps\?\.map/);
+});
+
+test("weak position line: no free agent beats my weakest starter there → one line, Yahoo week projection when both have one", () => {
+  const groups = { QB: { rank: 3 }, RB: { rank: 8 }, WR: { rank: 2 }, TE: { rank: 1 } };
+  assert.deepEqual(weakPositions({ needs: [], groups }, 12), ["RB"]);
+  assert.deepEqual(weakPositions({ needs: ["WR", "K"], groups: { ...groups, RB: { rank: 5 } } }, 12), ["WR"]);
+  assert.deepEqual(weakPositions(undefined, 12), []);
+  const lineup = [
+    { player: vp("RB1", "RB", 16, 20, { yahooProjWeekly: 15 }), label: "RB" },
+    { player: vp("RBF", "RB", 12, 9, { yahooProjWeekly: 9.6 }), label: "W/R/T2" },
+  ];
+  const fa = vp("Spare Back", "RB", 5, 0, { name: "Spare Back", yahooProjWeekly: 7.3 });
+  assert.deepEqual(gapLines(["RB"], lineup, [], [fa]), ["RB: no free agent beats yours (best: Spare Back 7.3 this week vs your W/R/T2 9.6). Look at trades."]);
+  // A row that adds lineup points, or a better free agent: no line (the rows answer it).
+  assert.deepEqual(gapLines(["RB"], lineup, [{ pos: "RB", gain: 0.4, recommendation: "optional" }], [fa]), []);
+  assert.deepEqual(gapLines(["RB"], lineup, [], [{ ...fa, yahooProjWeekly: 10 }]), []);
+  // No Yahoo projection on one side: our pts/game.
+  assert.match(gapLines(["RB"], lineup, [], [{ ...fa, yahooProjWeekly: undefined }])[0], /best: Spare Back 5\.0 ppg vs your W\/R\/T2 12\.0/);
 });

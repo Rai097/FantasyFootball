@@ -13,6 +13,8 @@ export const VACATED = {
   jumpMinGain: 2,
   /** The teammate's earlier mean usage must beat his by at least this (a real competitor, not a fringe player). */
   minMargin: 1,
+  /** ...and be a real role: at least this many targets (pass catchers) / touches (RBs) per game before. */
+  minUsage: { PC: 4, RB: 8 },
   /** Left early = under this snap share after ≥ `leftEarlyBefore` on average before (counts as absent). */
   leftEarlyLast: 0.15,
   leftEarlyBefore: 0.5,
@@ -25,8 +27,8 @@ export const SPIKE = {
   window: 3,
   minGames: 2,
   /** Elevated = ≥ max(ratio × earlier mean, earlier mean + minGain) expected pts. */
-  ratio: 1.5,
-  minGain: 3,
+  ratio: 1.25,
+  minGain: 1.5,
   /** ...and at least this share of the window's best game (a 5.5 next to a 16.2 is not the new role). */
   peakShare: 0.5,
   /** An isolated spike game's recency weight is capped at this (as if it were 2 games old). */
@@ -109,7 +111,8 @@ export function vacatedGames(players: VacPlayer[]): Map<string, Map<number, Vaca
           if (t.id === p.id || t.team !== team) continue;
           const before = gamesOf(t).filter((x) => x.week < g.week);
           if (!before.length) continue;
-          if (mean(before.map((x) => usageOf(x, group))) < base + VACATED.minMargin) continue;
+          const tMean = mean(before.map((x) => usageOf(x, group)));
+          if (tMean < base + VACATED.minMargin || tMean < VACATED.minUsage[group]) continue;
           if (!absentAt(t, g.week)) continue;
           // The absence must explain the jump: no game of his without a jump earlier in the same absence stretch
           // (a teammate out since week 4 does not explain a week-6 jump after a quiet week 5).

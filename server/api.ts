@@ -354,7 +354,7 @@ async function faBreakoutSignals(l: Loaded, team: string): Promise<Map<string, W
   return new Map(
     r.targets
       .filter((t) => t.where.type === "fa")
-      .map((t) => [t.player.id, { tier: t.tier, score: t.score, situation: t.components.situation, oppLevel: t.components.oppLevel, thesis: t.thesis }]),
+      .map((t) => [t.player.id, { tier: t.tier, score: t.score, situation: t.components.situation, oppLevel: t.components.oppLevel, thesis: t.thesis, role: t.role }]),
   );
 }
 

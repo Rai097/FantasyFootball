@@ -194,21 +194,36 @@ test("a starter who left early (< 15% after ≥ 50%) is tagged, counts 0.5, and 
 
 test("snaps overrule a depth chart that lists a clear part-timer ahead", () => {
   const te = (id: string, snaps: number[]) => ({ ...rb(id, snaps, [4, 4, 6], [4, 4, 5]), pos: "TE" as const, name: id });
-  const t1 = te("T1", [0.6, 0.55, 0.3]);
+  const t1 = te("T1", [0.6, 0.3, 0.3]);
   const t2 = te("T2", [0.3, 0.3, 0.2]);
   const t3 = te("T3", [0.2, 0.2, 0.15]);
-  const me = te("ME", [0.2, 0.26, 0.71]);
+  // Fix 2026-10-28: snaps overrule the chart only when he out-snaps the player ahead in 2 of his last 3 games.
+  const me = te("ME", [0.2, 0.7, 0.71]);
   const depth = { byPlayer: new Map(), byTeamPos: new Map([["KC|TE", ["T1", "T2", "T3", "ME"]]]) };
   const m = roleMetrics(me, HALF_PPR);
   const s = situationOf(me, [t1, t2, t3, me], depth, m);
   assert.equal(s.depthLabel, "TE1");
   assert.equal(s.chartSays, "TE4");
   assert.equal(s.ahead.length, 0);
-  assert.match(thesisOf(me, m, s, { value: 1 }), /^Now TE1 by snaps \(depth chart says TE4\)/);
+  assert.match(thesisOf(me, m, s, { value: 1 }), /^TE1 by snaps \(depth chart says TE4\)/);
   // a chart that agrees with snaps is kept
   const s2 = situationOf(t2, [t1, t2, t3, me], { byPlayer: new Map(), byTeamPos: new Map([["KC|TE", ["T1", "T2"]]]) }, roleMetrics(t2, HALF_PPR));
   assert.equal(s2.depthLabel, "TE2");
   assert.equal(s2.chartSays, undefined);
+});
+
+test("one fill-in game never overrules the depth chart (fix 2026-10-28): the chart order stands", () => {
+  const te = (id: string, snaps: number[]) => ({ ...rb(id, snaps, [4, 4, 6], [4, 4, 5]), pos: "TE" as const, name: id });
+  const t1 = te("T1", [0.6, 0.55, 0.3]);
+  const me = te("ME", [0.2, 0.26, 0.71]);
+  const s = situationOf(me, [t1, me], { byPlayer: new Map(), byTeamPos: new Map([["KC|TE", ["T1", "ME"]]]) }, roleMetrics(me, HALF_PPR));
+  assert.equal(s.depthLabel, "TE2");
+  assert.equal(s.chartSays, undefined);
+  // The starter ahead was out (no snaps) or left early in the games he out-snapped him: those games do not count.
+  const out = te("T1b", [0.6, 0.6]);
+  const me2 = te("ME2", [0.2, 0.8, 0.8]);
+  const s2 = situationOf(me2, [out, me2], { byPlayer: new Map(), byTeamPos: new Map([["KC|TE", ["T1b", "ME2"]]]) }, roleMetrics(me2, HALF_PPR));
+  assert.equal(s2.depthLabel, "TE2");
 });
 
 test("how-it's-scored items: one rule each, cheap rule follows the price source", () => {
@@ -231,4 +246,32 @@ test("Targets tags use the app-wide labels: luck buy-low / sell-high, market gap
   assert.ok(!tags("back").includes("usage > output"), "the old season-gap tag is gone");
   assert.ok(tags("flat").includes("sell-high"));
   assert.ok(!tags("flat").includes("market undervalues"), "an estimated market value has no real edge");
+});
+
+test("fix 2026-10-28: a one-game jump and a borrowed role are watch (stash tier), with the role facts in the details", () => {
+  // Spike: quiet backup, one big game.
+  const spike = rb("spike", [0.3, 0.3, 0.3, 0.6], [2, 2, 2, 12], [2, 2, 2, 10], { team: "BUF" });
+  // Borrowed: the lead back (12+ touches) missed weeks 3–4 while the backup's touches and points jumped.
+  const touch = (t: number[], team: string) => t.map((c, i) => wk(i + 1, c * 0.8, c * 0.8, { targets: 0, carries: c, airYards: 0 })).map((w) => ({ ...w, team }));
+  const lead = vp("lead", "RB", 14, 30, { team: "DAL", name: "Lead RB", weeks: touch([15, 16], "DAL"), snapShare: { 1: 0.7, 2: 0.7 }, games: 2 });
+  const borrowed = vp("borrowed", "RB", 6, 3, { team: "DAL", weeks: touch([4, 4, 14, 15], "DAL"), snapShare: { 1: 0.3, 2: 0.3, 3: 0.7, 4: 0.72 }, games: 4 });
+  const steady = rb("steady", [0.5, 0.52, 0.55, 0.6], [5, 6.5, 8, 9], [5, 6, 7, 8], { team: "NYJ" });
+  const ps = [spike, lead, borrowed, steady];
+  const players = new Map(ps.map((p) => [p.id, p]));
+  const L = league([team("me", []), team("o", [lead])], undefined, { numTeams: 12 });
+  const teams = analyzeTeams(L, players, { QB: 15, RB: 8, WR: 8, TE: 6, K: 7, DEF: 6 });
+  const r = findBreakouts({ league: L, players, teams, myTeamId: "me" });
+  const by = (id: string) => r.targets.find((t) => t.player.id === id)!;
+  assert.equal(by("spike").role.spike, true);
+  assert.equal(by("spike").tier, "stash", "one big game is not a rising starter");
+  assert.ok(by("spike").tags.includes("one-game jump"));
+  assert.ok(by("spike").details.some((d) => d.label === "Not a starter yet" && /One-game jump/.test(d.value)));
+  assert.deepEqual(by("borrowed").role.vacated, { weeks: [3, 4], by: ["Lead RB"], back: true });
+  assert.equal(by("borrowed").tier, "stash");
+  assert.ok(by("borrowed").details.some((d) => d.label === "Borrowed role" && /wk 3, 4 while Lead RB was out/.test(d.value)));
+  // A gradual climb over 3 games is a sustained rise, not a spike.
+  assert.equal(by("steady").role.spike, false);
+  assert.equal(by("steady").role.sustained, true);
+  assert.equal(by("steady").tier, "rising");
+  for (const t of r.targets) assert.deepEqual(detailProblems(t.details), [], t.player.id);
 });

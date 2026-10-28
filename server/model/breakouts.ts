@@ -17,6 +17,9 @@ import { score } from "./scoring.js";
 import { injuryKind } from "./projection.js";
 import { marketTag } from "./labels.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
+import { futureStarterBlock, roleCheck, roleItems, teamOffense, teamUsage, vacPlayerOf } from "./roleCheck.js";
+import { vacatedGames } from "./signals/vacated.js";
+import type { RoleCheck } from "./types.js";
 
 export const BREAKOUT_POS: Position[] = ["RB", "WR", "TE"];
 export const WEIGHTS = { roleTrend: 0.25, oppTrend: 0.25, oppLevel: 0.2, gap: 0.15, situation: 0.15 } as const;
@@ -180,6 +183,21 @@ function snapShape(t: ValuedPlayer): { now: number; before: number; leftEarly: b
   return { now, before, leftEarly, role: leftEarly ? before : now, trend: lastVsEarlier(sh) };
 }
 
+/**
+ * He out-snapped `t` by ≥ CHART_OVERRULE in ≥ 2 of his last 3 games, counting only games `t` really played (≥ 15%
+ * snaps): one fill-in game next to a starter who was out or left early never overrules the depth chart.
+ */
+export function outSnaps(p: ValuedPlayer, t: ValuedPlayer): boolean {
+  const weeks = snapSeries(p).weeks.slice(-3);
+  let n = 0;
+  for (const w of weeks) {
+    const ts = t.snapShare[w];
+    if (ts === undefined || ts < LEFT_EARLY.last) continue;
+    if ((p.snapShare[w] ?? 0) - ts >= CHART_OVERRULE) n++;
+  }
+  return n >= 2;
+}
+
 export function situationOf(p: ValuedPlayer, teammates: ValuedPlayer[], depth: DepthLike | null | undefined, m: Pick<RoleMetrics, "roleNow" | "roleTrend">): Situation {
   const byId = new Map(teammates.map((t) => [t.id, t]));
   const shape = new Map(teammates.map((t) => [t.id, snapShape(t)]));
@@ -193,7 +211,7 @@ export function situationOf(p: ValuedPlayer, teammates: ValuedPlayer[], depth: D
   if (chart && chart.includes(p.id)) {
     const ci = chart.indexOf(p.id);
     // Trust snaps when he clearly out-snaps someone the chart lists ahead of him.
-    const overruled = chart.slice(0, ci).some((id) => byId.has(id) && m.roleNow - role(id) >= CHART_OVERRULE);
+    const overruled = chart.slice(0, ci).some((id) => byId.has(id) && outSnaps(p, byId.get(id)!));
     if (overruled) {
       if (snapOrder.indexOf(p.id) !== ci) chartSays = `${p.pos}${ci + 1}`;
     } else order = chart;
@@ -379,12 +397,19 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
     (groups.get(k) ?? groups.set(k, []).get(k)!).push(p);
   }
 
+  // Borrowed roles (one definition, signals/vacated.ts), team usage and offense level for the role check.
+  const pool = [...players.values()];
+  const vac = vacatedGames(pool.filter((p) => BREAKOUT_POS.includes(p.pos) && p.team !== "FA").map(vacPlayerOf));
+  const usage = teamUsage(pool);
+  const offense = teamOffense(pool, S);
+
   interface Cand {
     p: ValuedPlayer;
     m: RoleMetrics;
     sit: Situation;
     cheap: boolean;
     market?: number;
+    role: RoleCheck;
   }
   const cands: Cand[] = [];
   let established = 0;
@@ -404,7 +429,8 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
     // With a market connected, a player outside its list has ~0 market value.
     const mv = market ? (market.get(p.id)?.value ?? 0) : undefined;
     const cheap = mv !== undefined ? mv < CHEAP.market : p.value < CHEAP.ours;
-    cands.push({ p, m, sit, cheap, market: mv });
+    const role = roleCheck({ p, weeks: m.weeks, expPpg: m.expPpg, vacated: vac.get(p.id), players, chart: depth?.byTeamPos.get(`${p.team}|${p.pos}`), usage, offense });
+    cands.push({ p, m, sit, cheap, market: mv, role });
   }
 
   // Normalise within position (RB, WR and TE usage live on different scales).
@@ -420,7 +446,7 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
   const myBench = teams.find((t) => t.team.id === myTeamId)?.bench.filter((p) => !(myTeam.irPlayerIds ?? []).includes(p.id)) ?? [];
 
   const out: BreakoutTarget[] = cands.map((c) => {
-    const { p, m, sit, cheap, market: mv } = c;
+    const { p, m, sit, cheap, market: mv, role } = c;
     const nr = nRole(c);
     const no = nOpp(c);
     const nl = nLvl(c);
@@ -433,7 +459,9 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
       situation: r3(WEIGHTS.situation * sit.bonus),
     };
     const total = parts.roleTrend + parts.oppTrend + parts.oppLevel + parts.gap + parts.situation;
-    const tier: BreakoutTarget["tier"] = m.oppLevel >= (RISING.expPts[p.pos] ?? 7) || m.roleNow >= RISING.snaps ? "rising" : "stash";
+    // A one-game jump or a borrowed role (teammate back / due back) is a watch, never a rising starter.
+    const watch = role.spike || (!!role.vacated?.back && !role.sustained);
+    const tier: BreakoutTarget["tier"] = !watch && (m.oppLevel >= (RISING.expPts[p.pos] ?? 7) || m.roleNow >= RISING.snaps) ? "rising" : "stash";
     const pr = prodRank.get(p.id) ?? 999;
     const ecrEdge = p.ecrPos !== undefined ? Math.round(pr - p.ecrPos) : undefined;
     const young = p.age !== undefined && p.age <= 26;
@@ -482,6 +510,10 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
       if (w) moveItems.push({ label: "Waivers call", value: w.recommendation === "pass" ? "Pass: not above your bench yet" : w.recommendation });
       if (w?.drop && (w.recommendation === "claim" || w.recommendation === "optional")) moveItems.push({ label: "Drop", value: w.drop.name });
     }
+    const block = futureStarterBlock(role, p.pos);
+    moveItems.splice(0, 0, ...(block ? [{ label: "Not a starter yet", value: block.rule }] : []), ...roleItems(role, p.pos));
+    if (role.spike) tags.push("one-game jump");
+    if (role.vacated) tags.push("borrowed role");
     const card = targetCard(p, m, sit, components, r1(100 * total), { ask, items: moveItems });
     return {
       player: p,
@@ -498,6 +530,7 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
       chartSays: sit.chartSays,
       ahead: sit.ahead,
       tags,
+      role,
       thesis: thesisOf(p, m, sit, { value: p.value, market: mv }),
       summary: card.summary,
       details: card.details,

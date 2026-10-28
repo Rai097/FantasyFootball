@@ -69,6 +69,8 @@ export interface WaiversResponse {
   faStatusKnown: boolean;
   /** Data problems worth a line (e.g. imported free agents we could not match), when any. */
   notes?: string[];
+  /** One line per weak starting position where no free agent beats my starter ("look at trades"). */
+  gaps?: string[];
   /** Stash watch: unrostered players out now who matter on their return (≤ 10). */
   stash: StashRow[];
 }

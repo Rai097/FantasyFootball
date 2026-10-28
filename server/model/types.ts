@@ -427,6 +427,10 @@ export type Availability = "fa" | "waivers" | "unknown";
 
 export interface WaiverTarget extends Omit<ValuedPlayer, "why"> {
   gain: number; // starter ppg gain if added (and `drop` released)
+  /** Set when `gain` is not the point of the call (≈ 0): the UI shows "—" with this tooltip instead of 0.0. */
+  gainNote?: string;
+  /** Set when `value` is ≈ 0 (below replacement): the UI shows "—" with this tooltip. */
+  valueNote?: string;
   benchGain: number; // value - dropped value
   drop: ValuedPlayer | null;
   trend: number;
@@ -456,7 +460,7 @@ export interface WaiverTarget extends Omit<ValuedPlayer, "why"> {
  */
 export type WaiverRow = Pick<
   WaiverTarget,
-  "id" | "name" | "pos" | "team" | "injury" | "ppg" | "value" | "gain" | "benchGain" | "recommendation" | "summary" | "details" | "onWaivers" | "availability" | "percentOwned" | "rankScore"
+  "id" | "name" | "pos" | "team" | "injury" | "ppg" | "value" | "gain" | "gainNote" | "valueNote" | "benchGain" | "recommendation" | "summary" | "details" | "onWaivers" | "availability" | "percentOwned" | "rankScore"
 > & {
   drop: { id: string; name: string; pos: Position; value: number } | null;
   breakout?: Omit<WaiverBreakout, "thesis">;
@@ -475,6 +479,8 @@ export interface WaiverBreakout {
   /** Mean expected fantasy points over the last 2 weeks (league scoring). */
   oppLevel: number;
   thesis: string;
+  /** Is the jump a real role (spike, borrowed role, depth chart, share, offense)? Absent = not checked (old callers). */
+  role?: RoleCheck;
 }
 
 /** Breakout Targets (GET /breakouts): a player whose role is rising before his fantasy points have. */
@@ -528,6 +534,28 @@ export interface BreakoutComponents {
   parts: { roleTrend: number; oppTrend: number; oppLevel: number; gap: number; situation: number };
 }
 
+/**
+ * Is a usage jump a real role? (roleCheck.ts; DESIGN "Fix: vacated role, spikes, depth and roster need (2026-10-28)").
+ * Missing inputs are unknown (undefined), never a block.
+ */
+export interface RoleCheck {
+  /** Higher usage in ≥ 2 of the last 3 games (a borrowed-role game counts VACATED.weight while the teammate is back / due back). */
+  sustained: boolean;
+  /** The latest jump is one game only: watch, never a claim. */
+  spike: boolean;
+  /** Borrowed role: the weeks, who was out, and whether he is back (playing, or a return week is known). */
+  vacated?: { weeks: number[]; by: string[]; back: boolean };
+  /** Depth-chart rank (chart order, not snaps) and the rank after players ahead who are out; undefined = unknown. */
+  chartRank?: number;
+  chartEffective?: number;
+  /** Effective rank below starter level (TE2+ / WR4+ / RB3+); undefined = chart unknown. */
+  belowStarter?: boolean;
+  /** Target share (RB: share of team carries + targets) in his last games with the teammates healthy; undefined = unknown. */
+  healthyShare?: number;
+  /** Team offense: skill players' fantasy pts/game (league scoring) and rank (1 = best) of `of` teams; undefined = unknown. */
+  offense?: { ppg: number; rank: number; of: number };
+}
+
 export interface BreakoutTarget {
   player: ValuedPlayer;
   where: { type: "fa" } | { type: "roster"; teamId: string; teamName: string };
@@ -549,6 +577,8 @@ export interface BreakoutTarget {
   chartSays?: string;
   ahead: BreakoutAhead[];
   tags: string[];
+  /** Is the jump a real role (roleCheck.ts). */
+  role: RoleCheck;
   /** Prose thesis; server-only (the waivers module splits it into items). Not in the /breakouts response. */
   thesis: string;
   /** Row text: role + usage, then the move (≤ 255 chars, 2 sentences). */
