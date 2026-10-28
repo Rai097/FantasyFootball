@@ -51,11 +51,13 @@ SHIPPED 2026-10-27 (live 5db1266): one playoff engine (floor factor out of seaso
    main/smaller/near Now 2/3/7, Balanced 2/3/7, Playoffs 2/1/6. Known residuals: a 0-usage week-1 game dilutes a riser's
    sample; the 3-for-1 case is blocked by the true-value bar, not the mode gate (pieces only Questionable on this
    snapshot); evaluate's "Now" bullet still says "pts this week" for the availability-weighted rate.
-   NEXT BRIEF after it: "vacated role" — a usage jump that coincides
-   with a same-team, same-position teammate's absence (e.g. lead RB out week-to-week) must revert in the weeks after that
-   teammate's projected return (playoff weeks especially); and a single spike game must not lift our own rate much
-   (recency weight capped for one outlier game). Also check acceptance on "buy the high" deals (partner sees a sell-high
-   vs a breakout: today ×0.7 spike penalty only).
+   VACATED ROLE / SPIKES / DEPTH / ROSTER NEED (2026-10-28, DESIGN "Fix: vacated role, spikes, depth and roster need"):
+   BUILT, not deployed (828a40d projection side, 9e146b8 waivers/breakouts). Risk HIGH (core valuation + claim calls):
+   needs an adversarial tester + advisor pass before deploy. On a data copy: the 3 bad week-8 claims (TE3 one-game
+   jump, WR4 fill-in on a bottom-3 offense, TE2 behind a healthy TE1) are no longer claims; a TE stash at a position
+   with 2 TE starters + a TE cover is "Trade chip only"; an RB's one 3-TD spike game value 12.8 → 5.4. Still open:
+   "buy the high" acceptance (partner sees a sell-high: perception ×0.7 only) — backlog. Unverified: 390 px layout of
+   the weak-position line; calibration of ROLE_ENV.minShare / VACATED / SPIKE constants beyond one league-week.
 NEXT (backlog, highest value first):
 - DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
@@ -98,7 +100,6 @@ Release 2 — import fixes (verified against the owner's raw browser import, 202
 - Footer said "regular season ends week 18" before a league loaded; check it reads 14 with the league.
 
 Known limitations (not scheduled):
-- Future-starter claims ignore position depth (e.g. a TE claim when three TEs are rostered = a trade chip, not a lineup fix).
 - Trade lineups do not apply the Q/D/O discount (only My Team / power ranks do).
 - Waivers now loads the depth chart (~55 MB, cached 12 h; wiped on Render restarts), so the first Waivers load after a
   wake is slower.

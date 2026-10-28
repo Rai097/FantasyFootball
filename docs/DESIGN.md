@@ -1255,3 +1255,56 @@ almost every K / DEF "pass".
   "This week" tile. Rows stay one line.
 * **Unverified**: the real players-page markup (form vs links, option values, selected marker). Check on the owner's
   next v6 import: the `faProjections` entries' `how`, `url`, `viewIndicator` and `note`.
+
+## Fix: vacated role, spikes, depth and roster need (2026-10-28) — overrides "Waivers v2" / "Breakout Targets" where they differ
+
+Owner (week 8 Waivers): the top claims were a TE3 whose targets went 0 → 5 in ONE game the week the team's WR2 was out,
+a WR4 with one 87%-snap fill-in game on a bottom-3 offense, and a TE2 behind a healthy TE1; a TE "bench upgrade" was
+optional with three TEs rostered; claim rows showed VALUE 0.0 / GAIN 0.0. Trades had the same root cause (an RB's one
+big game valued as a breakout).
+
+* **Borrowed (vacated) role** (`signals/vacated.ts` `vacatedGames`, the one definition; projection v4 and breakouts
+  both call it): a game is vacated when a same-team teammate in his competing group (WR/TE share targets; RBs share
+  carries + targets), still on the team, with more prior usage (mean before that week ≥ his + `VACATED.minMargin` and ≥
+  `minUsage` 4 targets / 8 touches) did not play or left early (< 15% snaps after ≥ 50%), AND his own usage jumped (≥
+  max(1.5 × his earlier mean, + 2)), AND every earlier game of his in that absence stretch was a jump too (an absence
+  that began before a quiet game does not explain a later jump). No earlier game of his = unknown, never flagged.
+  * Signals: `GameFlags.vacated` (not part of `isFlagged`: still a real game in the sample and the trend); the game
+    weighs `VACATED.weight` (0.4) in the rates; `PlayerSignals.vacated` keeps the weeks, who was out and the full-weight
+    expected rate. The role-change exemption (`isRoleUp`) ignores vacated games.
+  * Projection v4: per remaining week, × min(2, full ÷ settled rate) while the teammate is out (his return week from
+    `returns.ts`; unknown return / no team = out for good → every week), 1 after: the projection reverts to the
+    pre-absence role once he is back. Why-lines "Borrowed role: usage rose while X was out (wk 7): counts 40%" and
+    "While he is out: ×1.25 for 3 games (X back wk 10)".
+* **One-game spike** (`usageShape`, expected pts per game): elevated = ≥ max(1.25 × the mean before the last 3 games
+  (none: the lowest of the window), that mean + 1.5, 0.5 × the window's best game). Sustained = elevated in ≥ 2 of the
+  last 3 (a borrowed game counts 0.4 while its teammate is back or due back); a spike = a jump that is not sustained.
+  Projection: an isolated elevated game in the last 3 has its recency capped at `SPIKE.maxRecency` (0.5, as if 2 games
+  old); why-line "One-game jump: wk 7 counts like a game 2 weeks old".
+* **Role check** (`roleCheck.ts`, `RoleCheck` on every breakout target and `WaiverBreakout.role`): sustained / spike,
+  borrowed role (+ back?), depth-chart rank (chart order) and effective rank (minus players ahead who are Out / D / IR
+  / PUP / suspended: the chart "moved him up"), share with the starters healthy (targets, RB touches; last 4 games
+  without a borrowed role, ≥ 2 games else unknown), team offense (skill players' actual fantasy pts per team game,
+  ranked of 32, ≥ 3 team weeks else unknown). `futureStarterBlock` (order): borrowed role whose teammate is back →
+  spike → not sustained → effective rank below starter level (TE2+ / WR4+ / RB3+) → share below `ROLE_ENV.minShare`
+  (RB 20% / WR 15% / TE 12%; × 1.25 on a bottom-8 offense). Unknown inputs never block. All shown in details (depth
+  rank, share, offense, borrowed role, one-game jump; "Unknown" when missing).
+* **Calls**: a would-be future starter that is blocked → stash "Watch, not a claim: one strong game, not a role yet
+  (breakout score 78)." Breakouts' "rising" tier excludes spikes and borrowed roles (tags "one-game jump", "borrowed
+  role"). Snaps overrule the depth chart only when he out-snaps the player ahead by ≥ 15 points in ≥ 2 of his last 3
+  games, counting only games that player played (≥ 15% snaps).
+* **Roster need** (`rankWaivers` `coverAt`): my starters fill every slot of his position (FLEX-type starters at that
+  position count) and a bench player there projects ≥ his pts/game → a role claim (future starter / top-3 at a need),
+  stash or bench-only add is pass "Trade chip only: you start 2 TEs and X covers (9.8 vs his 8.6 ppg)." A lineup-gain
+  claim is never downgraded. A bench-only add that projects above my cover reads "Better TE cover than X (11.4 vs 9.8
+  ppg), dropping Y."
+* **Rows**: `gainNote` (gain ≈ 0, not a K/DEF stream) / `valueNote` (value ≈ 0, below replacement) → the Waivers tab
+  shows "—" with the note as tooltip in both layouts.
+* **Weak position line** (`weakPositions`, `gapLines`; response `gaps`): the analysis needs plus my worst-ranked
+  QB/RB/WR/TE group when it ranks in the bottom half; if no row there adds lineup points and the best free agent does
+  not measure above my weakest starter there (Yahoo week projection when both have one, else our pts/game), one line
+  "RB: no free agent beats yours (best: X 7.3 this week vs your W/R/T2 9.6). Look at trades."
+* **Not done**: "buy the high" acceptance (the partner's view of a spike, `perception.ts` ×0.7) is unchanged. The depth
+  chart is one snapshot, so "moved up" means injured players ahead, not a change between snapshots. An RB whose lead
+  back was out but who had the larger prior role himself is not a borrowed role by definition (spike rule + TD
+  regression apply).
