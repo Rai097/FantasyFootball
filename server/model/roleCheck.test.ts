@@ -102,3 +102,44 @@ describe("roleCheck + futureStarterBlock", () => {
     assert.equal(known.find((d) => d.label === "Depth chart rank")?.value, "WR3 (WR2 with the injured ahead out)");
   });
 });
+
+describe("fix round 1: one spike definition, a riser's share, a borrowed role that is his", () => {
+  test("the projection (signals) and the role check call a spike on the same games (one definition)", async () => {
+    const { computeAllSignals } = await import("./signals/index.js");
+    const { PPR } = await import("../data/fixtures/signals2026.js");
+    const series: { t: number[]; snap: number }[] = [
+      { t: [2, 2, 2, 2, 2, 2, 9], snap: 0.3 },
+      { t: [2, 2, 2, 2, 3, 5, 12], snap: 0.3 },
+      { t: [8, 9, 8, 9, 8, 16, 8], snap: 0.9 },
+      { t: [1, 2, 4, 3, 5, 0, 15], snap: 0.35 },
+      { t: [4, 4, 4, 4], snap: 0.5 },
+    ];
+    for (const { t, snap } of series) {
+      const p = player("x", "WR", "AAA", t, { snapShare: Object.fromEntries(t.map((_, i) => [i + 1, snap])) });
+      const games = p.weeks.map((w) => ({ week: w.week, gameId: `g${w.week}`, team: "AAA", targets: w.opp!.targets, carries: 0, airYards: 0, passAttempts: 0, actual: w.actual, expected: w.expected, snapShare: snap }));
+      const sig = computeAllSignals([{ id: "x", name: "x", pos: "WR", team: "AAA", games, status: [] }], { season: 2026, scoring: PPR, asOf: new Date("2026-10-26T00:00:00Z") }).get("x")!;
+      const exp = sig.weeks.map((w) => w.expPts);
+      const r = roleCheck({ p, weeks: p.weeks.map((w) => w.week), expPpg: exp, players: new Map(), usage: new Map(), offense: new Map() });
+      assert.equal(r.spike, !!sig.spike, `targets ${t.join(",")}`);
+    }
+  });
+  test("rising usage: the share follows his last 2 games (shown as such); flat usage: the last 4", () => {
+    const usage = new Map([1, 2, 3, 4].map((w) => [`AAA|${w}`, { targets: 36, touches: 60 }]));
+    const riser = roleCheck({ p: player("r", "WR", "AAA", [2, 3, 7, 8]), weeks: [1, 2, 3, 4], expPpg: [2.2, 3.3, 7.7, 8.8], players: new Map(), usage, offense: new Map() });
+    assert.equal(riser.shareGames, 2);
+    assert.ok(Math.abs(riser.healthyShare! - 15 / 72) < 1e-3);
+    assert.ok(roleItems(riser, "WR").some((d) => /last 2 games/.test(d.value)));
+    const flat = roleCheck({ p: player("f", "WR", "AAA", [4, 4, 4, 4]), weeks: [1, 2, 3, 4], expPpg: [4, 4, 4, 4], players: new Map(), usage, offense: new Map() });
+    assert.equal(flat.shareGames, 4);
+  });
+  test("borrowed role whose teammate has no return week: his share counts those games, the detail says the role is his", () => {
+    const me = player("me", "TE", "AAA", [2, 2, 8, 8]);
+    const mate = player("wr", "WR", "AAA", [8, 8, null, null], { ret: { week: null, confidence: "unknown", reasons: [], absent: true, practiceUp: false } });
+    const usage = teamUsage([me, mate]);
+    const by = [{ id: "wr", name: "Lead WR", pos: "WR" }];
+    const r = roleCheck({ p: me, weeks: [1, 2, 3, 4], expPpg: [1.5, 1.5, 9, 9], vacated: new Map([[3, by], [4, by]]), players: new Map([["wr", mate]]), usage, offense: new Map() });
+    assert.equal(r.vacated?.back, false);
+    assert.equal(r.healthyShare, 1, "weeks 3–4 count: he had all 16 team targets");
+    assert.ok(roleItems(r, "TE").some((d) => d.label === "Borrowed role" && /the role is his/.test(d.value)));
+  });
+});

@@ -552,6 +552,8 @@ export interface RoleCheck {
   belowStarter?: boolean;
   /** Target share (RB: share of team carries + targets) in his last games with the teammates healthy; undefined = unknown. */
   healthyShare?: number;
+  /** Games behind healthyShare (4; 2 when his usage is rising). */
+  shareGames?: number;
   /** Team offense: skill players' fantasy pts/game (league scoring) and rank (1 = best) of `of` teams; undefined = unknown. */
   offense?: { ppg: number; rank: number; of: number };
 }

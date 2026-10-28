@@ -513,7 +513,8 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
     const block = futureStarterBlock(role, p.pos);
     moveItems.splice(0, 0, ...(block ? [{ label: "Not a starter yet", value: block.rule }] : []), ...roleItems(role, p.pos));
     if (role.spike) tags.push("one-game jump");
-    if (role.vacated) tags.push("borrowed role");
+    // Only while the teammate is back or due back: with no return week the role is his (fix round 1).
+    if (role.vacated?.back) tags.push("borrowed role");
     const card = targetCard(p, m, sit, components, r1(100 * total), { ask, items: moveItems });
     return {
       player: p,

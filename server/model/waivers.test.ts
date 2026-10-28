@@ -429,8 +429,11 @@ test("roster need: a role claim / stash at a position I start and cover at least
   assert.equal(low.recommendation, "pass", txt(low));
   assert.equal(low.summary, "Trade chip only: you start 3 RBs and BN1 covers (4.0 vs his 3.5 ppg).");
   assert.match(txt(low), /Rule: Roster need: 3 RB starters \+ BN1 as cover \(4\.0 ppg\)/);
-  // Projects above my cover: he still fills a need (better cover), the call stands.
-  assert.equal(r.freeAgents.find((x) => x.id === "FA_RB_HI")!.recommendation, "claim");
+  // Projects above my cover but would not start over my RBs: a better cover alone is a trade chip (fix round 1,
+  // owner's call via the coordinator).
+  const hi = r.freeAgents.find((x) => x.id === "FA_RB_HI")!;
+  assert.equal(hi.recommendation, "pass", txt(hi));
+  assert.equal(hi.summary, "Trade chip only: you start 3 RBs and BN1 covers; he would not start (4.5 vs your FLEX 9.0 ppg).");
   // A stash at a covered position is a trade chip too.
   const s = rankWaivers(ctx, "me", [{ player: vp("FA_ST", "RB", 1, 0), onWaivers: true }], { breakouts: new Map([["FA_ST", { tier: "stash" as const, score: 55, situation: 0, oppLevel: 5, thesis: "" }]]) }).freeAgents[0];
   assert.equal(s.recommendation, "pass", txt(s));
@@ -444,11 +447,15 @@ test("roster need counts FLEX starters: two TEs starting (one at FLEX) + a bench
   assert.match(t.summary, /^Trade chip only: you start 2 TEs and BN3 covers/);
 });
 
-test("bench-only upgrade at a covered position names the real reason: a better cover than mine", () => {
+test("bench-only upgrade at a covered position: a better cover than mine who would not start is a trade chip (fix round 1)", () => {
   const ctx = ctxFor([...mine, ...other], ["IRGUY"]);
   const t = rankWaivers(ctx, "me", [{ player: vp("FA_TE", "TE", 6, 4), onWaivers: false }]).freeAgents[0];
-  assert.equal(t.recommendation, "optional", txt(t));
-  assert.match(t.summary, /^Better TE cover than BN3 \(6\.0 vs 1\.0 ppg\), dropping BN3\./);
+  assert.equal(t.recommendation, "pass", txt(t));
+  assert.equal(t.summary, "Trade chip only: you start 1 TE and BN3 covers; he would not start (6.0 vs your TE 8.0 ppg).");
+  // He would start over my TE: offered as usual (a lineup gain, never a trade chip).
+  const starter = rankWaivers(ctx, "me", [{ player: vp("FA_TE2", "TE", 10, 6), onWaivers: false }]).freeAgents[0];
+  assert.notEqual(starter.recommendation, "pass", txt(starter));
+  assert.doesNotMatch(starter.summary, /Trade chip only/);
 });
 
 test("VALUE / GAIN not meaningful for the call → a note (UI shows '—' + tooltip), never a bare 0.0", () => {
@@ -487,4 +494,25 @@ test("weak position line: no free agent beats my weakest starter there → one l
   assert.deepEqual(gapLines(["RB"], lineup, [], [{ ...fa, yahooProjWeekly: 10 }]), []);
   // No Yahoo projection on one side: our pts/game.
   assert.match(gapLines(["RB"], lineup, [], [{ ...fa, yahooProjWeekly: undefined }])[0], /best: Spare Back 5\.0 ppg vs your W\/R\/T2 12\.0/);
+});
+
+test("roster need (fix round 1): a bench player Doubtful or due back after this week is not cover; one back this week is", () => {
+  const withBn1 = (extra: Partial<ValuedPlayer>) => {
+    const roster = mine.map((p) => (p.id === "BN1" ? { ...p, ...extra } : p));
+    return rankWaivers(ctxFor([...roster, ...other], ["IRGUY"], roster), "me", [{ player: vp("FA_RB", "RB", 3.5, 0), onWaivers: true }], { myPriority: 3, breakouts: new Map([["FA_RB", fut()]]) }).freeAgents[0];
+  };
+  const ret = (week: number) => ({ ret: { week, confidence: "medium" as const, reasons: [], absent: true, practiceUp: false } });
+  assert.doesNotMatch(withBn1({ injury: { status: "D", detail: "Ankle", week: 4 } }).summary, /Trade chip only/, "Doubtful");
+  assert.doesNotMatch(withBn1(ret(6)).summary, /Trade chip only/, "due back week 6 (current week 4)");
+  assert.match(withBn1(ret(4)).summary, /^Trade chip only/, "back this week: he covers");
+});
+
+test("gapLines (fix round 1): without a week projection for every starter both sides use pts/game", () => {
+  const lineup = [
+    { player: vp("WR-A", "WR", 12, 10, { yahooProjWeekly: 15 }), label: "WR1" },
+    { player: vp("WR-B", "WR", 9, 15), label: "WR2" }, // no week projection
+  ];
+  const lower = gapLines(["WR"], lineup, [], [vp("FA", "WR", 8, 0, { yahooProjWeekly: 30 })]);
+  assert.deepEqual(lower, ["WR: no free agent beats yours (best: FA 8.0 ppg vs your WR2 9.0). Look at trades."]);
+  assert.deepEqual(gapLines(["WR"], lineup, [], [vp("FA", "WR", 9.5, 0)]), [], "beats my weakest on pts/game");
 });

@@ -234,6 +234,8 @@ interface Base {
   roleUp: boolean;
   /** Model rate with the borrowed-role games at full weight (signals `vacated.fullExpPts`); null = none. */
   modelFull: number | null;
+  /** Borrowed role that is his own (teammate not expected back in the window): no discount; weeks and who for the why. */
+  borrowedOwn?: { weeks: number[]; by: string[] };
   /** Expected-TD regression (null = not applied: no expected TD data, actual-points fallback, K / DEF). */
   td: TdShrink | null;
   games: number;
@@ -315,6 +317,60 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     if (!sigMemo.has(p)) sigMemo.set(p, p.pos === "K" || p.pos === "DEF" ? null : signalsOf(p));
     return sigMemo.get(p)!;
   };
+  // Availability: kind, schedule, games missed and the return estimate (memoized: a teammate's return week decides
+  // when a borrowed role ends, DESIGN "Fix: vacated role, spikes, depth and roster need").
+  const availMemo = new Map<Player, ReturnType<typeof availCompute>>();
+  const availCompute = (b: Pick<Base, "p" | "sig" | "kdef">) => {
+    const p = b.p;
+    const { kind, absence } = availKind(p, b.sig);
+    const sched = tables.schedule.size ? tables.schedule.get(p.team) : undefined;
+    // His team's remaining game weeks and the games he has missed since his last game.
+    const gameWeeks: number[] = [];
+    for (let w = S.currentWeek; w <= S.finalWeek; w++) if (sched ? sched.has(w) : p.bye !== w) gameWeeks.push(w);
+    let gamesMissed: number | null = null;
+    if (p.team !== "FA" && !b.kdef) {
+      const played = tables.playedWeeks?.get(p.team) ?? Array.from({ length: Math.max(0, S.currentWeek - 1) }, (_, i) => i + 1).filter((w) => w !== p.bye);
+      const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
+      const last = own.length ? Math.max(...own) : 0;
+      gamesMissed = played.filter((w) => w > last && w < S.currentWeek).length;
+    }
+    let est: ReturnEstimate | undefined;
+    if (kind === "absent" && absence) {
+      const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
+      est = estimateReturn({
+        absence,
+        rosterStatus: b.sig?.rosterStatus,
+        rosterCode: b.sig?.rosterCode,
+        onIr: onIr(p, b.sig),
+        ...(absence === "reserve" && leagueOnlyIr(p, b.sig) ? { leagueOnly: true } : {}),
+        status: b.sig?.status ?? [],
+        currentWeek: S.currentWeek,
+        gameWeeks,
+        gamesMissed,
+        ...(own.length ? { lastGameWeek: Math.max(...own) } : {}),
+        ...(/^(O|OUT)$/.test(p.injury?.status.trim().toUpperCase() ?? "") ? { tagOut: true } : {}),
+      });
+    }
+    return { kind, absence, sched, gameWeeks, gamesMissed, est };
+  };
+  const availInfo = (b: Pick<Base, "p" | "sig" | "kdef">) => {
+    if (!availMemo.has(b.p)) availMemo.set(b.p, availCompute(b));
+    return availMemo.get(b.p)!;
+  };
+  const playerById = new Map(all.map((p) => [p.id, p]));
+  /**
+   * Borrowed role is temporary only while EVERY teammate he filled in for is back (playing) or due back within the
+   * projection window (a known return week). A teammate out for the season, with no return week, gone from the team or
+   * unknown → the role is his own: no discount (fix round 1, DESIGN "Fix round 1").
+   */
+  const borrowedIsTemporary = (p: Player, v: NonNullable<PlayerSignals["vacated"]>): boolean =>
+    v.by.every((t) => {
+      const tp = playerById.get(t.id);
+      if (!tp || tp.team !== p.team) return false;
+      const a = availInfo({ p: tp, sig: sigOf(tp), kdef: false });
+      return a.kind !== "noTeam" && !(a.kind === "absent" && (a.est?.returnWeek ?? null) === null);
+    });
+
   // Position TD baselines: ACTUAL TDs per opportunity over every game of players with ≥ priorMinGames games
   // (players without a usable prior regress toward them; tdRegression.ts).
   const tdBaseline = positionTdBaselines(all.map((p) => ({ pos: p.pos, sig: sigOf(p) })), V4.priorMinGames);
@@ -333,7 +389,11 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       trend: weeks.length >= 3 ? mean(exp.slice(-2)) - mean(exp) : 0,
     };
     if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorW: 0, roleUp: false, td: null, modelFull: null };
-    const sig = sigOf(p);
+    const sig0 = sigOf(p);
+    // Borrowed role whose teammate is not expected back in the window: the role is his (signals without detection).
+    const ownRole = !!sig0?.vacated && !borrowedIsTemporary(p, sig0.vacated);
+    const sig = ownRole ? sig0!.vacated!.own : sig0;
+    const borrowedOwn = ownRole ? { weeks: sig0!.vacated!.weeks, by: sig0!.vacated!.by.map((t) => t.name) } : undefined;
     // Missing expected data (ffopportunity has no usage for him while he scores): rate on recency-weighted actual
     // points, with the usual prior / ECR shrinkage, instead of ~0 usage.
     const ghost = sig ? sig.weeks.filter((w) => w.expPts === 0 && w.actPts > 0).length : 0;
@@ -379,7 +439,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       const cur = (sig.vacated.fullExpPts - (td?.ptsDelta ?? 0)) * eff;
       modelFull = priorRate !== null ? (sampleGames * cur + priorW * priorRate) / (sampleGames + priorW) : cur;
     }
-    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorW, roleUp, td, modelFull };
+    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorW, roleUp, td, modelFull, ...(borrowedOwn ? { borrowedOwn } : {}) };
   };
   const bases = all.map(makeBase);
   const baseById = new Map(bases.map((b) => [b.p.id, b]));
@@ -406,46 +466,6 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     maxRank[pos] = m;
   }
 
-  // Availability: kind, schedule, games missed and the return estimate (memoized: a teammate's return week decides
-  // when a borrowed role ends, DESIGN "Fix: vacated role, spikes, depth and roster need").
-  const availMemo = new Map<Base, ReturnType<typeof availCompute>>();
-  const availCompute = (b: Base) => {
-    const p = b.p;
-    const { kind, absence } = availKind(p, b.sig);
-    const sched = tables.schedule.size ? tables.schedule.get(p.team) : undefined;
-    // His team's remaining game weeks and the games he has missed since his last game.
-    const gameWeeks: number[] = [];
-    for (let w = S.currentWeek; w <= S.finalWeek; w++) if (sched ? sched.has(w) : p.bye !== w) gameWeeks.push(w);
-    let gamesMissed: number | null = null;
-    if (p.team !== "FA" && !b.kdef) {
-      const played = tables.playedWeeks?.get(p.team) ?? Array.from({ length: Math.max(0, S.currentWeek - 1) }, (_, i) => i + 1).filter((w) => w !== p.bye);
-      const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
-      const last = own.length ? Math.max(...own) : 0;
-      gamesMissed = played.filter((w) => w > last && w < S.currentWeek).length;
-    }
-    let est: ReturnEstimate | undefined;
-    if (kind === "absent" && absence) {
-      const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
-      est = estimateReturn({
-        absence,
-        rosterStatus: b.sig?.rosterStatus,
-        rosterCode: b.sig?.rosterCode,
-        onIr: onIr(p, b.sig),
-        ...(absence === "reserve" && leagueOnlyIr(p, b.sig) ? { leagueOnly: true } : {}),
-        status: b.sig?.status ?? [],
-        currentWeek: S.currentWeek,
-        gameWeeks,
-        gamesMissed,
-        ...(own.length ? { lastGameWeek: Math.max(...own) } : {}),
-        ...(/^(O|OUT)$/.test(p.injury?.status.trim().toUpperCase() ?? "") ? { tagOut: true } : {}),
-      });
-    }
-    return { kind, absence, sched, gameWeeks, gamesMissed, est };
-  };
-  const availInfo = (b: Base) => {
-    if (!availMemo.has(b)) availMemo.set(b, availCompute(b));
-    return availMemo.get(b)!;
-  };
   /** Borrowed role: × (full rate ÷ settled rate) in the weeks the teammate(s) he replaced stay out; 1 otherwise. */
   const vacatedFactor = (b: Base, rate: number, rateFull: number | null): { factor: number; outAt: (w: number) => boolean; by: string[]; until: number | null } | null => {
     const v = b.sig?.vacated;
@@ -801,7 +821,11 @@ function explainItems(
     if (x.effRaw !== null) add("Finishing", `×${x.eff.toFixed(2)} (actual ÷ expected ${x.effRaw.toFixed(2)}, pulled toward 1)`);
     if (x.flagged > 0) add("Odd games", `${x.flagged} count 25%: backup QB, left early or blowout`);
     const vac = x.sig?.vacated;
-    if (vac) {
+    if (x.borrowedOwn) {
+      const who = x.borrowedOwn.by.join(", ");
+      add("Borrowed role", `usage rose while ${who} ${x.borrowedOwn.by.length > 1 ? "were" : "was"} out (wk ${x.borrowedOwn.weeks.join(", ")}): counts in full`);
+      add("While he is out", `the role is his: ${who} has no return week this season (return unknown)`);
+    } else if (vac) {
       const who = vac.by.map((t) => t.name).join(", ");
       add("Borrowed role", `usage rose while ${who} ${vac.by.length > 1 ? "were" : "was"} out (wk ${vac.weeks.join(", ")}): counts ${pct(VACATED.weight)}`, "warn");
       if (x.roleF?.weeks) add("While he is out", `×${x.roleF.factor.toFixed(2)} for ${x.roleF.weeks} games${x.roleF.until !== null ? ` (${x.roleF.by.join(", ")} back wk ${x.roleF.until})` : " (return unknown)"}`, "warn");

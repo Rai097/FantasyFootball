@@ -31,24 +31,19 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
   const flags = contextFlags(games, p.pos);
   const flagged = flags.map(isFlagged);
   // Vacated-role games weigh VACATED.weight; an isolated one-game jump in the last 3 games has its recency capped
-  // (DESIGN "Fix: vacated role, spikes, depth and roster need").
+  // (DESIGN "Fix: vacated role, spikes, depth and roster need"); a game with both gets the stronger discount only.
   const vacW = flags.map((f) => (f.vacated ? VACATED.weight : 1));
-  // Over all his games (a low flagged game still shows his usage level), oldest first.
+  // Over all his games (a low flagged game still shows his usage level), oldest first: the one spike definition
+  // (vacated.ts usageShape), shared with the waiver role check.
   const shape = usageShape(
     games.map((g) => score(ctx.scoring, g.expected, p.pos)),
     vacW,
+    { pos: p.pos, snaps: games.map((g) => g.snapShare) },
   );
-  // A climbing opportunity share (WOPR / weighted touches up 3 straight unflagged games, slope ≥ his own weekly noise:
-  // trend.ts without the flex-level bar) is a breakout, not a spike: no cap.
   const opps = games.map((g) => weekOpportunity(g, p.pos, ctx.scoring));
-  const climbing = trendOf(games.map((g, i) => ({ week: g.week, flagged: flagged[i], wopr: opps[i].wopr, weightedOpp: opps[i].weightedOpp })), p.pos, -Infinity)?.rising ?? false;
-  if (climbing) {
-    shape.spikeIdx = [];
-    shape.spike = false;
-  }
   const capped = new Set(shape.spikeIdx);
   const fullWeights = recencyWeights(flagged, { capped, cap: SPIKE.maxRecency });
-  const weights = fullWeights.map((w, i) => w * vacW[i]);
+  const weights = recencyWeights(flagged, { capped, cap: SPIKE.maxRecency, factor: vacW });
   shape.spikeIdx.forEach((i) => (flags[i] = { ...flags[i], spike: true }));
   const weeks: WeekSignal[] = games.map((g, i) => ({
     week: g.week,
@@ -78,6 +73,9 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
   const by = new Map<string, { id: string; name: string; pos: string }>();
   for (const i of vacIdx) for (const t of games[i].vacated!) by.set(t.id, t);
   const fullExp = vacIdx.length ? weightedRate(weeks.map((w) => w.expPts), fullWeights) : null;
+  // The same player with no borrowed-role detection: the projection uses it when the teammate is not expected back
+  // in the projection window (fix round 1: then the role is his own).
+  const own = vacIdx.length ? computePlayerSignals({ ...p, games: p.games.map(({ vacated: _v, ...g }) => g) }, ctx) : null;
   return {
     id: p.id,
     name: p.name,
@@ -94,7 +92,7 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
     rosterStatus: p.roster?.status,
     ...(p.roster?.statusCode ? { rosterCode: p.roster.statusCode } : {}),
     status: [...p.status].sort((a, b) => a.week - b.week),
-    ...(fullExp !== null ? { vacated: { weeks: vacIdx.map((i) => games[i].week), by: [...by.values()], fullExpPts: fullExp } } : {}),
+    ...(fullExp !== null ? { vacated: { weeks: vacIdx.map((i) => games[i].week), by: [...by.values()], fullExpPts: fullExp, own: own! } } : {}),
     ...(shape.spike ? { spike: true } : {}),
   };
 }
@@ -120,6 +118,9 @@ export function computeAllSignals(inputs: Iterable<PlayerSignalInput>, ctx: Sign
       return { pos: s.pos, rate: m ? s.rates[m] : null, games: m ? s.weeks.filter((w) => w[m] !== undefined).length : 0 };
     }),
   );
-  for (const s of out.values()) s.trend = trendOf(s.weeks, s.pos, levels[s.pos]);
+  for (const s of out.values()) {
+    s.trend = trendOf(s.weeks, s.pos, levels[s.pos]);
+    if (s.vacated) s.vacated.own.trend = trendOf(s.vacated.own.weeks, s.pos, levels[s.pos]);
+  }
   return out;
 }

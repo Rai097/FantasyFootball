@@ -65,3 +65,18 @@ describe("projection v4: borrowed role", () => {
     assert.ok(Math.abs(v.weekly![lastIdx] - back.weekly![lastIdx]) < 0.11, "playoffs: settled role");
   });
 });
+
+describe("projection v4: borrowed role, fix round 1 (the role is his when the teammate is not due back)", () => {
+  test("teammate out for the season → no discount: same rate as with no detection, the why says it counts in full", () => {
+    const out = value([TE(), WR({ status: "IR", detail: "Knee - out for season", week: 7 })]).get("te2")!;
+    const alone = value([TE()]).get("te2")!;
+    assert.ok(Math.abs(out.ppg - alone.ppg) < 1e-9, `${out.ppg} vs ${alone.ppg}`);
+    assert.match(item(out, "Borrowed role") ?? "", /counts in full/);
+  });
+  test("teammate traded away (no longer on the team) → the role is his", () => {
+    const traded = rawPlayer("wr1", "WR", { team: "BBB", weeks: weeks([9, 10, 9, 8, 9, null, null]) });
+    const v = value([TE(), traded]).get("te2")!;
+    const alone = value([TE()]).get("te2")!;
+    assert.ok(Math.abs(v.ppg - alone.ppg) < 1e-9, `${v.ppg} vs ${alone.ppg}`);
+  });
+});

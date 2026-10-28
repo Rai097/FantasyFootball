@@ -16,6 +16,8 @@ export const DEPTH_STARTER: Partial<Record<Position, number>> = { RB: 2, WR: 3, 
 export const ROLE_ENV = {
   minShare: { RB: 0.2, WR: 0.15, TE: 0.12 } as Partial<Record<Position, number>>,
   shareGames: 4,
+  /** Usage rising (up in 2 of his last 3 games): the share follows his current role, over his last this-many games. */
+  riserShareGames: 2,
   /** Fewer such games than this → share unknown (one game is not a share). */
   minShareGames: 2,
   lowOffenseBottom: 8,
@@ -74,12 +76,12 @@ export function teamUsage(players: Iterable<ValuedPlayer>): Map<string, { target
   return out;
 }
 
-/** His share over his last `shareGames` games for his current team without a borrowed role; undefined = unknown. */
-export function healthyShare(p: ValuedPlayer, usage: Map<string, { targets: number; touches: number }>, vacatedWeeks: ReadonlySet<number>): number | undefined {
+/** His share over his last `games` games (default shareGames) for his current team without a borrowed role; undefined = unknown. */
+export function healthyShare(p: ValuedPlayer, usage: Map<string, { targets: number; touches: number }>, vacatedWeeks: ReadonlySet<number>, last: number = ROLE_ENV.shareGames): number | undefined {
   const games = p.weeks
     .filter((w) => w.opp && w.team === p.team && !vacatedWeeks.has(w.week) && usage.has(`${w.team}|${w.week}`))
     .sort((a, b) => a.week - b.week)
-    .slice(-ROLE_ENV.shareGames);
+    .slice(-last);
   let mine = 0;
   let team = 0;
   for (const w of games) {
@@ -125,7 +127,8 @@ export function roleCheck(i: RoleCheckInput): RoleCheck {
   const back = by.size > 0 && [...by.values()].every((t) => isBack(i.players.get(t.id), p.team));
   // A borrowed-role game counts VACATED.weight while the teammate is back or due back; in full when he is gone for good.
   const weights = i.weeks.map((w) => (vac.has(w) && back ? VACATED.weight : 1));
-  const shape = usageShape(i.expPpg, weights);
+  // The one spike definition (vacated.ts usageShape), shared with the projection: same position and snap context.
+  const shape = usageShape(i.expPpg, weights, { pos: p.pos, snaps: i.weeks.map((w) => p.snapShare[w]) });
   const out: RoleCheck = { sustained: shape.sustained, spike: shape.spike };
   if (vacWeeks.length) out.vacated = { weeks: vacWeeks, by: [...by.values()].map((t) => t.name), back };
   if (i.chart && i.chart.includes(p.id)) {
@@ -136,8 +139,14 @@ export function roleCheck(i: RoleCheckInput): RoleCheck {
     const level = DEPTH_STARTER[p.pos];
     if (level !== undefined) out.belowStarter = out.chartEffective > level;
   }
-  const share = healthyShare(p, i.usage, new Set(vacWeeks));
-  if (share !== undefined) out.healthyShare = Math.round(share * 1000) / 1000;
+  // Borrowed games leave the share only while the teammate is back or due back (else the role is his). A riser's
+  // share follows his current role: his last riserShareGames games, not the season (fix round 1).
+  const window = shape.sustained ? ROLE_ENV.riserShareGames : ROLE_ENV.shareGames;
+  const share = healthyShare(p, i.usage, back ? new Set(vacWeeks) : new Set(), window);
+  if (share !== undefined) {
+    out.healthyShare = Math.round(share * 1000) / 1000;
+    out.shareGames = window;
+  }
   const off = i.offense.get(p.team);
   if (off) out.offense = off;
   return out;
@@ -187,9 +196,9 @@ export function roleItems(r: RoleCheck, pos: Position): { label: string; value: 
     ...(r.belowStarter ? { tone: "warn" as const } : {}),
   });
   const what = pos === "RB" ? "Touch share" : "Target share";
-  out.push({ label: `${what}, starters healthy`, value: r.healthyShare === undefined ? "Unknown" : `${pct1(r.healthyShare)} of his team's (last ${ROLE_ENV.shareGames} games)` });
+  out.push({ label: `${what}, starters healthy`, value: r.healthyShare === undefined ? "Unknown" : `${pct1(r.healthyShare)} of his team's (last ${r.shareGames ?? ROLE_ENV.shareGames} games)` });
   out.push({ label: "Offense", value: r.offense ? `${ordinal(r.offense.rank)} of ${r.offense.of} in fantasy pts/game (${r.offense.ppg.toFixed(1)})` : "Unknown" });
-  if (r.vacated) out.push({ label: "Borrowed role", value: `wk ${r.vacated.weeks.join(", ")} while ${r.vacated.by.join(", ")} ${r.vacated.by.length > 1 ? "were" : "was"} out${r.vacated.back ? " (back or due back)" : ""}`, tone: "warn" });
+  if (r.vacated) out.push({ label: "Borrowed role", value: `wk ${r.vacated.weeks.join(", ")} while ${r.vacated.by.join(", ")} ${r.vacated.by.length > 1 ? "were" : "was"} out${r.vacated.back ? " (back or due back)" : ": no return week, the role is his"}`, ...(r.vacated.back ? { tone: "warn" as const } : {}) });
   if (r.spike) out.push({ label: "One-game jump", value: "Higher usage in only 1 of his last 3 games: watch", tone: "warn" });
   return out;
 }

@@ -275,3 +275,17 @@ test("fix 2026-10-28: a one-game jump and a borrowed role are watch (stash tier)
   assert.equal(by("steady").tier, "rising");
   for (const t of r.targets) assert.deepEqual(detailProblems(t.details), [], t.player.id);
 });
+
+test("fix round 1: a borrowed role whose teammate has no return week is his role: no 'borrowed role' tag or watch", () => {
+  const touch = (t: number[], team: string) => t.map((c, i) => wk(i + 1, c * 0.8, c * 0.8, { targets: 0, carries: c, airYards: 0 })).map((w) => ({ ...w, team }));
+  const unknownReturn = { week: null, confidence: "unknown" as const, reasons: [], absent: true, practiceUp: false };
+  const lead = vp("lead", "RB", 14, 30, { team: "DAL", name: "Lead RB", weeks: touch([15, 16], "DAL"), snapShare: { 1: 0.7, 2: 0.7 }, games: 2, ret: unknownReturn });
+  const heir = vp("heir", "RB", 6, 3, { team: "DAL", weeks: touch([4, 4, 14, 15], "DAL"), snapShare: { 1: 0.3, 2: 0.3, 3: 0.7, 4: 0.72 }, games: 4 });
+  const players = new Map([lead, heir].map((p) => [p.id, p]));
+  const L = league([team("me", []), team("o", [lead])], undefined, { numTeams: 12 });
+  const r = findBreakouts({ league: L, players, teams: analyzeTeams(L, players, { QB: 15, RB: 8, WR: 8, TE: 6, K: 7, DEF: 6 }), myTeamId: "me" });
+  const t = r.targets.find((x) => x.player.id === "heir")!;
+  assert.equal(t.role.vacated?.back, false);
+  assert.ok(!t.tags.includes("borrowed role"), t.tags.join(", "));
+  assert.ok(t.details.some((d) => d.label === "Borrowed role" && /the role is his/.test(d.value)));
+});

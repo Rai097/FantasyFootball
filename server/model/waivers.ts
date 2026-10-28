@@ -5,7 +5,7 @@ import { irSet, rosterOf } from "./analysis.js";
 import type { TradeContext } from "./tradeKit.js";
 import { injuryKind, isQuestionable } from "./projection.js";
 import { luckText } from "./labels.js";
-import { futureStarterBlock, roleItems } from "./roleCheck.js";
+import { futureStarterBlock, isOutStatus, roleItems } from "./roleCheck.js";
 
 export interface FreeAgentInput {
   player: ValuedPlayer;
@@ -115,21 +115,33 @@ export function rankWaivers(
   const labels = slotLabels(base.lineup);
 
   /**
-   * Roster need (DESIGN "Fix: vacated role, spikes, depth and roster need"): my starters fill every slot of his
-   * position (FLEX-type starters at his position count too) and a bench player at his position projects at least as
-   * well as he does → he adds nothing but a trade chip. Null = he fills a need.
+   * Roster need (DESIGN "Fix: vacated role, spikes, depth and roster need" + fix round 1): my starters fill every slot
+   * of his position (FLEX-type starters at his position count too) and an AVAILABLE bench player there covers (not
+   * Out / Doubtful / IR / PUP / suspended, not returning after this week). Then a free agent is offered only if he
+   * would start over one of my starters at his position; a better cover alone is a trade chip.
    */
-  /** My best bench player at his position when my starters fill every slot of it (else null: a need). */
+  /** My best available bench player at his position when my starters fill every slot of it (else null: a need). */
   const coverAt = (fa: ValuedPlayer): ValuedPlayer | null => {
     if (fa.pos === "K" || fa.pos === "DEF") return null;
     const dedicated = S.slots.filter((x) => x === fa.pos).length;
     const starters = base.lineup.filter((l) => l.player?.pos === fa.pos).length;
     if (starters < dedicated || starters === 0) return null;
-    return base.bench.filter((p) => p.pos === fa.pos && !irIds.has(p.id) && p.remainingGames > 0).sort((a, b) => b.ppg - a.ppg)[0] ?? null;
+    const available = (p: ValuedPlayer) =>
+      !irIds.has(p.id) && p.remainingGames > 0 && !isOutStatus(p.injury?.status) && !(p.ret?.absent && (p.ret.week === null || p.ret.week > S.currentWeek));
+    return base.bench.filter((p) => p.pos === fa.pos && available(p)).sort((a, b) => b.ppg - a.ppg)[0] ?? null;
   };
-  const coveredBy = (fa: ValuedPlayer): { starters: number; cover: ValuedPlayer } | null => {
+  /** My weakest starter at his position (FLEX slots included) with its slot label; null = none. */
+  const weakestStarter = (pos: Position): { player: ValuedPlayer; label: string } | null =>
+    base.lineup
+      .map((l, i) => ({ player: l.player, label: labels[i] }))
+      .filter((x): x is { player: ValuedPlayer; label: string } => x.player?.pos === pos)
+      .sort((a, b) => a.player.ppg - b.player.ppg)[0] ?? null;
+  const coveredBy = (fa: ValuedPlayer, gain: number): { starters: number; cover: ValuedPlayer; weakest: { player: ValuedPlayer; label: string } } | null => {
     const cover = coverAt(fa);
-    return cover && cover.ppg >= fa.ppg ? { starters: base.lineup.filter((l) => l.player?.pos === fa.pos).length, cover } : null;
+    const weakest = weakestStarter(fa.pos);
+    if (!cover || !weakest) return null;
+    const wouldStart = gain > 0.05 || fa.ppg > weakest.player.ppg;
+    return wouldStart ? null : { starters: base.lineup.filter((l) => l.player?.pos === fa.pos).length, cover, weakest };
   };
 
   const needs = new Set(analysis?.needs ?? []);
@@ -323,19 +335,19 @@ export function rankWaivers(
           ? "Bid the minimum at most, or add him if he clears waivers."
           : "Not worth priority, so add him only if he clears waivers.";
     }
-    // Roster need: a role claim, a stash or a bench-only upgrade at a position I already start and cover → trade chip.
+    // Roster need: a role claim, a stash or a bench-only upgrade at a position I already start and cover, by a player
+    // who would not start over my starters there → trade chip (a better cover alone is not worth the spot).
     const benchOnly = recommendation === "optional" && !(gain > 0.05);
-    const covered = !isKDef && (byRole || recommendation === "stash" || benchOnly) ? coveredBy(fa) : null;
-    const weakerCover = !covered && benchOnly && !isKDef ? coverAt(fa) : null;
-    if (weakerCover) {
-      lead = `Better ${fa.pos} cover than ${weakerCover.name} (${fa.ppg.toFixed(1)} vs ${weakerCover.ppg.toFixed(1)} ppg)${drop ? `, dropping ${drop.name}` : ""}.`;
-      rule = `Bench upgrade: projects above your ${fa.pos} cover ${weakerCover.name}`;
-    }
+    const covered = !isKDef && (byRole || recommendation === "stash" || benchOnly) ? coveredBy(fa, gain) : null;
     if (covered) {
       const c = covered.cover;
+      const plural = `${covered.starters} ${fa.pos}${covered.starters > 1 ? "s" : ""}`;
       recommendation = "pass";
       rule = `Roster need: ${covered.starters} ${fa.pos} starter${covered.starters > 1 ? "s" : ""} + ${c.name} as cover (${c.ppg.toFixed(1)} ppg)`;
-      lead = `Trade chip only: you start ${covered.starters} ${fa.pos}${covered.starters > 1 ? "s" : ""} and ${c.name} covers (${c.ppg.toFixed(1)} vs his ${fa.ppg.toFixed(1)} ppg).`;
+      lead =
+        c.ppg >= fa.ppg
+          ? `Trade chip only: you start ${plural} and ${c.name} covers (${c.ppg.toFixed(1)} vs his ${fa.ppg.toFixed(1)} ppg).`
+          : `Trade chip only: you start ${plural} and ${c.name} covers; he would not start (${fa.ppg.toFixed(1)} vs your ${covered.weakest.label} ${covered.weakest.player.ppg.toFixed(1)} ppg).`;
       action = undefined;
     }
     const injText = fa.injury ? `${fa.injury.status.trim() || "injured"}${fa.injury.detail?.trim() ? ` (${fa.injury.detail.trim()})` : ""}` : "";
@@ -502,7 +514,8 @@ export function weakPositions(analysis: { needs: string[]; groups: Record<string
 /**
  * Weak starting positions (weakPositions) where no free agent beats my weakest starter there: one line each,
  * "RB: no free agent beats yours (best: X 7.3 this week vs your RB2 9.6). Look at trades." Measured on Yahoo's week
- * projection when both sides have one, else on our projected pts/game. A position where a row already adds lineup
+ * projection when every starter there and a free agent have one, else our pts/game, the weakest starter picked on
+ * that same measure (fix round 1). A position where a row already adds lineup
  * points (claim / optional with gain), or the best free agent measures higher, gets no line (the rows answer it).
  */
 export function gapLines(
@@ -514,24 +527,24 @@ export function gapLines(
   const out: string[] = [];
   for (const pos of weak) {
     if (rows.some((t) => t.pos === pos && t.gain > 0.05 && (t.recommendation === "claim" || t.recommendation === "optional"))) continue;
-    const mine = lineup.filter((x) => x.player?.pos === pos).sort((a, b) => a.player!.ppg - b.player!.ppg)[0];
-    if (!mine) continue;
+    const starters = lineup.filter((x): x is { player: ValuedPlayer; label: string } => x.player?.pos === pos);
+    if (!starters.length) continue;
     const fas = pool.filter((p) => p.pos === pos);
     if (!fas.length) {
       out.push(`${pos}: no free agent at ${pos} to compare. Look at trades.`);
       continue;
     }
-    const myWeek = weekProjOf(mine.player!);
+    // One measure for both sides (fix round 1): Yahoo's week projection when every starter there and a free agent
+    // have one, else our pts/game; the weakest starter is chosen on that same measure.
     const withWeek = fas.filter((p) => weekProjOf(p) !== undefined).sort((a, b) => weekProjOf(b)! - weekProjOf(a)!);
+    const byWeek = withWeek.length > 0 && starters.every((x) => weekProjOf(x.player) !== undefined);
+    const measure = (p: ValuedPlayer) => (byWeek ? weekProjOf(p)! : p.ppg);
+    const mine = [...starters].sort((a, b) => measure(a.player) - measure(b.player))[0];
+    const best = byWeek ? withWeek[0] : [...fas].sort((a, b) => b.ppg - a.ppg)[0];
     let line: string | null = null;
-    if (myWeek !== undefined && withWeek.length) {
-      const best = withWeek[0];
-      if (weekProjOf(best)! <= myWeek)
-        line = `${pos}: no free agent beats yours (best: ${best.name} ${weekProjOf(best)!.toFixed(1)} this week vs your ${mine.label} ${myWeek.toFixed(1)}). Look at trades.`;
-    } else {
-      const best = [...fas].sort((a, b) => b.ppg - a.ppg)[0];
-      if (best.ppg <= mine.player!.ppg)
-        line = `${pos}: no free agent beats yours (best: ${best.name} ${best.ppg.toFixed(1)} ppg vs your ${mine.label} ${mine.player!.ppg.toFixed(1)}). Look at trades.`;
+    if (measure(best) <= measure(mine.player)) {
+      const unit = byWeek ? " this week" : " ppg";
+      line = `${pos}: no free agent beats yours (best: ${best.name} ${measure(best).toFixed(1)}${unit} vs your ${mine.label} ${measure(mine.player).toFixed(1)}). Look at trades.`;
     }
     if (line) out.push(line.length <= SUMMARY_MAX ? line : `${pos}: no free agent beats your ${mine.label}. Look at trades.`);
   }

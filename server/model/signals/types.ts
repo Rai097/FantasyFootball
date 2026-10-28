@@ -201,8 +201,9 @@ export interface PlayerSignals {
   rosterCode?: string;
   status: StatusWeek[];
   /** Vacated-role games (weeks, who was out) and the recency-weighted expected pts/game with those games at full
-   *  weight (`rates.expPts` counts them at VACATED.weight): the projection uses the full rate while they stay out. */
-  vacated?: { weeks: number[]; by: { id: string; name: string; pos: string }[]; fullExpPts: number };
+   *  weight (`rates.expPts` counts them at VACATED.weight): the projection uses the full rate while they stay out;
+   *  `own` = his signals with no borrowed-role detection (used when the teammate is not expected back in the window). */
+  vacated?: { weeks: number[]; by: { id: string; name: string; pos: string }[]; fullExpPts: number; own: PlayerSignals };
   /** The latest usage jump is in only one of the last 3 games (usageShape): a spike, not a trend. */
   spike?: boolean;
 }
