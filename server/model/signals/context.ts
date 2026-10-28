@@ -70,6 +70,7 @@ export function contextFlags(games: PlayerGame[], pos: SkillPos): GameFlags[] {
       qbOut: pos !== "QB" && !!g.starterQbId && !!g.usualQbIds?.length && !g.usualQbIds.includes(g.starterQbId),
       leftEarly,
       blowout: g.teamMargin !== undefined && Math.abs(g.teamMargin) >= BLOWOUT_MARGIN,
+      ...(g.vacated?.length ? { vacated: true } : {}),
     };
   });
 }

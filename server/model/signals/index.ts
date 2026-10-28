@@ -7,6 +7,8 @@ import { luckOf } from "./luck.js";
 import { weekOpportunity } from "./opportunity.js";
 import { plainMean, recencyWeights, weightedRate } from "./recency.js";
 import { talentPrior } from "./talent.js";
+import { score } from "../scoring.js";
+import { SPIKE, usageShape, VACATED, vacatedGames } from "./vacated.js";
 import { flexLevels, metricOf, trendOf } from "./trend.js";
 import type { PlayerSignalInput, PlayerSignals, RateKey, Rates, SkillPos, WeekSignal } from "./types.js";
 
@@ -28,7 +30,17 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
   const games = [...p.games].sort((a, b) => a.week - b.week);
   const flags = contextFlags(games, p.pos);
   const flagged = flags.map(isFlagged);
-  const weights = recencyWeights(flagged);
+  // Vacated-role games weigh VACATED.weight; an isolated one-game jump in the last 3 games has its recency capped
+  // (DESIGN "Fix: vacated role, spikes, depth and roster need").
+  const vacW = flags.map((f) => (f.vacated ? VACATED.weight : 1));
+  const shape = usageShape(
+    games.map((g) => score(ctx.scoring, g.expected, p.pos)),
+    vacW,
+  );
+  const capped = new Set(shape.spikeIdx);
+  const fullWeights = recencyWeights(flagged, { capped, cap: SPIKE.maxRecency });
+  const weights = fullWeights.map((w, i) => w * vacW[i]);
+  shape.spikeIdx.forEach((i) => (flags[i] = { ...flags[i], spike: true }));
   const weeks: WeekSignal[] = games.map((g, i) => ({
     week: g.week,
     gameId: g.gameId,
@@ -53,6 +65,10 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
     weight: w.weight,
     sample: w.flagged ? FLAGGED_WEIGHT : 1,
   }));
+  const vacIdx = games.map((g, i) => (g.vacated?.length ? i : -1)).filter((i) => i >= 0);
+  const by = new Map<string, { id: string; name: string; pos: string }>();
+  for (const i of vacIdx) for (const t of games[i].vacated!) by.set(t.id, t);
+  const fullExp = vacIdx.length ? weightedRate(weeks.map((w) => w.expPts), fullWeights) : null;
   return {
     id: p.id,
     name: p.name,
@@ -69,14 +85,26 @@ export function computePlayerSignals(p: PlayerSignalInput, ctx: SignalContext): 
     rosterStatus: p.roster?.status,
     ...(p.roster?.statusCode ? { rosterCode: p.roster.statusCode } : {}),
     status: [...p.status].sort((a, b) => a.week - b.week),
+    ...(fullExp !== null ? { vacated: { weeks: vacIdx.map((i) => games[i].week), by: [...by.values()], fullExpPts: fullExp } } : {}),
+    ...(shape.spike ? { spike: true } : {}),
   };
+}
+
+/** Inputs with each game's `vacated` teammates stamped (vacated.ts, one definition for signals and breakouts). */
+export function stampVacated(inputs: PlayerSignalInput[]): PlayerSignalInput[] {
+  const vac = vacatedGames(inputs);
+  return inputs.map((p) => {
+    const m = vac.get(p.id);
+    if (!m) return p;
+    return { ...p, games: p.games.map((g) => (m.has(g.week) && m.get(g.week)!.length && g.team ? { ...g, vacated: m.get(g.week) } : g)) };
+  });
 }
 
 /** Batch over every skill player in the inputs; the trend's flex levels come from the batch itself (two passes). */
 export function computeAllSignals(inputs: Iterable<PlayerSignalInput>, ctx: SignalContext): Map<string, PlayerSignals> {
   const out = new Map<string, PlayerSignals>();
   const { flexLevels: _ignored, ...base } = ctx;
-  for (const p of inputs) out.set(p.id, computePlayerSignals(p, base));
+  for (const p of stampVacated([...inputs])) out.set(p.id, computePlayerSignals(p, base));
   const levels = flexLevels(
     [...out.values()].map((s) => {
       const m = metricOf(s.pos);

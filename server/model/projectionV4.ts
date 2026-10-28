@@ -20,6 +20,8 @@ import type { PlayerSignalInput, PlayerSignals, SkillPos } from "./signals/types
 import { luckLabel, luckText } from "./labels.js";
 import { RETURNS, estimateReturn, returnText, type Absence, type ReturnEstimate } from "./returns.js";
 import { FLEX_RANK } from "./signals/trend.js";
+import { SPIKE, VACATED } from "./signals/vacated.js";
+import { HALF_LIFE_GAMES } from "./signals/recency.js";
 import { positionTdBaselines, regressTds, tdPointsOf, type TdShrink } from "./tdRegression.js";
 
 
@@ -207,6 +209,8 @@ interface WeekProj {
   matchup: number;
   avail: number;
   pts: number;
+  /** Borrowed-role factor this week (vacated.ts; absent = 1). */
+  role?: number;
 }
 
 interface Base {
@@ -260,6 +264,8 @@ interface Proj extends Base {
   seasonPts: number;
   playoffPts: number;
   avgMatchup: number;
+  /** Borrowed role (vacated.ts): factor, who he replaced, their return week (null = unknown), weeks it applies. */
+  roleF?: { factor: number; by: string[]; until: number | null; weeks: number };
 }
 
 export interface Valuation {
@@ -357,7 +363,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     }
     // A backup-turned-starter: last season's smaller role must not outweigh his new one. Usage = expected points after
     // the TD regression (a one-off goal-line spike is not a new role); not on the actual-points fallback.
-    const roleUp = priorRate !== null && !missingExp && expRate !== null && isRoleUp(expRate - (td?.ptsDelta ?? 0), t!.priorExpPpg!, (sig?.weeks ?? []).filter((w) => !w.flagged).map((w) => w.expPts));
+    const roleUp = priorRate !== null && !missingExp && expRate !== null && isRoleUp(expRate - (td?.ptsDelta ?? 0), t!.priorExpPpg!, (sig?.weeks ?? []).filter((w) => !w.flagged && !w.flags.vacated).map((w) => w.expPts));
     // Never more pseudo-games than the prior season actually had (a 4-game 2025 counts as ≤ 4 games).
     const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames, roleUp), t!.priorGames) : 0;
     let model: number | null = null;
@@ -391,6 +397,63 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     for (const p of all) if (p.pos === pos) m = Math.max(m, p.ecrPos ?? derivedRank.get(p.id) ?? 0);
     maxRank[pos] = m;
   }
+
+  // Availability: kind, schedule, games missed and the return estimate (memoized: a teammate's return week decides
+  // when a borrowed role ends, DESIGN "Fix: vacated role, spikes, depth and roster need").
+  const availMemo = new Map<Base, ReturnType<typeof availCompute>>();
+  const availCompute = (b: Base) => {
+    const p = b.p;
+    const { kind, absence } = availKind(p, b.sig);
+    const sched = tables.schedule.size ? tables.schedule.get(p.team) : undefined;
+    // His team's remaining game weeks and the games he has missed since his last game.
+    const gameWeeks: number[] = [];
+    for (let w = S.currentWeek; w <= S.finalWeek; w++) if (sched ? sched.has(w) : p.bye !== w) gameWeeks.push(w);
+    let gamesMissed: number | null = null;
+    if (p.team !== "FA" && !b.kdef) {
+      const played = tables.playedWeeks?.get(p.team) ?? Array.from({ length: Math.max(0, S.currentWeek - 1) }, (_, i) => i + 1).filter((w) => w !== p.bye);
+      const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
+      const last = own.length ? Math.max(...own) : 0;
+      gamesMissed = played.filter((w) => w > last && w < S.currentWeek).length;
+    }
+    let est: ReturnEstimate | undefined;
+    if (kind === "absent" && absence) {
+      const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
+      est = estimateReturn({
+        absence,
+        rosterStatus: b.sig?.rosterStatus,
+        rosterCode: b.sig?.rosterCode,
+        onIr: onIr(p, b.sig),
+        ...(absence === "reserve" && leagueOnlyIr(p, b.sig) ? { leagueOnly: true } : {}),
+        status: b.sig?.status ?? [],
+        currentWeek: S.currentWeek,
+        gameWeeks,
+        gamesMissed,
+        ...(own.length ? { lastGameWeek: Math.max(...own) } : {}),
+        ...(/^(O|OUT)$/.test(p.injury?.status.trim().toUpperCase() ?? "") ? { tagOut: true } : {}),
+      });
+    }
+    return { kind, absence, sched, gameWeeks, gamesMissed, est };
+  };
+  const availInfo = (b: Base) => {
+    if (!availMemo.has(b)) availMemo.set(b, availCompute(b));
+    return availMemo.get(b)!;
+  };
+  /** Borrowed role: × (full rate ÷ settled rate) in the weeks the teammate(s) he replaced stay out; 1 otherwise. */
+  const vacatedFactor = (b: Base): { factor: number; outAt: (w: number) => boolean; by: string[]; until: number | null } | null => {
+    const v = b.sig?.vacated;
+    const settled = b.sig?.rates.expPts ?? null;
+    if (!v || !settled || settled <= 0 || b.missingExp) return null;
+    const factor = Math.min(VACATED.maxFactor, Math.max(1, v.fullExpPts / settled));
+    const mates = v.by.map((t) => baseById.get(t.id)).filter((t): t is Base => !!t);
+    if (factor <= 1.0001 || !mates.length) return null;
+    const info = mates.map((t) => ({ name: t.p.name, a: availInfo(t) }));
+    const outAt = (w: number) =>
+      info.some(({ a }) => a.kind === "noTeam" || (a.kind === "absent" && (a.est?.returnWeek == null || w < a.est.returnWeek)));
+    const out = info.filter(({ a }) => a.kind === "noTeam" || a.kind === "absent");
+    const back = out.map(({ a }) => (a.kind === "absent" ? (a.est?.returnWeek ?? null) : null));
+    const until = out.length && back.every((x) => x !== null) ? Math.max(...(back as number[])) : null;
+    return { factor, outAt, by: (out.length ? out : info).map((x) => x.name), until };
+  };
 
   // --- pass 2: rate, weekly points
   const project = (b: Base): Proj => {
@@ -431,17 +494,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       }
     }
     rate = Math.max(0, Number.isFinite(rate) ? rate : 0);
-    const sched = tables.schedule.size ? tables.schedule.get(p.team) : undefined;
-    // His team's remaining game weeks and the games he has missed since his last game.
-    const gameWeeks: number[] = [];
-    for (let w = S.currentWeek; w <= S.finalWeek; w++) if (sched ? sched.has(w) : p.bye !== w) gameWeeks.push(w);
-    let gamesMissed: number | null = null;
-    if (p.team !== "FA" && !b.kdef) {
-      const played = tables.playedWeeks?.get(p.team) ?? Array.from({ length: Math.max(0, S.currentWeek - 1) }, (_, i) => i + 1).filter((w) => w !== p.bye);
-      const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
-      const last = own.length ? Math.max(...own) : 0;
-      gamesMissed = played.filter((w) => w > last && w < S.currentWeek).length;
-    }
+    const { sched, gamesMissed, est } = availInfo(b);
     // Healthy-role rate = THE projection rate (one definition), so My Team hold, Stash watch, Values and lineups show
     // one number for the same player and return week. Known only with a sample (else unknown: no stash candidate on
     // an expert rank alone).
@@ -449,23 +502,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     let healthySource: "season" | "prior" | undefined;
     if (!b.kdef && b.unflagged >= 2 && b.model !== null) [healthyRate, healthySource] = [rate, "season"];
     else if (!b.kdef && b.sig?.talent.priorExpPpg != null && b.sig.talent.priorGames >= V4.priorMinGames) [healthyRate, healthySource] = [rate, "prior"];
-    let est: ReturnEstimate | undefined;
-    if (kind === "absent" && absence) {
-      const own = b.sig ? b.sig.weeks.map((w) => w.week) : p.weeks.map((w) => w.week);
-      est = estimateReturn({
-        absence,
-        rosterStatus: b.sig?.rosterStatus,
-        rosterCode: b.sig?.rosterCode,
-        onIr: onIr(p, b.sig),
-        ...(absence === "reserve" && leagueOnlyIr(p, b.sig) ? { leagueOnly: true } : {}),
-        status: b.sig?.status ?? [],
-        currentWeek: S.currentWeek,
-        gameWeeks,
-        gamesMissed,
-        ...(own.length ? { lastGameWeek: Math.max(...own) } : {}),
-        ...(/^(O|OUT)$/.test(p.injury?.status.trim().toUpperCase() ?? "") ? { tagOut: true } : {}),
-      });
-    }
+    // A borrowed role (vacated.ts): the full rate while the teammate he replaced stays out, the settled rate after.
+    const roleF = b.kdef ? null : vacatedFactor(b);
     const ramp = absence !== "out";
     const weeks: WeekProj[] = [];
     let gameIdx = 0;
@@ -495,11 +533,14 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       } else if (next && kind === "doubtful") avail = V4.doubtful;
       else if (next && kind === "questionable") avail = V4.questionable;
       gameIdx++;
-      weeks.push({ week: w, game, matchup, avail, pts: rate * matchup * avail });
+      const role = roleF && roleF.outAt(w) ? roleF.factor : 1;
+      weeks.push({ week: w, game, matchup, avail, pts: rate * role * matchup * avail, ...(role !== 1 ? { role } : {}) });
     }
     const played = weeks.filter((x) => x.game);
     const gamesLeft = played.length;
     const avgMatchup = gamesLeft ? mean(played.map((x) => x.matchup)) : 1;
+    // Per-game rate over his remaining games, the borrowed-role weeks included (= rate × avgMatchup without one).
+    const avgRole = gamesLeft ? mean(played.map((x) => x.matchup * (x.role ?? 1))) : 1;
     const total = played.reduce((a, x) => a + x.pts, 0);
     return {
       ...b,
@@ -518,7 +559,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       weeks,
       gamesLeft,
       remainingGames: played.reduce((a, x) => a + x.avail, 0),
-      ppg: rate * avgMatchup,
+      ppg: rate * avgRole,
+      ...(roleF ? { roleF: { factor: roleF.factor, by: roleF.by, until: roleF.until, weeks: played.filter((x) => x.role).length } } : {}),
       effPpg: gamesLeft ? total / gamesLeft : 0,
       seasonPts: weeks.filter((x) => x.week < playoffStart).reduce((a, x) => a + x.pts, 0),
       playoffPts: weeks.filter((x) => x.week >= playoffStart).reduce((a, x) => a + x.pts, 0),
@@ -748,6 +790,14 @@ function explainItems(
       add("Touchdowns", `${x.td.raw.toFixed(2)} expected/g regressed to ${x.td.regressed.toFixed(2)} (${x.td.source === "prior" ? "last season" : `${p.pos} average`} ${x.td.base.toFixed(2)})`);
     if (x.effRaw !== null) add("Finishing", `×${x.eff.toFixed(2)} (actual ÷ expected ${x.effRaw.toFixed(2)}, pulled toward 1)`);
     if (x.flagged > 0) add("Odd games", `${x.flagged} count 25%: backup QB, left early or blowout`);
+    const vac = x.sig?.vacated;
+    if (vac) {
+      const who = vac.by.map((t) => t.name).join(", ");
+      add("Borrowed role", `usage rose while ${who} ${vac.by.length > 1 ? "were" : "was"} out (wk ${vac.weeks.join(", ")}): counts ${pct(VACATED.weight)}`, "warn");
+      if (x.roleF?.weeks) add("While he is out", `×${x.roleF.factor.toFixed(2)} for ${x.roleF.weeks} games${x.roleF.until !== null ? ` (${x.roleF.by.join(", ")} back wk ${x.roleF.until})` : " (return unknown)"}`, "warn");
+    }
+    const sp = x.sig?.weeks.filter((w) => w.flags.spike).map((w) => w.week) ?? [];
+    if (sp.length) add("One-game jump", `wk ${sp.join(", ")} counts like a game ${Math.round(Math.log2(1 / SPIKE.maxRecency) * HALF_LIFE_GAMES)} weeks old`, "warn");
     if (x.priorRate !== null) {
       const w = Number.isInteger(x.priorW) ? x.priorW : x.priorW.toFixed(1);
       const grew = x.roleUp && x.expRate !== null ? ` (role grew: ${f1(x.expRate - (x.td?.ptsDelta ?? 0))} vs ${f1(x.sig!.talent.priorExpPpg!)} expected/g)` : "";

@@ -33,6 +33,8 @@ export interface PlayerGame {
   starterQbId?: string;
   /** gsis ids of the team's usual starting QBs this season (context.ts usualStarters); a game by any of them is not qbOut. */
   usualQbIds?: string[];
+  /** Teammates whose role he borrowed this game (vacated.ts vacatedGames; stamped by computeAllSignals). */
+  vacated?: { id: string; name: string; pos: string }[];
 }
 
 /** Injury report / practice participation for one week. */
@@ -86,6 +88,11 @@ export interface GameFlags {
   qbOut: boolean;
   leftEarly: boolean;
   blowout: boolean;
+  /** Usage jumped while a teammate with more prior usage at a competing position was out (not part of isFlagged:
+   *  weighs VACATED.weight in the rates, still a real game in the sample and the trend). */
+  vacated?: boolean;
+  /** An isolated one-game jump in the last 3 games: recency weight capped at SPIKE.maxRecency. */
+  spike?: boolean;
 }
 
 export interface WeekOpportunity {
@@ -193,4 +200,9 @@ export interface PlayerSignals {
   /** Roster transaction code (RosterInfo.statusCode), e.g. R48 = designated to return. */
   rosterCode?: string;
   status: StatusWeek[];
+  /** Vacated-role games (weeks, who was out) and the recency-weighted expected pts/game with those games at full
+   *  weight (`rates.expPts` counts them at VACATED.weight): the projection uses the full rate while they stay out. */
+  vacated?: { weeks: number[]; by: { id: string; name: string; pos: string }[]; fullExpPts: number };
+  /** The latest usage jump is in only one of the last 3 games (usageShape): a spike, not a trend. */
+  spike?: boolean;
 }
