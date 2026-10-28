@@ -52,7 +52,7 @@ SHIPPED 2026-10-27 (live 5db1266): one playoff engine (floor factor out of seaso
    sample; the 3-for-1 case is blocked by the true-value bar, not the mode gate (pieces only Questionable on this
    snapshot); evaluate's "Now" bullet still says "pts this week" for the availability-weighted rate.
    VACATED ROLE / SPIKES / DEPTH / ROSTER NEED (2026-10-28, DESIGN "Fix: vacated role, spikes, depth and roster need"):
-   BUILT, not deployed (828a40d projection side, 9e146b8 waivers/breakouts, f3f7fb2 fix round). Risk HIGH (core valuation + claim calls):
+   SHIPPED 2026-10-28 (live b2db9bd; advisor pass done, adversarial cases green; the 2-for-1 "buy a one-spike RB" acceptance trade is in no list). Was: BUILT (828a40d projection side, 9e146b8 waivers/breakouts, f3f7fb2 fix round). Risk HIGH (core valuation + claim calls):
    needs an adversarial tester + advisor pass before deploy. On a data copy: the 3 bad week-8 claims (TE3 one-game
    jump, WR4 fill-in on a bottom-3 offense, TE2 behind a healthy TE1) are no longer claims; a TE stash at a position
    with 2 TE starters + a TE cover is "Trade chip only"; an RB's one 3-TD spike game value 12.8 → 5.5 (spike cap, not the
@@ -71,14 +71,15 @@ SHIPPED 2026-10-27 (live 5db1266): one playoff engine (floor factor out of seaso
    the 4 games before the spike game. Data copy vs round 1: starting QBs, top RBs/WRs and acceptance players unchanged
    in ppg; the lead RB stays 13.55 by the CLIMB rule (exp pts 7.7 → 9.7 → 25.9; snaps 53/48/76/75%: he was never
    "settled"), not the settled rule; 7 part-time players moved −0.01 to −0.54 ppg; waivers 0 claims / 0 stashes
-   unchanged; trades2 lists unchanged (Now 0/0/5, Balanced 2/2/4, Playoffs 2/2/4). Next: tester re-run + advisor
-   pass, then deploy. Residual: early in a season (< 2 known games before the jump) a settled starter's big game is
+   unchanged; trades2 lists unchanged (Now 0/0/5, Balanced 2/2/4, Playoffs 2/2/4). Residual: early in a season (< 2 known games before the jump) a settled starter's big game is
    capped. Residuals: breakouts' borrowed-role check has no prior
    opportunities (one-game teammate = unknown there); a starter whose prior-season role beat the teammate's can still
    read "borrowed" when his own baseline is one game. Still open:
    "buy the high" acceptance (partner sees a sell-high: perception ×0.7 only) — backlog. Unverified: 390 px layout of
    the weak-position line; "riser" (trend.ts) still counts borrowed-role games; calibration of ROLE_ENV.minShare / VACATED / SPIKE constants beyond one league-week.
 NEXT (backlog, highest value first):
+- Season-ending injuries: a lead RB out for the year (on IR as R01, not in the import) shows in Stash watch as
+  "return unconfirmed"; no loaded source marks season-ending. Options: nflverse R48 vs R01 rule, or Yahoo player notes.
 - DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
   they get +16% (why they'd accept)"; pitch text must not say "you win on value" ambiguously; name the projection
