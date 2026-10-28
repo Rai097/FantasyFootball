@@ -1311,3 +1311,39 @@ big game valued as a breakout).
   chart is one snapshot, so "moved up" means injured players ahead, not a change between snapshots. An RB whose lead
   back was out but who had the larger prior role himself is not a borrowed role by definition (spike rule + TD
   regression apply).
+
+### Fix round 1 (2026-10-28) — overrides the section above where they differ
+
+Adversarial review found the borrowed-role discount and the spike cap hitting settled starters and players who took
+over a role for good. Decisions (coordinator):
+
+* **The inherited role is his** unless the teammate comes back inside the projection window. The discount applies only
+  while EVERY teammate he filled in for plays again or has a known return week (`returns.ts`, always ≤ the final week).
+  Out for the season, no return week, or gone from the team → projection v4 uses his signals without detection
+  (`PlayerSignals.vacated.own`): no 40% weight, the role-change exemption (`isRoleUp`) sees those games. Why-lines
+  "Borrowed role: … counts in full" and "While he is out: the role is his: X has no return week this season (return
+  unknown)". Role check: those weeks stay in his share; the detail reads "…: no return week, the role is his"; no
+  "borrowed role" tag.
+* **A bigger role needs evidence** (`vacatedGames`): the teammate's usage comes from ≥ `VACATED.mateMinGames` (2) of
+  his games for the team before that week, else last season's per-game opportunities with ≥ 4 games
+  (`VacPlayer.prior`, signals path only: the player DB has no prior opportunities, so breakouts treat a one-game
+  teammate as unknown). A one-game sample is unknown → no flag. Only games for his CURRENT team count. A player who
+  missed his team's game right before the stretch is back from his own absence → not borrowed.
+* **One spike definition** (`usageShape`, called by signals AND `roleCheck`, enforced by a test that feeds the same
+  series to both): elevated = ≥ max(1.25 × base, base + 1.5, 0.5 × the best EARLIER game of the window) — a bigger
+  latest game never makes an earlier one look less elevated; a higher game followed by a game below the base did not
+  hold (unless he left that game early, < 15% snaps); a climb (both steps of the last 3 up ≥ `SPIKE.climbStep` 1 pt,
+  latest elevated, no discounted borrowed game) is sustained. The trend.ts opportunity exemption in signals is gone
+  (it could not run in the role check).
+* **Settled roles never spike**: QBs, and mean snap share ≥ `SPIKE.settledSnap` (65%) over the last 4 games with a
+  known share (≥ 2; games under 15% snaps = left early, ignored). A spike that is also a borrowed game takes the
+  stronger single discount (`recencyWeights`: min(cap, recency × 0.4)), never the product.
+* **Riser's share**: when his usage is sustained, the share with the starters healthy uses his last
+  `ROLE_ENV.riserShareGames` (2) games; `RoleCheck.shareGames` says which (detail "last 2 games").
+* **Cover must be available**: a bench player Out / Doubtful / IR / PUP / suspended or due back after this week is not
+  cover. **A better cover is not a pickup**: at a position where my starters and an available cover are rostered, a
+  free agent is offered only if he would start over one of my starters there (lineup gain, or ppg above my weakest
+  starter at that position incl. FLEX); else pass "Trade chip only: you start 2 TEs and X covers; he would not start
+  (11.4 vs your FLEX1 14.6 ppg)." The "Better TE cover than X" call above is removed.
+* **Weak-position line**: one measure for both sides — Yahoo's week projection when every starter there and a free
+  agent have one, else pts/game — and the weakest starter is picked on that same measure.

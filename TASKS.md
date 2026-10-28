@@ -58,7 +58,18 @@ SHIPPED 2026-10-27 (live 5db1266): one playoff engine (floor factor out of seaso
    with 2 TE starters + a TE cover is "Trade chip only"; an RB's one 3-TD spike game value 12.8 → 5.5 (spike cap, not the
    borrowed-role rule: he was the lead back); acceptance players otherwise within ±0.2 ppg. Waivers on the owner's
    roster: 3 claims + 15 stashes → 0 claims, 0 stashes, 1 optional (roster need makes most adds "trade chip only").
-   Open choice for the owner: a bench add that projects above my cover (TE 11.4 vs 9.8) stays optional. Still open:
+   Owner's choice resolved (coordinator): a bench add that projects above my cover but would not start is "Trade chip only".
+   Adversarial tests 216ed17 (9 failing) → FIX ROUND 1 BUILT, not deployed (DESIGN "Fix round 1 (2026-10-28)"): the
+   inherited role is his unless the teammate is due back in the window; ≥ 2-game teammate sample (or last season);
+   one spike definition for projection + role check (climb = trend; QBs / ≥ 65%-snap roles never spike; no double
+   discount); riser's share over his last 2 games; cover must be available; gap line on one measure. Data copy vs
+   4906de5: the backup-turned-starter RB 11.83 ppg (= pre-release), a veteran RB 12.08 (pre 12.10), starting
+   QBs and the top RB unchanged in ppg; the lead RB's one-game cap is gone (settled role: 13.55 = pre-release; the TD
+   regression is what remains); acceptance players within ±0.05 ppg of pre-release; waivers 0 claims / 0 stashes, TE
+   bench add now "Trade chip only"; trades2 counts (main/smaller/near) Now 0/0/5, Balanced 2/2/4, Playoffs 2/2/4,
+   0.16–0.20 s. Next: tester re-run + advisor pass, then deploy. Residuals: breakouts' borrowed-role check has no prior
+   opportunities (one-game teammate = unknown there); a starter whose prior-season role beat the teammate's can still
+   read "borrowed" when his own baseline is one game. Still open:
    "buy the high" acceptance (partner sees a sell-high: perception ×0.7 only) — backlog. Unverified: 390 px layout of
    the weak-position line; "riser" (trend.ts) still counts borrowed-role games; calibration of ROLE_ENV.minShare / VACATED / SPIKE constants beyond one league-week.
 NEXT (backlog, highest value first):
