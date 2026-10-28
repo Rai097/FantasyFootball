@@ -52,12 +52,15 @@ SHIPPED 2026-10-27 (live 5db1266): one playoff engine (floor factor out of seaso
    sample; the 3-for-1 case is blocked by the true-value bar, not the mode gate (pieces only Questionable on this
    snapshot); evaluate's "Now" bullet still says "pts this week" for the availability-weighted rate.
    VACATED ROLE / SPIKES / DEPTH / ROSTER NEED (2026-10-28, DESIGN "Fix: vacated role, spikes, depth and roster need"):
-   BUILT, not deployed (828a40d projection side, 9e146b8 waivers/breakouts). Risk HIGH (core valuation + claim calls):
+   BUILT, not deployed (828a40d projection side, 9e146b8 waivers/breakouts, f3f7fb2 fix round). Risk HIGH (core valuation + claim calls):
    needs an adversarial tester + advisor pass before deploy. On a data copy: the 3 bad week-8 claims (TE3 one-game
    jump, WR4 fill-in on a bottom-3 offense, TE2 behind a healthy TE1) are no longer claims; a TE stash at a position
-   with 2 TE starters + a TE cover is "Trade chip only"; an RB's one 3-TD spike game value 12.8 → 5.4. Still open:
+   with 2 TE starters + a TE cover is "Trade chip only"; an RB's one 3-TD spike game value 12.8 → 5.5 (spike cap, not the
+   borrowed-role rule: he was the lead back); acceptance players otherwise within ±0.2 ppg. Waivers on the owner's
+   roster: 3 claims + 15 stashes → 0 claims, 0 stashes, 1 optional (roster need makes most adds "trade chip only").
+   Open choice for the owner: a bench add that projects above my cover (TE 11.4 vs 9.8) stays optional. Still open:
    "buy the high" acceptance (partner sees a sell-high: perception ×0.7 only) — backlog. Unverified: 390 px layout of
-   the weak-position line; calibration of ROLE_ENV.minShare / VACATED / SPIKE constants beyond one league-week.
+   the weak-position line; "riser" (trend.ts) still counts borrowed-role games; calibration of ROLE_ENV.minShare / VACATED / SPIKE constants beyond one league-week.
 NEXT (backlog, highest value first):
 - DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
