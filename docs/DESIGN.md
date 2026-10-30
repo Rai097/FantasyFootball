@@ -1545,3 +1545,10 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
 - Needs the owner (or a member) to import before kickoff every week; no backfill (history files hold no projections).
 - Screenshot `docs/screenshots/league-accuracy-500.jpg`: anonymized scratch copy with SYNTHETIC weeks 5–7 (week-8
   projections replayed against real actuals): layout only, not a real accuracy result.
+
+* **Fix round (owner, 2026-10-30): a weak game inside the run counts against him.** The trust count is now net games:
+  from his first game at the role-change bar, games at the bar minus games below it (never below 0), on USAGE
+  (expected points) — so a low-scoring game with big usage still counts for him, a low-usage game counts against.
+  Table `V4.roleTrust` = { 1: 0.25, 2: 0.5, 3: 0.8 }, ≥ 4 → 1.0 (calibration values). A role vacated for the season
+  still gets full trust. On the owner's league today no player moves (no dud inside a current role run).
+

@@ -84,10 +84,16 @@ export function roleUpBar(priorExpPpg: number): number {
 export function roleRunGames(priorExpPpg: number, recentExp: readonly number[]): number {
   if (!(priorExpPpg > 0)) return 0;
   const bar = roleUpBar(priorExpPpg);
-  return recentExp.filter((x) => x >= bar).length;
+  // The run starts at his first game at the bar. Inside it, a game below the bar (by usage, so a low-scoring game with
+  // big usage still counts for him) counts against him: net games = above − below, never below 0 (owner, 2026-10-30).
+  const start = recentExp.findIndex((x) => x >= bar);
+  if (start < 0) return 0;
+  const run = recentExp.slice(start);
+  const above = run.filter((x) => x >= bar).length;
+  return Math.max(0, above - (run.length - above));
 }
 
-/** Trust in a new role after n games in it: V4.roleTrust, 1.0 from the table's last entry on (n < 2 is never roleUp). */
+/** Trust in a new role after n net games in it: V4.roleTrust (0 below its first entry), 1.0 past its last entry. */
 export function roleTrustOf(n: number): number {
   const keys = Object.keys(V4.roleTrust).map(Number).sort((a, b) => a - b);
   if (n < keys[0]) return 0;
@@ -116,7 +122,7 @@ export const V4 = {
   /** Trust ramp on a role change (calibration values, tuned on one league): games in the new role → share of the way
    *  the prior moves from last season's rate to his current-role rate; ≥ 4 games → 1.0. A role vacated for the season
    *  (known, lasting cause) and an established team change (≥ lateGames) get 1.0. */
-  roleTrust: { 2: 0.5, 3: 0.8 },
+  roleTrust: { 1: 0.25, 2: 0.5, 3: 0.8 },
   /** Expected TDs per opportunity regress toward a baseline with this many games × his opportunity rate (last season's
    *  actual TDs per opportunity when he played ≥ tdPriorMinGames for his current team, else the position's mean actual
    *  rate this season). */

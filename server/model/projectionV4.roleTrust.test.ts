@@ -1,6 +1,6 @@
 // DESIGN "Fix: role-change trust ramp (2026-10-30)" (projectionV4.ts makeBase, roleRunGames, roleTrustOf): on a role
 // change the prior moves from last season's rate toward his current-role rate by V4.roleTrust per games in the new
-// role (2 → 0.5, 3 → 0.8, ≥ 4 → 1.0); a role vacated for the season is trusted fully; team changes keep their gate.
+// role (net games: 1 → 0.25, 2 → 0.5, 3 → 0.8, ≥ 4 → 1.0); a role vacated for the season is trusted fully; team changes keep their gate.
 // Synthetic players only (generic ids).
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
@@ -62,14 +62,18 @@ function expected(sig: PlayerSignals, trust: number) {
 const rep = <T>(n: number, x: T): T[] => Array.from({ length: n }, () => x);
 
 describe("role-change trust ramp", () => {
-  test("pure helpers: the table, ≥ 4 → 1.0, and the run count skips below-bar games without resetting", () => {
+  test("pure helpers: the table, ≥ 4 → 1.0, and a below-bar game inside the run counts against him", () => {
     assert.equal(roleTrustOf(2), 0.5);
     assert.equal(roleTrustOf(3), 0.8);
     assert.equal(roleTrustOf(4), 1);
     assert.equal(roleTrustOf(9), 1);
-    assert.equal(roleTrustOf(1), 0);
+    assert.equal(roleTrustOf(1), 0.25);
+    assert.equal(roleTrustOf(0), 0);
     assert.equal(roleRunGames(4, [4, 4, 16, 16]), 2);
-    assert.equal(roleRunGames(4, [4, 16, 4, 16, 16]), 3, "the dud inside the run is not counted and does not reset");
+    assert.equal(roleRunGames(4, [4, 16, 4, 16, 16]), 2, "3 at the bar − 1 low-usage dud inside the run = 2 net");
+    assert.equal(roleRunGames(4, [16, 4, 4, 16, 16]), 1, "two duds inside the run cost two games");
+    assert.equal(roleRunGames(4, [16, 4, 4, 4, 16]), 0, "net never below 0");
+    // The bar is on usage (expected points): a game with big usage and few points is at the bar and counts for him.
     assert.equal(roleRunGames(4, [7, 7]), 2, "exactly at the bar counts");
     assert.equal(roleRunGames(0, [16, 16]), 0);
   });
@@ -98,11 +102,11 @@ describe("role-change trust ramp", () => {
     assert.ok((e2.used - e2.prior) / (e2.cur - e2.prior) < (e3.used - e3.prior) / (e3.cur - e3.prior));
   });
 
-  test("a below-bar game inside the run is not counted and does not reset the run (3 games → 80%)", () => {
+  test("a low-usage game inside the run counts against him (3 at the bar − 1 dud = 2 → 50%)", () => {
     const { players, sigs } = run([input("dud", [BACKUP, BACKUP, STARTER, BACKUP, STARTER, STARTER], PRIOR)]);
     const v = players.get("dud")!;
-    assert.match(item(v, "2025 at new role") ?? "", /80% toward this year's role \(3 games in it\)$/, dump(v));
-    const e = expected(sigs.get("dud")!, 0.8);
+    assert.match(item(v, "2025 at new role") ?? "", /50% toward this year's role \(2 games in it\)$/, dump(v));
+    const e = expected(sigs.get("dud")!, 0.5);
     assert.ok(Math.abs(num(v, "Our model") - e.model) <= 0.05, `model ${item(v, "Our model")} vs ${e.model.toFixed(2)}`);
   });
 
