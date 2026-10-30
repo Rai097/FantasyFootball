@@ -38,6 +38,7 @@ import type { MarketValue } from "../data/fantasycalc.js";
 const G = { remainingGames: 14 };
 const REPL = { QB: 15, RB: 8, WR: 8, TE: 6, K: 7, DEF: 6 };
 const S = league([]).settings;
+const r1 = (x: number) => Math.round(x * 10) / 10;
 
 // ---------------------------------------------------------------- package math
 
@@ -138,7 +139,7 @@ test("injured pieces: out for the season is never a piece, whatever the market s
   assert.equal(ineligibleReason(vp("so2", "WR", 12, 10, { ...G, market: 30, injury: { status: "IR", detail: "Knee - out for season", week: 4 } }), S), "out for the season");
 });
 
-test("QB rule: only a spare top-14 QB, only to a team whose best QB ranks worse than 18", () => {
+test("QB rule: only a spare QB (top two both project top-14), only to a team that needs one", () => {
   const qb = (id: string, rank: number, ppg: number) => vp(id, "QB", ppg, 10, { ...G, posRank: rank });
   const two = [qb("a", 5, 22), qb("b", 12, 18)];
   const needy = [qb("x", 22, 14)];
@@ -151,9 +152,42 @@ test("QB rule: only a spare top-14 QB, only to a team whose best QB ranks worse 
   assert.equal(qbTradeable(two, fine), null, "partner already has a top-18 QB");
   assert.equal(qbTradeable(needy, two), null);
   assert.equal(bestQbRank([]), 99);
-  // Market position rank wins when market values exist.
+  // The giver's depth uses OUR projection rank, not the market (fix 2026-10-30).
   const m = [vp("m1", "QB", 22, 10, { ...G, posRank: 3, market: 20, marketPosRank: 4 }), vp("m2", "QB", 18, 5, { ...G, posRank: 9, market: 3, marketPosRank: 20 })];
-  assert.equal(spareQb(m), null, "second QB is QB20 by market");
+  assert.equal(spareQb(m)?.id, "m2", "market QB20 but projected QB9: a startable spare");
+  const body = [vp("n1", "QB", 22, 10, { ...G, posRank: 3, market: 20, marketPosRank: 4 }), vp("n2", "QB", 15, 5, { ...G, posRank: 16, market: 15, marketPosRank: 5 })];
+  assert.equal(spareQb(body), null, "market QB5 but projected QB16: a bench body, no spare");
+});
+
+test("QB rule (fix 2026-10-30): need = the spare projects ≥ qbUpgradeMin over the receiver's best QB, or the old market-rank rule", () => {
+  assert.equal(V3.qbUpgradeMin, 1.0);
+  const qb = (id: string, posRank: number, ppg: number, marketPosRank: number) => vp(id, "QB", ppg, 10, { ...G, posRank, market: 30 - marketPosRank, marketPosRank });
+  const giver = [qb("g1", 4, 22, 6), qb("g2", 10, 19.2, 12)];
+  // A name-brand QB (market QB2) having a weak season: projected 17.7, 1.5 below the spare.
+  const brand = [qb("r1", 15, 17.7, 2)];
+  assert.equal(bestQbRank(brand), 2, "top-18 by name: the old rule alone would block");
+  assert.equal(qbTradeable(giver, brand)?.id, "g2", "+1.5 pts/g by our projections: allowed");
+  const it = qbItems(
+    { roster: giver } as Parameters<typeof qbItems>[0], { roster: brand } as Parameters<typeof qbItems>[1], [giver[1]], [])!;
+  assert.equal(it[0].value, "g2 allowed: +1.5 pts/g over their QB (QB10 vs QB15, our projections)");
+  assert.equal(it[0].tone, undefined);
+  // Under the bar (+0.6): not allowed, with the reason.
+  const close = [qb("r2", 12, 18.6, 2)];
+  assert.equal(qbTradeable(giver, close), null);
+  const no = qbItems({ roster: giver } as Parameters<typeof qbItems>[0], { roster: close } as Parameters<typeof qbItems>[1], [giver[1]], [])!;
+  assert.equal(no[0].value, "g2 NOT allowed: only +0.6 pts/g over their QB (QB10 vs QB12, our projections)");
+  assert.equal(no[0].tone, "warn");
+  // Exactly at the bar counts.
+  assert.equal(qbTradeable(giver, [qb("r3", 12, 18.2, 2)])?.id, "g2");
+  // Old rule still allows: best QB outside the market top 18, even when he projects close to the spare.
+  const lowName = [qb("r4", 11, 18.8, 25)];
+  assert.equal(qbTradeable(giver, lowName)?.id, "g2");
+  assert.match(qbItems({ roster: giver } as Parameters<typeof qbItems>[0], { roster: lowName } as Parameters<typeof qbItems>[1], [giver[1]], [])![0].value, /^g2 allowed: their best QB is QB25 by market$/);
+  // A giver whose backup projects outside qbDepthRank has no spare, however needy the receiver.
+  const thin = [qb("t1", 4, 22, 6), qb("t2", V3.qbDepthRank + 1, 16, 3)];
+  assert.equal(qbTradeable(thin, [qb("r5", 30, 9, 40)]), null);
+  assert.match(qbItems({ roster: thin } as Parameters<typeof qbItems>[0], { roster: brand } as Parameters<typeof qbItems>[1], [thin[1]], [])![0].value, /NOT allowed: not a spare/);
+  for (const d of [...it, ...no]) assert.ok(d.value.length <= 90, d.value);
 });
 
 // ---------------------------------------------------------------- judged packages
@@ -243,6 +277,64 @@ test("consolidation premium: only uneven deals pay it — an even 2-for-2 is jud
   const sellUneven = J()([P("mRB1")], [P("tWR2"), P("tWR3")]); // 1-for-2
   assert.equal(sellUneven.premiumOk, false);
   assert.match(sellUneven.myFail, /best player/);
+});
+
+test("true-value bar per mode (fix 2026-10-30): Playoffs may cost up to 3% of the deal, Balanced / Win now need +3%", () => {
+  assert.deepEqual(V3.minMyTrueGain, { now: 0.03, balanced: 0.03, playoffs: -0.03 });
+  // 1-for-1 (no drops): I give mRB2, get tWR2; true values set so my true change is a known share of the deal (100).
+  const swap = (give: number, get: number, mode: "playoffs" | "balanced" | "now") =>
+    judge3(ctx, teamV3(ctx, "me"), teamV3(ctx, "them"), mode)([{ ...P("mRB2"), trueMarket: give }], [{ ...P("tWR2"), trueMarket: get }]);
+  const minus2 = swap(51, 49, "playoffs");
+  assert.ok(Math.abs(minus2.myTrueChange + 2) < 1e-9 && Math.abs(minus2.trueGive + minus2.trueGet - 100) < 1e-9);
+  assert.ok(r1(minus2.strengthDelta) >= V3.minMyGain, `playoff strength ${minus2.strengthDelta}`);
+  assert.equal(minus2.myOk, true, minus2.myFail);
+  assert.equal(listsInMode(minus2, "playoffs"), true);
+  const minus4 = swap(52, 48, "playoffs");
+  assert.equal(minus4.myOk, false);
+  assert.equal(minus4.myFail, "you give away value: true value −4.0 (Playoffs allows down to −3.0, 3% of the deal)");
+  // Balanced and Win now still need +3%.
+  for (const mode of ["balanced", "now"] as const) {
+    assert.equal(swap(51, 49, mode).myFail, `you pay market price: true value −2.0 (${mode === "now" ? "Win now" : "Balanced"} needs +3.0, 3% of the deal)`);
+    assert.equal(swap(48.5, 51.5, mode).myOk, true, swap(48.5, 51.5, mode).myFail);
+  }
+});
+
+test("real case (generic, fix 2026-10-30): bench QB + TE for a workhorse RB + a returning RB lists in Playoffs, not Balanced", () => {
+  // Me: two startable QBs (the spare projects 19.2, QB10), two good TEs, thin at RB. Partner: a name-brand QB (market
+  // QB2) projecting 17.7 (QB16), RB depth, a weak TE. The deal costs me ~2% of its true value and adds playoff strength.
+  // Market values sit inside the finder's pre-fair window (preFairLo); the TE carries no riser flag (never sold).
+  const m = (market: number, trueMarket: number, posRank: number, marketPosRank: number) => ({ ...G, market, trueMarket, posRank, marketPosRank });
+  const a = [
+    vp("aQB", "QB", 23, 20, m(31, 22, 3, 3)), vp("aQB2", "QB", 19.2, 4.5, m(16.8, 10, 10, 8)),
+    vp("aTE", "TE", 19, 70, m(60, 80, 1, 1)), vp("aTE2", "TE", 15.8, 38, m(28, 45, 3, 5)),
+    vp("aWR1", "WR", 23, 100, m(95, 100, 1, 1)), vp("aWR2", "WR", 15, 30, m(20, 38, 13, 24)), vp("aWR3", "WR", 12, 12, m(8, 19, 30, 37)),
+    vp("aRB1", "RB", 12, 6, m(14, 10, 27, 20)), vp("aRB2", "RB", 9, 3, m(6, 5, 40, 40)), vp("aWR4", "WR", 9, 1, m(4.6, 4.6, 56, 47)),
+    vp("aK", "K", 8, 1, G), vp("aDEF", "DEF", 7, 1, G),
+  ];
+  const b = [
+    vp("bQB", "QB", 17.7, 0.3, m(31.5, 1, 16, 2)),
+    vp("bRB1", "RB", 19.2, 45, m(39, 45, 4, 14)), vp("bRB2", "RB", 10.6, 0.8, m(16, 8, 34, 26)), vp("bRB3", "RB", 17.7, 41, m(36, 41, 8, 17)),
+    vp("bWR1", "WR", 16, 30, m(30, 30, 10, 12)), vp("bWR2", "WR", 13, 15, m(15, 15, 25, 25)), vp("bWR3", "WR", 11, 8, m(9, 9, 35, 35)),
+    vp("bTE", "TE", 7, 1, m(3, 2, 20, 20)), vp("bRB4", "RB", 15, 5, m(10, 6, 20, 30)), vp("bWR4", "WR", 8, 1, m(3, 1, 60, 60)),
+    vp("bK", "K", 8, 1, G), vp("bDEF", "DEF", 7, 1, G),
+  ];
+  [...a, ...b].forEach((p, i) => (p.team = NFL[i % NFL.length]));
+  const c = ctxFor(league([team("me", a), team("them", b)]), [...a, ...b]);
+  const key = "them:aQB2,aTE2>bRB1,bRB2";
+  assert.equal(bestQbRank(b), 2, "the old market-rank rule alone would block the QB");
+  const listed = (mode: "playoffs" | "balanced") => {
+    const r = findTradesV3(c, "me", { mode, limit: 50 });
+    return [...r.trades, ...r.smallerEdges].map((t) => t.key);
+  };
+  assert.ok(listed("playoffs").includes(key), JSON.stringify(listed("playoffs")));
+  assert.ok(!listed("balanced").includes(key), "Balanced still needs +3% true value");
+  const po = evaluateTradeV3(c, "me", "them", ["aQB2", "aTE2"], ["bRB1", "bRB2"], "playoffs");
+  assert.equal(po.verdict, "Accept");
+  assert.ok((po.packages?.myTrueChange ?? 0) < 0, "costs a little true value");
+  assert.ok(po.details!.some((d) => d.label === "QB rule" && d.value === "aQB2 allowed: +1.5 pts/g over their QB (QB10 vs QB16, our projections)"), JSON.stringify(po.details));
+  const ba = evaluateTradeV3(c, "me", "them", ["aQB2", "aTE2"], ["bRB1", "bRB2"], "balanced");
+  assert.equal(ba.verdict, "Fair, lean decline");
+  assert.ok(ba.details!.some((d) => d.label === "For you" && /^you pay market price: true value −1\.7 \(Balanced needs \+3\.2, 3% of the deal\)$/.test(d.value)), JSON.stringify(ba.details));
 });
 
 test("drop cost: the side receiving more players nets the player it must cut (≥ 3)", () => {

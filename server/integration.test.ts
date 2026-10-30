@@ -332,9 +332,14 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
         .team.playerIds.map((id: string) => P[id])
         .filter((p: any) => p && p.pos === "QB" && p.remainingGames > 0 && p.ppg > 0);
     const bestRank = (teamId: string) => Math.min(99, ...qbsOf(teamId).map(rank));
+    // Fix 2026-10-30: the spare pair uses our projection rank; need = the spare projects ≥ 1.0 pts/g over the
+    // receiver's best QB, or its best QB ranks worse than 18 by market (old rule).
+    const eff = (p: any) => p.effPpg ?? p.ppg;
     const ruleOk = (qb: any, from: string, to: string) => {
-      const qbs = qbsOf(from).sort((a: any, b: any) => (b.effPpg ?? b.ppg) - (a.effPpg ?? a.ppg) || rank(a) - rank(b));
-      return qbs.length >= 2 && rank(qbs[0]) <= 14 && rank(qbs[1]) <= 14 && qbs[1].id === qb.id && bestRank(to) > 18;
+      const qbs = qbsOf(from).sort((a: any, b: any) => eff(b) - eff(a) || a.posRank - b.posRank);
+      const best = Math.max(0, ...qbsOf(to).map(eff));
+      const needed = !qbsOf(to).length || eff(qb) - best >= 1.0 - 1e-9 || bestRank(to) > 18;
+      return qbs.length >= 2 && qbs[0].posRank <= 14 && qbs[1].posRank <= 14 && qbs[1].id === qb.id && needed;
     };
     let checked = 0;
     for (const team of analysis.teams.slice(0, 3).map((t: any) => t.team.id)) {

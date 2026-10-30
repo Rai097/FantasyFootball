@@ -1552,3 +1552,29 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
   Table `V4.roleTrust` = { 1: 0.25, 2: 0.5, 3: 0.8 }, ≥ 4 → 1.0 (calibration values). A role vacated for the season
   still gets full trust. On the owner's league today no player moves (no dud inside a current role run).
 
+
+## Fix: QB upgrade rule and playoffs value gate (2026-10-30) — overrides "Trade finder v3" on the QB rule and the true-value bar
+
+* **QB need** (`tradesV3.ts` `qbNeeded` / `qbTradeable`): a team needs the incoming spare QB when he projects (our
+  effPpg, the lineup's number) ≥ `V3.qbUpgradeMin` (1.0 pts/g, calibration value) above its best usable QB, OR its
+  best QB's market position rank is worse than `qbNeedRank` (18; the old rule, kept). Before, only the market rank
+  counted, so a name-brand QB having a weak season (market QB2, projected ~QB16) blocked a real upgrade, and in a
+  12-team 1-QB league almost no QB trade listed.
+* **Spare QB** (`spareQb`): the giver's top two QBs must both PROJECT (our posRank, not the market) ≤ `qbDepthRank` (14);
+  a backup who is only a bench body is no spare even if his name ranks high.
+* **QB rule bullet** (`qbRuleText`, ≤ 90 chars): "X allowed: +1.5 pts/g over their QB (QB10 vs QB16, our projections)",
+  "X allowed: their best QB is QB25 by market", "X NOT allowed: only +0.6 pts/g over their QB (…)" or
+  "X NOT allowed: not a spare (both QBs must project top-14)". Evaluate's "Outside the rules" reason names both tests.
+* **True-value bar per mode** (`V3.minMyTrueGain`, `trueBarFail`): Playoffs −3% of the deal's total true value (a deal
+  may cost up to 3% when it clears the playoff-strength bar; value only guards against giving it away); Balanced and
+  Win now +3% (unchanged). Fail text names the mode's bar ("Playoffs allows down to −3.0" / "Balanced needs +3.2").
+* Unchanged: acceptance weights, riser ×1.15, consolidation rule, `minMyGain`, all other constants.
+* **Why**: a hand-found deal (bench QB + TE for a workhorse RB + a returning RB; playoff strength +2.2, ~70% accept)
+  was "Decline — QB rule" and "you pay market price: true value −0.5 (needs +4.0)". Now evaluate says Accept in Playoffs.
+* **Still not on the finder's lists**: that deal's market ratio is 0.66, below the pre-fair window (`preFairLo` 0.75),
+  and its TE is a riser (the finder never sells a riser). Both are separate owner decisions, unchanged here.
+* **Real-data effect** (owner league snapshot): counts unchanged in both modes (trades 2, smaller edges 4, near misses 7);
+  Playoffs: 1 new smaller edge (top TE + spare QB for two RBs; +2.1/wk playoff lineup, 66%), 4 new near misses;
+  Balanced: 1 new smaller edge (spare QB + bench TE for a TE; 92%), 4 new near misses.
+* Tests: `tradesV3.test.ts` "QB rule (fix 2026-10-30)…", "true-value bar per mode…", "real case (generic…)";
+  `integration.test.ts` QB-rule check mirrors the new rule.

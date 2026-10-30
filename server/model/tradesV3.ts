@@ -23,9 +23,15 @@ export const V3 = {
   minPieceValue: 3,
   /** Injured pieces (owner 2026-10-26): an absent player is tradeable when he has ≥ this many games left from his return. */
   minGamesBack: 3,
-  /** QB rule: a QB moves only from a team with two QBs ranked ≤ qbDepthRank to a team whose best QB ranks > qbNeedRank. */
+  /**
+   * QB rule (fix 2026-10-30): a QB moves only from a team whose top two QBs both PROJECT (our posRank) ≤ qbDepthRank,
+   * to a team that needs one: the spare QB projects ≥ qbUpgradeMin pts/g (effPpg) above its best usable QB, or its best
+   * QB's market rank is > qbNeedRank (the old rule, kept as an OR).
+   */
   qbNeedRank: 18,
   qbDepthRank: 14,
+  /** Calibration value: pts/g a spare QB must project above the receiver's best QB to count as an upgrade. */
+  qbUpgradeMin: 1.0,
   /** Package value = best + 0.85·second + 0.70·third. */
   pkgWeights: [1, 0.85, 0.7],
   /** Drop cost per player the receiving side must cut: that player's value, at least this. */
@@ -34,7 +40,9 @@ export const V3 = {
   consolidationPremium: 1.1,
   /** Need model. */
   minMyDelta: 0.5,
-  minMyTrueGain: 0.03,
+  /** My side's true-value bar, as a share of the deal's total true value (fix 2026-10-30): Playoffs mode may cost up
+   *  to 3% (the playoff-strength bar decides), Balanced / Win now must gain 3%. */
+  minMyTrueGain: { now: 0.03, balanced: 0.03, playoffs: -0.03 } as Record<TradeMode, number>,
   /** v4 acceptance, dominant term: logistic in their perceived lineup change per week, +1 pt/wk → 0.70. */
   accLineupK: Math.log(0.7 / 0.3),
   /** Market term: logistic(k · market edge %), +5% → 0.65, weighted 20% (FantasyCalc matters only a little). */
@@ -192,6 +200,16 @@ export function gamesFrom(p: ValuedPlayer, S: LeagueSettings, from: number): num
 }
 
 /** Out for the season: ReturnInfo.seasonOver, or (no return estimate) an injury kind "long" whose detail says "season". */
+/** My side's true-value fail text, naming this mode's bar (V3.minMyTrueGain). */
+export function trueBarFail(myTrueChange: number, trueTotal: number, mode: TradeMode): string {
+  const share = V3.minMyTrueGain[mode];
+  const bar = share * trueTotal;
+  const pctTxt = `${Math.round(Math.abs(share) * 100)}% of the deal`;
+  return share < 0
+    ? `you give away value: true value ${fmtSigned(myTrueChange)} (${MODE_LABEL[mode]} allows down to ${fmtSigned(bar)}, ${pctTxt})`
+    : `you pay market price: true value ${fmtSigned(myTrueChange)} (${MODE_LABEL[mode]} needs ${fmtSigned(bar)}, ${pctTxt})`;
+}
+
 export const seasonEnding = (p: ValuedPlayer): boolean =>
   !!p.ret?.seasonOver || (!p.ret && injuryKind(p.injury) === "long" && /season/i.test(p.injury?.detail ?? ""));
 
@@ -221,7 +239,7 @@ export function ineligibleReason(p: ValuedPlayer, S: LeagueSettings): string {
   return "";
 }
 
-/** QB rank for the QB rule: market position rank when market values exist (99 = outside the list). */
+/** Market QB rank for the QB rule's need-by-rank test: market position rank when market values exist (99 = outside the list). */
 export function qbRank(p: ValuedPlayer): number {
   if (p.market !== undefined) return p.marketPosRank ?? 99;
   return p.posRank;
@@ -233,19 +251,47 @@ export function bestQbRank(roster: ValuedPlayer[]): number {
   return best;
 }
 
-/**
- * A team's second QB (the one it does not start: lower projected ppg) when its top two QBs both
- * rank ≤ qbDepthRank — the only QB it may trade.
- */
-export function spareQb(roster: ValuedPlayer[]): ValuedPlayer | null {
-  const qbs = roster.filter((p) => p.pos === "QB" && usable(p)).sort((a, b) => effPpg(b) - effPpg(a) || qbRank(a) - qbRank(b));
-  return qbs.length >= 2 && qbRank(qbs[0]) <= V3.qbDepthRank && qbRank(qbs[1]) <= V3.qbDepthRank ? qbs[1] : null;
+/** A team's best usable QB by our projection (effPpg, the lineup's number), or null when it has none. */
+export function bestQb(roster: ValuedPlayer[]): ValuedPlayer | null {
+  let best: ValuedPlayer | null = null;
+  for (const p of roster) if (p.pos === "QB" && usable(p) && (!best || effPpg(p) > effPpg(best))) best = p;
+  return best;
 }
 
-/** QB rule: `from` may send its spare QB to `to` only when `to`'s best QB ranks worse than qbNeedRank. */
+/**
+ * A team's second QB (the one it does not start: lower projected ppg) when its top two QBs both project
+ * (our posRank, not the market) ≤ qbDepthRank — the only QB it may trade. A backup who is merely a bench body is no spare.
+ */
+export function spareQb(roster: ValuedPlayer[]): ValuedPlayer | null {
+  const qbs = roster.filter((p) => p.pos === "QB" && usable(p)).sort((a, b) => effPpg(b) - effPpg(a) || a.posRank - b.posRank);
+  return qbs.length >= 2 && qbs[0].posRank <= V3.qbDepthRank && qbs[1].posRank <= V3.qbDepthRank ? qbs[1] : null;
+}
+
+/**
+ * Does `to` need this QB? Yes when he projects ≥ qbUpgradeMin pts/g above its best usable QB (our projections), or
+ * its best QB's market rank is worse than qbNeedRank (old rule). A name-brand QB having a weak season blocks nothing.
+ */
+export function qbNeeded(qb: ValuedPlayer, toRoster: ValuedPlayer[]): boolean {
+  const best = bestQb(toRoster);
+  return !best || effPpg(qb) - effPpg(best) >= V3.qbUpgradeMin - 1e-9 || bestQbRank(toRoster) > V3.qbNeedRank;
+}
+
+/** QB rule: `from` may send its spare QB (spareQb) to `to` only when `to` needs it (qbNeeded). */
 export function qbTradeable(fromRoster: ValuedPlayer[], toRoster: ValuedPlayer[]): ValuedPlayer | null {
-  if (bestQbRank(toRoster) <= V3.qbNeedRank) return null;
-  return spareQb(fromRoster);
+  const spare = spareQb(fromRoster);
+  return spare && qbNeeded(spare, toRoster) ? spare : null;
+}
+
+/** One "QB rule" bullet value: why this QB may (or may not) move from `fromRoster` to `toRoster`. */
+export function qbRuleText(q: ValuedPlayer, fromRoster: ValuedPlayer[], toRoster: ValuedPlayer[]): string {
+  if (spareQb(fromRoster)?.id !== q.id) return `${q.name} NOT allowed: not a spare (both QBs must project top-${V3.qbDepthRank})`;
+  const best = bestQb(toRoster);
+  if (!best) return `${q.name} allowed: the receiver has no QB`;
+  const d = effPpg(q) - effPpg(best);
+  const vs = `QB${q.posRank} vs QB${best.posRank}, our projections`;
+  if (d >= V3.qbUpgradeMin - 1e-9) return `${q.name} allowed: ${fmtSigned(d)} pts/g over their QB (${vs})`;
+  if (bestQbRank(toRoster) > V3.qbNeedRank) return `${q.name} allowed: their best QB is QB${bestQbRank(toRoster)} by market`;
+  return `${q.name} NOT allowed: only ${fmtSigned(d)} pts/g over their QB (${vs})`;
 }
 
 // ---------------------------------------------------------------- team profile / complementarity
@@ -550,7 +596,7 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     let myFail = "";
     if (premiumMine && !premiumOk) myFail = `you move the best player for a package worth less than ${pct(V3.consolidationPremium)} of him`;
     else if (myDelta < V3.minMyDelta) myFail = `your team ${fmtSigned(myDelta)} (needs +${V3.minMyDelta.toFixed(1)})${slotPenalty > 0 ? ` after −${slotPenalty.toFixed(1)} slot-loss aversion` : ""}`;
-    else if (myTrueChange < V3.minMyTrueGain * trueTotal) myFail = `you pay market price: true value ${fmtSigned(myTrueChange)} (needs +${(V3.minMyTrueGain * trueTotal).toFixed(1)}, 3% of the deal)`;
+    else if (myTrueChange < V3.minMyTrueGain[mode] * trueTotal) myFail = trueBarFail(myTrueChange, trueTotal, mode);
 
     // THEIR view (release (d)): the lineup totals Yahoo's evaluator would show, on perceived values (unscaled rosters:
     // the partner does not apply our target-overlap discount).
@@ -765,7 +811,7 @@ export function qbItems(my: TeamV3, their: TeamV3, give: ValuedPlayer[], get: Va
   return qbs.map((q) => {
     const [from, to] = give.includes(q) ? [my, their] : [their, my];
     const ok = qbTradeable(from.roster, to.roster)?.id === q.id;
-    return { label: "QB rule", value: `${q.name} ${ok ? "allowed" : "NOT allowed"}: spare QB${qbRank(q)}, receiver's best is QB${bestQbRank(to.roster)}`, ...(ok ? {} : { tone: "warn" as const }) };
+    return { label: "QB rule", value: qbRuleText(q, from.roster, to.roster), ...(ok ? {} : { tone: "warn" as const }) };
   });
 }
 
@@ -1094,7 +1140,7 @@ export function evaluateTradeV3(
   const trade = buildTrade3(ctx, j, my, their, mode);
   const { items: pre, add } = detailBuilder();
   const qbOk = (p: ValuedPlayer, from: TeamV3, to: TeamV3) => p.pos !== "QB" || qbTradeable(from.roster, to.roster)?.id === p.id;
-  const QB_RULE = "QB rule (only a spare top-14 QB, to a team whose best QB ranks worse than 18)";
+  const QB_RULE = `QB rule (only a spare QB, to a team he upgrades by ${V3.qbUpgradeMin.toFixed(1)}+ pts/g or whose best is outside top ${V3.qbNeedRank})`;
   const flagged = [
     ...give.map((p) => [p, ineligibleReason(p, S) || (qbOk(p, my, their) ? "" : QB_RULE)] as const),
     ...get.map((p) => [p, ineligibleReason(p, S) || (qbOk(p, their, my) ? "" : QB_RULE)] as const),

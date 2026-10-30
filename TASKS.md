@@ -2,6 +2,7 @@
 
 ## Resume here
 Owner (2026-10-26): Claude is the architect; work the queue autonomously, stop only for critical issues.
+QB UPGRADE RULE + PLAYOFFS VALUE GATE (2026-10-30, DESIGN "Fix: QB upgrade rule and playoffs value gate"): BUILT, not deployed; QB need by projection (+1.0 pts/g) or market rank, spare by projection rank, Playoffs true-value bar −3%; open owner call: the hand-found deal still misses the finder (market ratio 0.66 < preFairLo 0.75; riser TE never sold).
 ROLE-CHANGE TRUST RAMP (2026-10-30, DESIGN "Fix: role-change trust ramp"): BUILT, not deployed; prior moves 50% / 80% / 100% toward the new role at 2 / 3 / 4+ games, full on a role vacated for the season (real data: the 2-game TE 16.65 → 15.75 lineup pts/g).
 CONSOLIDATION PREMIUM ONLY FOR UNEVEN DEALS (2026-10-30, DESIGN "Fix: consolidation premium only for uneven deals"): BUILT, not deployed; even 2-for-2 swaps no longer pay the 110% premium (real data: smaller edges 2 → 4, near misses 6 → 7).
 PROJECTION ACCURACY LOG (2026-10-30, DESIGN "Projection accuracy log"): BUILT, not deployed (risk MEDIUM: coordinator review next). Starts collecting with the first import before kickoff after deploy; unverified: card at exactly 390 / 1280 px (browser stayed at 500 px).
