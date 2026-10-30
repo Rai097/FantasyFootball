@@ -1472,3 +1472,17 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
 * **Residual**: a player traded TO his current team mid-2025 counts as same-team, with TDs mixed from both teams
   (no per-team split).
 * Tests: `projectionV4.teamChange.test.ts`, `tdRegression.test.ts` (priorExcluded), `signalTables.test.ts` (lastTeam).
+
+## Fix: consolidation premium only for uneven deals (2026-10-30) — overrides "Trade finder v3" on when the premium applies
+
+* **Rule** (`tradesV3.ts` `judge3`): the consolidation premium (whoever receives the single best player gives ≥ 110%
+  of the other package, net of drop cost; their side on market values, mine on true values) applies only when
+  `give.length !== get.length` — 2-for-1, 1-for-2, 3-for-2. It is the "2-for-1 tax": one side gets fewer, better
+  players and frees a roster spot. Before, it applied to every deal that was not 1-for-1, including even 2-for-2 swaps.
+* **Even swaps** (1-for-1, 2-for-2) consolidate no roster spot and are judged by the acceptance model and the other
+  gates only. Acceptance weights and all constants unchanged.
+* **Why**: a real 2-for-2 (two bench pieces for a starting RB + a TE; playoff strength +3.2, ~42% accept, Yahoo shows
+  the partner gaining) was rejected as "consolidation premium … 57%" and never listed; the partner accepted it.
+* **Real-data effect** (owner league snapshot, playoffs mode): trades 2 → 2, smaller edges 2 → 4, near misses 6 → 7;
+  new listings are all 2-for-2 swaps, e.g. a bench RB + TE for a starting RB + WR (+2.8/wk playoff lineup, ~58%).
+* Tests: `tradesV3.test.ts` "consolidation premium: only uneven deals pay it".

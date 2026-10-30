@@ -182,7 +182,7 @@ const ctx = ctxFor(league([team("me", mine), team("them", theirs)]), [...mine, .
 const P = (id: string) => ctx.players.get(id)!;
 const J = () => judge3(ctx, teamV3(ctx, "me"), teamV3(ctx, "them"), "balanced");
 
-test("consolidation premium: whoever receives the best player in a non-1-for-1 deal gives ≥ 110%", () => {
+test("consolidation premium: whoever receives the best player in an uneven deal gives ≥ 110%", () => {
   // I get their best WR (55) for two RBs: they must receive ≥ 1.10 × 55 net of their drop cost.
   const low = J()([P("mRB2"), P("mRB3")], [P("tWR1")]); // 30 + 0.85·22 = 48.7 − drop ≥ 3 → < 60.5
   assert.equal(low.bestToMe, true);
@@ -212,6 +212,37 @@ test("consolidation premium: my side is judged on our true values, never the mar
   // Our true values still guard me: selling the true best player for less than 110% of him fails my side.
   const cheap = J()([withMarket(P("mRB1"), 10)], [withMarket(P("tWR2"), 80), withMarket(P("tWR3"), 80)]);
   assert.match(cheap.myFail, /best player/);
+});
+
+test("consolidation premium: only uneven deals pay it — an even 2-for-2 is judged by acceptance and the other gates", () => {
+  // They give the single best player (tWR1) in a 2-for-2; my package is worth more on the market but < 110% of theirs.
+  const withMarket = (p: ValuedPlayer, market: number): ValuedPlayer => ({ ...p, market });
+  const give = [withMarket(P("mRB2"), 40), withMarket(P("mRB3"), 30)]; // 40 + 0.85·30 = 65.5
+  const get = [P("tWR1"), P("tWR5")]; // 55 + 0.85·9 = 62.65
+  const even = J()(give, get);
+  assert.equal(even.bestToMe, true);
+  assert.ok(even.fairness >= 1 && even.fairness < V3.consolidationPremium, `fairness ${even.fairness}`);
+  assert.equal(even.premiumOk, true, "no roster spot is consolidated in an even swap");
+  assert.doesNotMatch(even.theirFail, /consolidation premium/);
+  assert.doesNotMatch(even.myFail, /best player/);
+  assert.equal(even.partnerOk, true, even.theirFail);
+  assert.equal(even.myOk, true, even.myFail);
+  assert.ok(even.acceptance >= V3.minAcceptance, `acceptance ${even.acceptance}`);
+  // My side is not taxed in an even swap either: I give the true-best player (mRB1) for two pieces worth < 110% of him.
+  const sellEven = J()([P("mRB1"), P("mRB4")], [P("tWR2"), P("tWR3")]);
+  assert.equal(sellEven.premiumOk, true);
+  assert.doesNotMatch(sellEven.myFail, /best player/);
+  // The same packages made uneven still pay the premium on both sides.
+  // 2-for-1: they receive 38 + 0.85·25 = 59.25 − their drop (≥ 3) for 55 → fair on the market, but < 110%.
+  const uneven = J()([withMarket(P("mRB2"), 38), withMarket(P("mRB3"), 25)], [P("tWR1")]);
+  assert.equal(uneven.bestToMe, true);
+  assert.ok(uneven.fairness >= 1 && uneven.fairness < V3.consolidationPremium, `fairness ${uneven.fairness}`);
+  assert.equal(uneven.premiumOk, false);
+  assert.match(uneven.theirFail, /consolidation premium/);
+  assert.equal(uneven.partnerOk, false);
+  const sellUneven = J()([P("mRB1")], [P("tWR2"), P("tWR3")]); // 1-for-2
+  assert.equal(sellUneven.premiumOk, false);
+  assert.match(sellUneven.myFail, /best player/);
 });
 
 test("drop cost: the side receiving more players nets the player it must cut (≥ 3)", () => {

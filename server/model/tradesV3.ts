@@ -30,7 +30,7 @@ export const V3 = {
   pkgWeights: [1, 0.85, 0.7],
   /** Drop cost per player the receiving side must cut: that player's value, at least this. */
   minDropCost: 3,
-  /** The side receiving the single best player in an uneven deal must give ≥ 110% of the other package. */
+  /** The side receiving the single best player in an uneven deal (give count ≠ get count) must give ≥ 110% of the other package; even swaps carry no premium. */
   consolidationPremium: 1.1,
   /** Need model. */
   minMyDelta: 0.5,
@@ -531,12 +531,14 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     // Single best player in the deal (market, then true value).
     const all = [...give, ...get].sort((a, b) => marketOf(b) - marketOf(a) || trueOf(b) - trueOf(a));
     const bestToMe = get.includes(all[0]);
-    // Consolidation premium: in any deal that is not 1-for-1, whoever receives the single best player
-    // must give ≥ 110% of the other side's package, net of drop cost. Their side is judged on what they see (market);
-    // mine on our true values — the market is never my bar (Model v4).
+    // Consolidation premium (the "2-for-1 tax"): only in an UNEVEN deal (2-for-1, 1-for-2, 3-for-2…), where one side
+    // gets fewer, better players and frees a roster spot, whoever receives the single best player must give ≥ 110% of
+    // the other side's package, net of drop cost. Even swaps (1-for-1, 2-for-2) consolidate no roster spot and are
+    // judged by the acceptance model and the other gates only. Their side is judged on what they see (market); mine on
+    // our true values — the market is never my bar (Model v4).
     let premiumOk = true;
     let premiumMine = false;
-    if (give.length > 1 || get.length > 1) {
+    if (give.length !== get.length) {
       if (bestToMe) premiumOk = theirRecvNet >= V3.consolidationPremium * marketGet;
       const bestTrue = [...give, ...get].sort((a, b) => trueOf(b) - trueOf(a) || marketOf(b) - marketOf(a))[0];
       if (give.includes(bestTrue) && trueGet - myDropT < V3.consolidationPremium * trueGive) {
