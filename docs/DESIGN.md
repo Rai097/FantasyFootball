@@ -1486,3 +1486,32 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
 * **Real-data effect** (owner league snapshot, playoffs mode): trades 2 → 2, smaller edges 2 → 4, near misses 6 → 7;
   new listings are all 2-for-2 swaps, e.g. a bench RB + TE for a starting RB + WR (+2.8/wk playoff lineup, ~58%).
 * Tests: `tradesV3.test.ts` "consolidation premium: only uneven deals pay it".
+
+## Projection accuracy log (2026-10-30)
+- Purpose: per player and overall, how the app's weekly projection and Yahoo's weekly projection compare with what
+  actually happened (League tab card "Projection accuracy"; "Vs Yahoo" bullet in a player's value details).
+- Capture (POST /api/import, after the save; runs after the response, one at a time per league, a failure is logged
+  `[projlog] capture failed` and never fails the import): week W = the league's current NFL week; every rostered and
+  free-agent QB/RB/WR/TE whose NFL team plays in W (K / DEF excluded: no actual-points source). Per player: id, name,
+  pos, NFL team, fantasy team id (null = free agent), starter (Yahoo slot not BN / IR at capture), app = projection v4
+  `weekly[W]` (matchup + availability included; an Out player's 0 is a real projection; no weekly = skipped, never 0),
+  yahoo = `yahooProjWeekly` only when the import's `projWeek` = W (absent otherwise), capturedAt = the import time.
+- Merge rule per (week, player): keep the latest capture taken BEFORE that player's kickoff; a capture at or after his
+  kickoff never overwrites anything. Kickoff = nflverse games.csv gameday + gametime read as US/Eastern
+  (`GameInfo.kickoff`, offset from the runtime's tz data). Team kickoff unknown → the week's first kickoff is the
+  cut-off; no kickoff known at all → nothing recorded (fail safe).
+- Storage: `.data/projlog-<importId>.json` (compact JSON), weeks 1–min(finalWeek, 18), ≤ 1200 players a week; a new
+  season replaces the log; deleted with the league. Measured on the owner's league: 266 entries ≈ 46 KB a week →
+  ≈ 0.8 MB a season. No new external calls (games.csv and weekly stats are files the model already downloads).
+- Actuals (resolved on read, never stored): the player's nflverse weekly stat line for W under the league's scoring =
+  played. No line: "did not play" only when his team's game is final AND that team's weekly rows are in (another
+  player of the team has a line); otherwise pending. Did-not-play is counted apart, never scored as 0.
+- Metrics (server/model/projLog.ts): mean absolute error and mean bias (actual − projected) for app and Yahoo over the
+  SAME player-weeks (played, both projections present), per week, season to date and per position. Played rows without
+  a Yahoo number go only into a separate app-only figure. Per player (≥ 3 compared weeks): average actual − Yahoo and
+  actual − app, beat counts. Per fantasy team: skill starters at capture, compared rows only (K / DEF excluded; did-not-
+  play and no-Yahoo starters counted apart).
+- API: `GET /api/league/import/:id/accuracy` (guard: league rule; handler re-checks ownership; demo / yahoo → 404;
+  cached under `import:<id>:accuracy`). Payload ≈ 3 KB (no raw log). Value details: "Vs Yahoo: +2.1 pts/wk over 4 wks
+  (beat 3 of 4)" from 3 compared weeks.
+- Needs the owner (or a member) to import before kickoff every week; no backfill (history files hold no projections).

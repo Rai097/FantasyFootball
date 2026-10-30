@@ -24,12 +24,12 @@ export async function readJson<T>(name: string): Promise<T | null> {
   }
 }
 
-/** Atomic write (tmp file + rename). `secret` restricts the file to the current user. */
-export async function writeJson(name: string, data: unknown, opts: { secret?: boolean } = {}): Promise<void> {
+/** Atomic write (tmp file + rename). `secret` restricts the file to the current user; `compact` drops the indentation. */
+export async function writeJson(name: string, data: unknown, opts: { secret?: boolean; compact?: boolean } = {}): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true });
   const file = fileFor(name);
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2), { mode: opts.secret ? 0o600 : 0o644 });
+  await fs.writeFile(tmp, opts.compact ? JSON.stringify(data) : JSON.stringify(data, null, 2), { mode: opts.secret ? 0o600 : 0o644 });
   await fs.rename(tmp, file);
 }
 

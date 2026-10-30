@@ -5,6 +5,7 @@ import type { BreakoutResponse, BreakoutTargetRow, CardPlayer, DetailItem, Stash
 export type TradeMode = "now" | "balanced" | "playoffs";
 export type { TradeFinderResult };
 import type { LeagueView } from "../../server/model/league";
+import type { AccuracyResponse } from "../../server/model/projLog";
 import { ApiError } from "./lib/errors";
 
 export { ApiError };
@@ -272,6 +273,8 @@ export const api = {
     request<Trade & { verdict: string }>("POST", `${base(a)}/trade/evaluate`, { team: a.team, partner, give, get }),
   /** League tab: standings, power-score parts, who is above me and why. */
   leagueView: (a: Active) => request<LeagueView>("GET", `${base(a)}/league${qs({ team: a.team })}`),
+  /** League tab "Projection accuracy" card: app vs Yahoo weekly projections against actual points (import leagues). */
+  accuracy: (a: Active) => request<AccuracyResponse>("GET", `${base(a)}/accuracy`),
   waivers: (a: Active) => request<WaiversResponse>("GET", `${base(a)}/waivers${qs({ team: a.team })}`),
   /** Slim rows (no value explanation); `valueWhy` fetches one player's value bullets on tap. */
   values: (a: Active) => request<ValueRow[]>("GET", `${base(a)}/values${qs({ team: a.team })}`),

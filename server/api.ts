@@ -11,6 +11,7 @@ import {
   buildImportLeague,
   deleteHistory,
   deleteImport,
+  deleteProjLog,
   findExistingImport,
   importFreeAgents,
   isValidId,
@@ -19,7 +20,10 @@ import {
   MAX_BYTES,
   mergeTeams,
   newPasteImport,
+  projCaptureEntries,
   readHistory,
+  readProjLog,
+  recordProjLog,
   readImport,
   recordHistory,
   saveImport,
@@ -35,7 +39,8 @@ import { analyzeLeague, analyzeTeams, type LeagueContext } from "./model/analysi
 import { buildLeagueView } from "./model/league.js";
 import { attachFloor } from "./model/signals.js";
 import { defaultMode, type ValueMode } from "./model/projectionV4.js";
-import { getProjectionTables } from "./data/signalTables.js";
+import { getProjectionTables, getSeasonTables } from "./data/signalTables.js";
+import { accuracyReport, outcomeOf, playerAccuracy, resolveLog, teamWeeksWithRows, toAccuracyResponse, vsYahooItem, weekKickoffs, type AccuracyResponse, type ResolvedRow } from "./model/projLog.js";
 import type { ProjectionTables } from "./model/projectionV4.js";
 import { getPriorWeeks } from "./data/priorWeeks.js";
 import { findBenchUpgrades } from "./model/benchUpgrades.js";
@@ -183,6 +188,18 @@ async function loadContext(provider: Provider, id: string, refresh: boolean, mod
     ctx.teams = analyzeTeams(league, ctx.players, ctx.replacement);
     // Release (d): how other managers see each player (Yahoo projection / FantasyPros rank + recent games).
     attachPerception(ctx.players.values(), league.settings, tables.schedule);
+    // Projection accuracy log: "Vs Yahoo" value bullet for players with ≥ 3 compared weeks (never breaks the league).
+    if (provider === "import") {
+      try {
+        const acc = playerAccuracy(await resolvedRows(db, league, id));
+        for (const p of ctx.players.values()) {
+          const item = vsYahooItem(acc.get(p.id));
+          if (item) p.whyItems = [...(p.whyItems ?? []), item];
+        }
+      } catch (e) {
+        console.warn(`[projlog] accuracy bullets skipped for ${id}: ${(e as Error).message}`);
+      }
+    }
     return { db, league, ctx, valueSource };
   });
 }
@@ -364,6 +381,46 @@ async function loadMarketValues(league: League): Promise<Map<string, MarketValue
   const qbSlots = S.slots.filter((x) => x === "QB" || x === "SFLEX").length;
   const d = await getMarketData({ numQbs: qbSlots >= 2 ? 2 : 1, numTeams: S.numTeams || 12, ppr: pprBucket(S.scoring.rec), dynasty: S.isDynasty });
   return d.source === "fantasycalc" && d.values.size ? d.values : null;
+}
+
+// ---------------------------------------------------------------- projection accuracy log
+/** The league's captured player-weeks with their actual results (league scoring; did-not-play / pending kept apart). */
+async function resolvedRows(db: PlayerDb, league: League, id: string): Promise<ResolvedRow[]> {
+  const log = await readProjLog(id);
+  if (!log || log.season !== db.season) return [];
+  const { games } = await getSeasonTables(db.season);
+  const final = new Set<string>();
+  for (const g of games.values()) if (g.result !== undefined) (final.add(`${g.home}|${g.week}`), final.add(`${g.away}|${g.week}`));
+  const rowsIn = teamWeeksWithRows(db.players.values(), db.season);
+  const q = { season: db.season, scoring: league.settings.scoring, gameFinal: (t: string, w: number) => final.has(`${t}|${w}`), teamRowsIn: (t: string, w: number) => rowsIn.has(`${t}|${w}`) };
+  return resolveLog(log, (e, week) => outcomeOf(db.players.get(e.id), { ...q, week, team: e.team }));
+}
+
+/**
+ * After an import is saved: value the league and record this week's app + Yahoo projections for every rostered and
+ * free-agent skill player with a game (only players whose kickoff is still ahead count). Runs after the response,
+ * one at a time per league; a failure is logged and never fails the import.
+ */
+let projCaptures: Promise<unknown> = Promise.resolve();
+export const projCaptureIdle = (): Promise<unknown> => projCaptures;
+function captureProjections(stored: StoredImport): void {
+  const run = (async () => {
+    const l = await loadContext("import", stored.id, false);
+    const week = l.league.settings.currentWeek;
+    const { games } = await getSeasonTables(l.db.season);
+    const { kickoffs, teams } = weekKickoffs(games.values(), week);
+    const appWeek = (p: Player): number | undefined => {
+      const v = l.ctx.players.get(p.id);
+      if (!v?.weekly || v.weeklyFrom === undefined) return undefined;
+      const x = v.weekly[week - v.weeklyFrom];
+      return typeof x === "number" && Number.isFinite(x) ? x : undefined;
+    };
+    const entries = projCaptureEntries(l.db, stored, week, appWeek, (t) => teams.has(t));
+    const r = await recordProjLog(stored.id, { season: l.db.season, week, capturedAt: stored.importedAt, entries, kickoffs, maxWeek: l.league.settings.finalWeek });
+    if (r.kept) invalidate(`import:${stored.id}:accuracy`);
+    console.log(`[projlog] import=${stored.id} week=${week} kept=${r.kept} ignored=${r.ignored}`);
+  })().catch((e) => console.warn(`[projlog] capture failed for ${stored.id}: ${(e as Error).message}`));
+  projCaptures = projCaptures.then(() => run);
 }
 
 // ---------------------------------------------------------------- routes
@@ -566,6 +623,24 @@ apiRouter.get(
   }),
 );
 
+// Projection accuracy: app vs Yahoo weekly projections against actual points (import leagues only; no log → empty).
+apiRouter.get(
+  "/api/league/:provider/:id/accuracy",
+  h(async (req, res) => {
+    const provider = parseProvider(req.params.provider);
+    if (provider !== "import") throw new HttpError(404, "Projection accuracy is tracked for imported leagues only");
+    requireOwnImport(req, req.params.id);
+    const id = req.params.id;
+    const body = await cached<AccuracyResponse>(`import:${id}:accuracy`, isRefresh(req), async () => {
+      const { db, league } = await loadBase("import", id, false);
+      const log = await readProjLog(id);
+      const rows = await resolvedRows(db, league, id);
+      return toAccuracyResponse(log && log.season === db.season ? log : null, accuracyReport(rows), (t) => league.teams.find((x) => x.id === t)?.name);
+    });
+    res.json(body);
+  }),
+);
+
 apiRouter.get(
   "/api/league/:provider/:id/values",
   h(async (req, res) => {
@@ -684,6 +759,7 @@ apiRouter.post(
     await saveImport(stored);
     await recordHistory(stored, previous);
     invalidateLeague("import", stored.id);
+    captureProjections(stored);
     res.json({
       id: stored.id,
       name: stored.name,
@@ -750,6 +826,7 @@ apiRouter.delete(
     requireAdmin(req);
     if (!isValidId(req.params.id) || !(await deleteImport(req.params.id))) throw new HttpError(404, `No imported league "${req.params.id}"`);
     await deleteHistory(req.params.id);
+    await deleteProjLog(req.params.id);
     invalidateLeague("import", req.params.id);
     res.json({ ok: true });
   }),

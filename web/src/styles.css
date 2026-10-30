@@ -608,3 +608,26 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
   .import-row .imp-actions { grid-area: actions; }
   .import-row .xrow-chevron { grid-area: chev; }
 }
+
+/* League tab: Projection accuracy card (collapsed; details on tap). */
+.acc-card { margin-top: 12px; }
+.acc-empty { padding: 12px 14px; }
+.acc-empty p { margin: 4px 0 0; }
+.acc-title { font-size: 15px; margin: 0; }
+.acc-row .xrow-head { grid-template-columns: minmax(130px, 180px) minmax(0, 1fr) 16px; padding: 10px 14px; }
+.acc-key { font-size: 13px; min-width: 0; }
+.acc-details { display: flex; flex-direction: column; gap: 10px; }
+.acc-table { font-size: 13px; }
+.acc-table th.acc-group { text-align: center; border-bottom: 1px solid var(--border); }
+.acc-table td.acc-better { color: var(--pos); font-weight: 650; }
+.acc-lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.acc-list h3 { margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.acc-list ul { list-style: none; margin: 0; padding: 0; }
+.acc-list li { display: grid; grid-template-columns: minmax(0, 1fr) 48px 36px; gap: 6px; align-items: center; padding: 3px 0; font-size: 13px; }
+@media (max-width: 640px) {
+  .acc-row .xrow-head { grid-template-columns: minmax(0, 1fr) 16px; grid-template-areas: "title chev" "key chev"; padding: 10px 12px; }
+  .acc-row .acc-title { grid-area: title; }
+  .acc-row .acc-key { grid-area: key; }
+  .acc-row .xrow-chevron { grid-area: chev; }
+  .acc-lists { grid-template-columns: minmax(0, 1fr); }
+}

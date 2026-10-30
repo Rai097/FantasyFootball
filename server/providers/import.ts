@@ -10,6 +10,7 @@ import type { Availability, League, Player, Scoring, SlotKind, Team, TeamRecord 
 import { draftBoard } from "./demo.js";
 import { DATA_DIR, readJson, removeJson, writeJson } from "./store.js";
 import { findPlayer, withYahooStatus, type YahooPlayerEntry } from "./yahoo-parse.js";
+import { mergeCapture, SKILL_POS, type Kickoffs, type MergeResult, type ProjEntry, type ProjLog } from "../model/projLog.js";
 
 export const MAX_BYTES = 1_000_000;
 export const MAX_TEAMS = 20;
@@ -801,4 +802,71 @@ export function upsertImport(existing: StoredImport, incoming: StoredImport): { 
   // The rosters (and their projections) are the incoming ones: so is the capture week (never the old import's).
   if (incoming.projWeek !== undefined) next.projWeek = incoming.projWeek;
   return { stored: next, changes: diffSnapshots(snapshotOf(existing), snapshotOf(next)) };
+}
+
+// ------------------------------------------------------------------ projection accuracy log (.data/projlog-<id>.json)
+const projLogFile = (id: string) => `projlog-${id}`;
+
+export async function readProjLog(id: string): Promise<ProjLog | null> {
+  if (!isValidId(id)) return null;
+  const l = await readJson<ProjLog>(projLogFile(id));
+  return l && typeof l === "object" && typeof l.season === "number" && l.weeks && typeof l.weeks === "object" ? l : null;
+}
+
+export async function deleteProjLog(id: string): Promise<void> {
+  if (isValidId(id)) await removeJson(projLogFile(id));
+}
+
+/**
+ * This import's capture for `week`: every rostered and free-agent skill player (QB/RB/WR/TE) whose NFL team has a game
+ * that week, with the app's projection for the week (`appWeek`, undefined = no projection → skipped, never 0) and
+ * Yahoo's weekly number only when it was captured in that same week (`projWeek === week`).
+ */
+export function projCaptureEntries(
+  db: Finder,
+  s: StoredImport,
+  week: number,
+  appWeek: (p: Player) => number | undefined,
+  hasGame: (team: string) => boolean,
+): Omit<ProjEntry, "capturedAt">[] {
+  const out = new Map<string, Omit<ProjEntry, "capturedAt">>();
+  const add = (raw: ImportPlayerRaw, teamId: string | null, starter: boolean) => {
+    const p = resolvePlayer(db, raw);
+    if (!p || out.has(p.id) || !SKILL_POS.includes(p.pos) || !hasGame(p.team)) return;
+    const app = appWeek(p);
+    if (app === undefined || !Number.isFinite(app)) return;
+    const e: Omit<ProjEntry, "capturedAt"> = { id: p.id, name: p.name, pos: p.pos, team: p.team, teamId, starter, app };
+    if (s.projWeek === week && typeof raw.yahooProjWeekly === "number" && Number.isFinite(raw.yahooProjWeekly)) e.yahoo = raw.yahooProjWeekly;
+    out.set(p.id, e);
+  };
+  for (const t of s.teams)
+    for (const raw of t.players) {
+      const slot = raw.slot ? toSlotKind(raw.slot) : undefined;
+      add(raw, t.id, slot !== undefined && slot !== "BN" && slot !== "IR");
+    }
+  for (const raw of s.freeAgents ?? []) add(raw, null, false);
+  return [...out.values()];
+}
+
+// One write at a time per league: two quick imports must not lose each other's read-merge-write.
+const projLogChains = new Map<string, Promise<unknown>>();
+
+/** Merge a capture into .data/projlog-<id>.json (serialized per league). */
+export function recordProjLog(
+  id: string,
+  cap: { season: number; week: number; capturedAt: string; entries: Omit<ProjEntry, "capturedAt">[]; kickoffs: Kickoffs; maxWeek?: number },
+): Promise<MergeResult> {
+  if (!isValidId(id)) return Promise.reject(new ImportError(`Bad import id "${id}"`));
+  const run = (projLogChains.get(id) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(async () => {
+      const r = mergeCapture(await readProjLog(id), cap);
+      if (r.kept) await writeJson(projLogFile(id), r.log, { compact: true });
+      return r;
+    });
+  projLogChains.set(id, run);
+  void run.finally(() => {
+    if (projLogChains.get(id) === run) projLogChains.delete(id);
+  }).catch(() => undefined);
+  return run;
 }

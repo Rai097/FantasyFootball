@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { api, type Active, type Analysis } from "../api";
 import type { LeagueTeamRow, LeagueView, PlayoffComparison, TeamComparison } from "../../../server/model/league";
+import type { AccuracyResponse, PlayerAccuracy } from "../../../server/model/projLog";
 import { ErrorBox, Loading, Stat, Why } from "../components/common";
 import { ColumnHelp } from "../components/HelpTip";
 import { DetailList, ExpandableList, ExpandableRow, type DetailLine } from "../components/ExpandableRow";
@@ -35,7 +36,12 @@ export function LeagueTab({ active }: { analysis: Analysis; active: Active & { t
   const res = useAsync(() => api.leagueView(active), [active.provider, active.id, active.team]);
   if (res.error) return <ErrorBox error={res.error} onRetry={res.reload} />;
   if (!res.data) return <Loading label="Ranking the league…" />;
-  return <LeagueBody v={res.data} />;
+  return (
+    <>
+      <LeagueBody v={res.data} />
+      {active.provider === "import" && <AccuracyCard active={active} />}
+    </>
+  );
 }
 
 function LeagueBody({ v }: { v: LeagueView }) {
@@ -445,3 +451,163 @@ function GroupBars({ c }: { c: TeamComparison }) {
   );
 }
 
+
+// ---------------------------------------------------------------- projection accuracy (DESIGN.md "Projection accuracy log")
+const ACC = {
+  mae: "Average miss: mean of |actual − projected| points per player-week, over weeks where both the app and Yahoo had a projection.",
+  bias: "Average actual − projected points: positive = the projection ran low (players beat it), negative = it ran high.",
+  n: "Player-weeks compared: captured before kickoff, played, and projected by both the app and Yahoo.",
+  weeks: "NFL weeks with at least one compared player-week.",
+  vsYahoo: "His average actual points minus Yahoo's weekly projection, over the weeks compared (3 or more).",
+  beat: "Weeks he scored more than Yahoo projected, of the weeks compared.",
+  teamApp: "Projected points per week of this team's skill starters (QB/RB/WR/TE, K and DEF excluded) by the app.",
+  teamYahoo: "The same starters' Yahoo projection per week.",
+  teamActual: "The same starters' actual points per week; starters who did not play or had no Yahoo number are left out of all three.",
+  empty: "Each import before kickoff records both projections for the week; accuracy shows once those games are final and their stats are in.",
+};
+
+function AccuracyCard({ active }: { active: Active }) {
+  const res = useAsync(() => api.accuracy(active), [active.provider, active.id]);
+  if (res.error) return <ErrorBox error={res.error} onRetry={res.reload} />;
+  if (!res.data) return null;
+  const a = res.data;
+  return (
+    <section className="card flush acc-card">
+      {a.season.n === 0 ? (
+        <div className="acc-empty">
+          <h2 className="acc-title">Projection accuracy</h2>
+          <p className="muted small" title={ACC.empty}>
+            Starts after the first imported week is played (import before kickoff each week).
+          </p>
+        </div>
+      ) : (
+        <ExpandableRow
+          className="acc-row"
+          label="Projection accuracy"
+          head={
+            <>
+              <span className="acc-title strong">Projection accuracy</span>
+              <span className="acc-key">
+                App off by <b title={ACC.mae}>{f1(a.season.appMae)}</b> pts/player-wk, Yahoo <b title={ACC.mae}>{f1(a.season.yahooMae)}</b> (
+                <span title={ACC.n}>{a.season.n} player-weeks</span>, <span title={ACC.weeks}>{weekSpan(a.weeks)}</span>)
+              </span>
+            </>
+          }
+        >
+          <AccuracyDetails a={a} />
+        </ExpandableRow>
+      )}
+    </section>
+  );
+}
+
+const weekSpan = (w: number[]) => (w.length === 1 ? `wk ${w[0]}` : `wks ${w[0]}–${w[w.length - 1]}`);
+
+function AccuracyDetails({ a }: { a: AccuracyResponse }) {
+  const H = ({ label, tip, rowSpan }: { label: string; tip: string; rowSpan?: number }) => (
+    <th className="num" rowSpan={rowSpan}>
+      <ColumnHelp tip={tip}>{label}</ColumnHelp>
+    </th>
+  );
+  const rows = [...a.byPos.map((p) => ({ key: p.pos, ...p })), { key: "All", ...a.season }];
+  return (
+    <div className="acc-details">
+      <div className="table-wrap">
+        <table className="table acc-table" aria-label="Projection error by position">
+          <thead>
+            <tr>
+              <th rowSpan={2}>Pos</th>
+              <H label="N" tip={ACC.n} rowSpan={2} />
+              <th colSpan={2} className="num acc-group">
+                <ColumnHelp tip={ACC.mae}>Avg miss</ColumnHelp>
+              </th>
+              <th colSpan={2} className="num acc-group">
+                <ColumnHelp tip={ACC.bias}>Bias</ColumnHelp>
+              </th>
+            </tr>
+            <tr>
+              <th className="num" title={ACC.mae}>App</th>
+              <th className="num" title={ACC.mae}>Yahoo</th>
+              <th className="num" title={ACC.bias}>App</th>
+              <th className="num" title={ACC.bias}>Yahoo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} className={r.key === "All" ? "strong" : ""}>
+                <td>{r.key}</td>
+                <td className="num" title={ACC.n}>{r.n}</td>
+                <td className={`num ${r.appMae < r.yahooMae ? "acc-better" : ""}`} title={ACC.mae}>{f1(r.appMae)}</td>
+                <td className={`num ${r.yahooMae < r.appMae ? "acc-better" : ""}`} title={ACC.mae}>{f1(r.yahooMae)}</td>
+                <td className="num" title={ACC.bias}>{signed(r.appBias)}</td>
+                <td className="num" title={ACC.bias}>{signed(r.yahooBias)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="acc-lists">
+        <PlayerList title="Most beat Yahoo" rows={a.mostBeat} />
+        <PlayerList title="Most missed Yahoo" rows={a.mostMissed} />
+      </div>
+      {a.teams.length > 0 && (
+        <div className="table-wrap">
+          <table className="table acc-table" aria-label="Starters projected vs actual per week">
+            <thead>
+              <tr>
+                <th>Starters per wk</th>
+                <H label="App" tip={ACC.teamApp} />
+                <H label="Yahoo" tip={ACC.teamYahoo} />
+                <H label="Actual" tip={ACC.teamActual} />
+              </tr>
+            </thead>
+            <tbody>
+              {a.teams.map((t) => (
+                <tr key={t.teamId}>
+                  <td className="lg-name" title={`${t.weeks} wk${t.weeks === 1 ? "" : "s"}; left out: ${t.dnp} did not play, ${t.noYahoo} without a Yahoo number`}>{t.name}</td>
+                  <td className="num" title={ACC.teamApp}>{f1(t.app)}</td>
+                  <td className="num" title={ACC.teamYahoo}>{f1(t.yahoo)}</td>
+                  <td className="num" title={ACC.teamActual}>{f1(t.actual)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <DetailList
+        items={[
+          { label: "Did not play", value: `${a.counts.dnp} player-weeks, left out`, title: "Captured players with no stats after their game was final: inactive, never scored as 0." },
+          { label: "No Yahoo number", value: `${a.counts.noYahoo} player-weeks, app-only`, title: "Played, but Yahoo's weekly projection was not captured that week: kept out of the comparison." },
+          { label: "Waiting for results", value: `${a.counts.pending} player-weeks`, title: "Games not final yet, or their weekly stats are not in yet." },
+        ]}
+      />
+    </div>
+  );
+}
+
+function PlayerList({ title, rows }: { title: string; rows: PlayerAccuracy[] }) {
+  return (
+    <div className="acc-list">
+      <h3 className="small muted">{title}</h3>
+      {rows.length ? (
+        <ul>
+          {rows.map((p) => (
+            <li key={p.id} title={`${p.name}: actual − Yahoo ${signed(p.vsYahoo)}, actual − app ${signed(p.vsApp)} pts/wk over ${p.weeks} weeks`}>
+              <span className="lg-name">
+                {p.name} <span className="muted small">{p.pos}</span>
+              </span>
+              <span className={`num delta ${deltaClass(p.vsYahoo)}`} title={ACC.vsYahoo}>
+                {signed(p.vsYahoo)}
+              </span>
+              <span className="muted small num" title={ACC.beat}>
+                {p.beatYahoo}/{p.weeks}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted small">— (needs 3 compared weeks)</p>
+      )}
+    </div>
+  );
+}

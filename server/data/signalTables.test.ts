@@ -186,3 +186,17 @@ test("prior season: a blank / NA posteam (normTeam → FA) is never the 2025 tea
   assert.equal(prior.get("a")!.games, 2, "the FA row still counts as a game");
   assert.equal(prior.get("b")!.lastTeam, undefined);
 });
+
+test("kickoff: games.csv gameday + gametime read as US/Eastern (EDT −4 in October, EST −5 in December)", async () => {
+  const { easternKickoff, parseGames: pg } = await import("./signalTables.js");
+  assert.equal(easternKickoff("2026-10-29", "20:15"), "2026-10-30T00:15:00.000Z");
+  assert.equal(easternKickoff("2026-12-13", "13:00"), "2026-12-13T18:00:00.000Z");
+  assert.equal(easternKickoff("2026-11-08", "09:30"), "2026-11-08T14:30:00.000Z"); // after the Nov 1 switch: EST
+  assert.equal(easternKickoff("2026-11-01", "13:00"), "2026-11-01T18:00:00.000Z"); // switch day, afternoon: EST
+  assert.equal(easternKickoff("2026-11-01", ""), undefined, "missing time = unknown kickoff");
+  assert.equal(easternKickoff(undefined, "13:00"), undefined);
+  const csv = "game_id,season,game_type,week,gameday,gametime,away_team,home_team,result\n2026_09_JAX_BAL,2026,REG,9,2026-11-05,20:15,JAX,BAL,\n2026_09_X_Y,2026,REG,9,2026-11-08,,DEN,CAR,";
+  const g = pg(csv, 2026);
+  assert.equal(g.get("2026_09_JAX_BAL")?.kickoff, "2026-11-06T01:15:00.000Z");
+  assert.equal(g.get("2026_09_X_Y")?.kickoff, undefined);
+});

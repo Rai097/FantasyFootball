@@ -105,6 +105,33 @@ export interface GameInfo {
   /** Vegas total and spread (home favoured by `spread`); nflverse fills them for played weeks and the next week only. */
   total?: number;
   spread?: number;
+  /** Kickoff instant (ISO, UTC) from games.csv gameday + gametime (US/Eastern); undefined when either is missing. */
+  kickoff?: string;
+}
+
+/**
+ * games.csv gameday ("2026-11-01") + gametime ("13:00", US/Eastern wall clock) → ISO instant (UTC). The Eastern offset
+ * (EDT −4 / EST −5) comes from the runtime's time-zone data at that instant, never hand-coded DST rules.
+ */
+export function easternKickoff(gameday: string | undefined, gametime: string | undefined): string | undefined {
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(gameday?.trim() ?? "");
+  const t = /^(\d{1,2}):(\d{2})$/.exec(gametime?.trim() ?? "");
+  if (!d || !t) return undefined;
+  const wall = Date.UTC(+d[1], +d[2] - 1, +d[3], +t[1], +t[2]);
+  if (!Number.isFinite(wall)) return undefined;
+  const offsetAt = (ms: number) => {
+    const part = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" })
+      .formatToParts(new Date(ms))
+      .find((x) => x.type === "timeZoneName")?.value;
+    const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(part ?? "");
+    return m ? (m[1] === "-" ? -1 : 1) * (+m[2] * 60 + +(m[3] ?? 0)) : undefined;
+  };
+  // Guess with the offset at the wall time read as UTC, then once more at the corrected instant (DST edges).
+  const first = offsetAt(wall);
+  if (first === undefined) return undefined; // no time-zone data: unknown, never a guess
+  const second = offsetAt(wall - first * 60_000);
+  if (second === undefined) return undefined;
+  return new Date(wall - second * 60_000).toISOString();
 }
 
 /** Regular-season games of one season from games.csv. */
@@ -122,6 +149,7 @@ export function parseGames(csv: string, season: number): Map<string, GameInfo> {
       awayQbId: opt(r.away_qb_id),
       total: opt(r.total_line) === undefined ? undefined : num(r.total_line),
       spread: opt(r.spread_line) === undefined ? undefined : num(r.spread_line),
+      kickoff: easternKickoff(r.gameday, r.gametime),
     });
   }
   return out;
