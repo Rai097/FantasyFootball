@@ -37,6 +37,16 @@ test("no prior and fewer than minGames sample games: not regressed; no sample: n
   assert.ok(Math.abs(r.base - 0.03 * 15) < 1e-9);
 });
 
+test("priorExcluded (a real last season not usable as the baseline): position baseline under minGames sample games", () => {
+  const pos = { perOpp: { pass: 0.045, rush: 0.03, rec: 0.05 }, perGame: { pass: 1.4, rush: 0.2, rec: 0.3 } };
+  const r = regressTds(base({ n: 2, xTd: { ...K, rush: 0.9 }, opp: { ...K, rush: 15 }, position: pos, priorExcluded: true }))!;
+  assert.equal(r.source, "position");
+  assert.ok(Math.abs(r.regressed - (2 * 0.9 + 8 * 0.03 * 15) / 10) < 1e-9);
+  // Still needs a position baseline and a sample.
+  assert.equal(regressTds(base({ n: 2, xTd: { ...K, rush: 0.9 }, opp: { ...K, rush: 15 }, priorExcluded: true })), null);
+  assert.equal(regressTds(base({ n: 0, position: pos, priorExcluded: true })), null);
+});
+
 const sig = (n: number, w: Partial<Record<"passAtt" | "carries" | "targets" | "actPassTd" | "actRushTd" | "actRecTd", number>>) =>
   ({ weeks: Array.from({ length: n }, () => ({ passAtt: 0, carries: 0, targets: 0, actPassTd: 0, actRushTd: 0, actRecTd: 0, ...w })) }) as unknown as PlayerSignals;
 

@@ -1427,3 +1427,36 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
 * **Effect on test fixtures**: a 4-ppg backup now at 16 pts/game over 4 games: 12.0 → 16.0. A 3.7-ppg backup now at
   16 expected / ~15.5 rate over 5 games: 12.1 → 15.5 (first build: 15.3). Any 2025 efficiency (lucky, poor, 4-game)
   now gives the same rate on a role change.
+
+## Fix: team-change prior and TD baseline (2026-10-30) — overrides "Fix: role-change prior at current volume" and "Fix: one playoff engine + small-sample prior" (TD baseline) where they differ
+
+* **Problem**: a lead back who changed teams (2025: split backfield, 11.3 pts/g; 2026: 20.0 expected pts/g over 6
+  games, experts RB2–3) read 16.4 pts/g. His jump sat just under the role-change bar, so the old-team prior kept the
+  small-sample weight (2.8 games, about −2.2 pts/g), and the TD baseline was his old team's goal-line rate (1.16
+  expected TD/g regressed to 0.71, about −2.7 pts/g). The same old-team / short-sample baseline also pushed the other
+  way: a QB with a 4-game 2025 was regressed UP (1.54 → 2.23 TD/g).
+* **Practice**: projections re-baseline a player's opportunity and touchdown expectations when he changes teams (new
+  offense, new goal-line usage); touchdown rate per opportunity is the least stable fantasy stat and needs a large
+  sample before a player's own rate beats the position average.
+* **Team change** (`signalTables.ts` `buildPrior` → `PriorSeason.lastTeam`, `talent.ts` `priorTeam`): his 2025 team
+  = the team of his latest 2025 regular-season game (ep_weekly `posteam`; traded mid-2025 = the later team).
+  `teamChanged` = that team is known and differs from his current team (FA or unknown = not changed: the player-DB
+  prior and fixtures have no team, so they keep the old behaviour).
+* **Prior** (`projectionV4.ts` `makeBase`): `priorNeutral = roleUp || (teamChanged && unflagged ≥ V4.roleUpMinGames)`
+  — the same mechanism and evidence bar as a role change: weight `priorK`, entering at his current-role rate. Under
+  2 unflagged games on the new team the prior blends as before (one partial game is no role yet). Works both ways: a
+  player with a smaller role on his new team also loses his old-team prior.
+* **TD baseline**: last season's own TDs per opportunity only when `!teamChanged` and he played ≥ `V4.tdPriorMinGames`
+  = 8 games (calibration value); otherwise the position's baseline. A player whose real 2025 (≥ `priorMinGames`) is
+  excluded this way (`regressTds` `priorExcluded`) regresses toward the position at any sample size; the
+  "no prior and < 4 sample games → no regression" skip stays for players without such history. `tdK` unchanged.
+* **Why-lines**: "2025 on another team: AAA in 2025: counted at this year's role, 18.9 pts/game" (AAA = his 2025 team) (when the neutral
+  path applied and the role-change line did not); Touchdowns shows "(RB average 0.73)" when the baseline is the
+  position's.
+* **Unchanged**: `isRoleUp` and its bar, the ECR anchor, finishing, vacated-role and spike logic.
+* **Real-data effect** (owner league snapshot, 28 players move ≥ 1 pt/g): the lead back 16.4 → 19.5; a QB with a
+  short 2025 20.7 → 17.6; backup and depth players on new teams drop 1–4 pts/g (their old-team starter priors);
+  a star receiver on a new team with 3 games and poor finishing 12.7 → 10.8.
+* **Residual**: a player traded TO his current team mid-2025 counts as same-team, with TDs mixed from both teams
+  (no per-team split).
+* Tests: `projectionV4.teamChange.test.ts`, `tdRegression.test.ts` (priorExcluded), `signalTables.test.ts` (lastTeam).

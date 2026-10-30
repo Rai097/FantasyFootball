@@ -30,6 +30,7 @@ export function talentPrior(
     priorActPpg: g > 0 ? score(s, prior!.actual, pos) / g : null,
     priorTds: g > 0 ? { pass: prior!.actual.passTd / g, rush: prior!.actual.rushTd / g, rec: prior!.actual.recTd / g } : null,
     priorOpps: g > 0 && prior!.opps ? { pass: prior!.opps.passAtt / g, rush: prior!.opps.carries / g, rec: prior!.opps.targets / g } : null,
+    priorTeam: g > 0 && prior!.lastTeam ? prior!.lastTeam : null,
     age: age === null ? null : Math.round(age * 10) / 10,
     ageRising: age === null ? null : age <= AGE_RISING_MAX,
     rookie,

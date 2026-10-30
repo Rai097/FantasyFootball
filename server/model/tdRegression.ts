@@ -3,7 +3,9 @@
 // receiving TDs per target — this season's expected TD rate per opportunity is pulled toward a baseline rate per
 // opportunity with tdK games × his own opportunity rate of weight, then multiplied by his current opportunity rate.
 // In per-game terms: regressed = (n × xTD/g + tdK × baseline/opp × opp/g) / (n + tdK). The baseline is last season's
-// ACTUAL TDs per opportunity (≥ minGames games), else the position's mean ACTUAL TDs per opportunity this season.
+// ACTUAL TDs per opportunity when the caller passes a prior (projectionV4: same team, ≥ V4.tdPriorMinGames games), else
+// the position's mean ACTUAL TDs per opportunity this season (without a prior only from minGames sample games, unless
+// the caller excluded a real last season: `priorExcluded`).
 // Unknown opportunities (a source without attempts / carries / targets) fall back to per-game rates. Pure.
 import type { ByTdKind, PlayerSignals } from "./signals/types.js";
 import type { Position, Scoring } from "./types.js";
@@ -98,6 +100,9 @@ export interface TdInput {
   k: number;
   /** Last season (≥ minGames games): actual TDs per game and opportunities per game (null = unknown). */
   prior: { tds: ByTdKind; opps: ByTdKind | null } | null;
+  /** He has a ≥ minGames last season that is not usable as his TD baseline (another team, or a short sample): the
+   *  position baseline applies at any sample size. The under-minGames skip is for players without such history. */
+  priorExcluded?: boolean;
   position: PositionTdBase | undefined;
   minGames: number;
   points: ByTdKind;
@@ -106,7 +111,7 @@ export interface TdInput {
 /** The regression, or null when it does not apply (no sample, or under minGames sample games without a prior). */
 export function regressTds(x: TdInput): TdShrink | null {
   if (!(x.n > 0)) return null;
-  if (!x.prior && (x.n < x.minGames || !x.position)) return null;
+  if (!x.prior && ((x.n < x.minGames && !x.priorExcluded) || !x.position)) return null;
   let raw = 0;
   let regressed = 0;
   let base = 0;

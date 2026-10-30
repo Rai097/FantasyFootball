@@ -63,6 +63,8 @@ export interface PriorSeason {
   expected: StatLine;
   /** Season opportunity totals (ep_weekly pass / rush / rec attempts); absent when the source has none (player DB). */
   opps?: { passAtt: number; carries: number; targets: number };
+  /** Team of his latest game that season (ep_weekly posteam); absent = unknown (player DB, fixtures). */
+  lastTeam?: string;
 }
 
 /** Touchdowns or opportunities by kind: passing (per attempt), rushing (per carry), receiving (per target). */
@@ -173,6 +175,8 @@ export interface TalentPrior {
   priorTds: ByTdKind | null;
   /** Last season's opportunities per game by kind; null when unknown (no games or no opportunity data). */
   priorOpps: ByTdKind | null;
+  /** Team of his latest game last season; null = unknown (unknown is never read as a team change). */
+  priorTeam: string | null;
   age: number | null;
   ageRising: boolean | null;
   rookie: boolean;

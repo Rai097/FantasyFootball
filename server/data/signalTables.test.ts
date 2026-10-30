@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { staleMemo } from "./memo.js";
 import {
   buildPlayedWeeks,
+  buildPrior,
   buildTables,
   buildPointsAllowed,
   buildSchedule,
@@ -16,7 +17,8 @@ import {
   parseStatus,
 } from "./signalTables.js";
 import { EP_2026, GAMES, INJURIES, ROSTER, SNAPS, IDS, fixtureInputs } from "./fixtures/signals2026.js";
-import { DB_STALE_MS } from "./players.js";
+import { DB_STALE_MS, emptyLine } from "./players.js";
+import type { EpRow } from "./signalTables.js";
 import { score } from "../model/scoring.js";
 import { PPR } from "./fixtures/signals2026.js";
 
@@ -161,4 +163,16 @@ test("release (c): roster transaction code kept; reserve / injury-report players
   const played = buildPlayedWeeks(parseGames(games, 2026));
   assert.deepEqual(played.get("AAA"), [1, 2]);
   assert.deepEqual(played.get("CCC"), [2]);
+});
+
+test("prior season: lastTeam is the team of his latest week (unsorted rows, multi-team season); no team → unknown", () => {
+  const row = (playerId: string, week: number, team: string): EpRow => ({
+    week, gameId: `g${week}`, team, playerId, name: playerId, pos: "RB", passAttempts: 0, targets: 2, carries: 10, airYards: 0, actual: emptyLine(), expected: emptyLine(),
+  });
+  const prior = buildPrior([row("a", 12, "BBB"), row("a", 3, "AAA"), row("a", 17, "BBB"), row("a", 8, "AAA"), row("b", 5, "CCC"), row("c", 2, "")]);
+  assert.equal(prior.get("a")!.lastTeam, "BBB", "traded mid-season: the later team");
+  assert.equal(prior.get("a")!.games, 4);
+  assert.equal(prior.get("a")!.opps!.carries, 40);
+  assert.equal(prior.get("b")!.lastTeam, "CCC");
+  assert.equal(prior.get("c")!.lastTeam, undefined, "no team in the rows: unknown");
 });

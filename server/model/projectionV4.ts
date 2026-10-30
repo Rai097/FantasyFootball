@@ -53,9 +53,10 @@ export interface ProjectionTables {
 
 /**
  * Pseudo-games last season's rate counts as next to `sampleGames` of this season: small samples lean on it more, unless
- * his role grew (`roleUp`: last season came from a smaller role, so it keeps only the base weight V4.priorK).
+ * last season came from another situation (`neutral`: his role grew or he changed teams, so it keeps only the base weight
+ * V4.priorK and enters at his current-role rate).
  */
-export const priorWeight = (sampleGames: number, roleUp = false): number => (roleUp ? V4.priorK : Math.max(V4.priorK, V4.priorKSmall - sampleGames));
+export const priorWeight = (sampleGames: number, neutral = false): number => (neutral ? V4.priorK : Math.max(V4.priorK, V4.priorKSmall - sampleGames));
 
 /**
  * Role change (fix 2026-10-27): the bar is max(V4.roleUpRatio × last season's expected pts/game, last season's +
@@ -90,9 +91,12 @@ export const V4 = {
   /** Each of his last this-many unflagged games must clear the bar. */
   roleUpMinGames: 2,
   /** Expected TDs per opportunity regress toward a baseline with this many games × his opportunity rate (last season's
-   *  actual TDs per opportunity when he played ≥ priorMinGames, else the position's mean actual rate this season). */
+   *  actual TDs per opportunity when he played ≥ tdPriorMinGames for his current team, else the position's mean actual
+   *  rate this season). */
   tdK: 8,
   priorMinGames: 4,
+  /** Last season's own TD rate is the baseline only from ≥ this many games (TD rate needs a large sample). */
+  tdPriorMinGames: 8,
   /** Points allowed: pseudo-games of league average, and the factor's clamp. */
   matchupK: 4,
   matchupClamp: [0.8, 1.2] as const,
@@ -231,12 +235,17 @@ interface Base {
   unflagged: number;
   flagged: number;
   priorRate: number | null;
-  /** The prior that enters the model: priorRate, or on roleUp his current-role rate (prior neutral). */
+  /** The prior that enters the model: priorRate, or on roleUp / teamChanged his current-role rate (prior neutral). */
   priorUsed: number | null;
   /** Pseudo-games last season's rate counts as (priorWeight). */
   priorW: number;
   /** His role grew since last season (isRoleUp): the prior keeps the base weight only. */
   roleUp: boolean;
+  /** His latest 2025 team differs from his current team (unknown = false): his 2025 TD rate is not the TD baseline,
+   *  and from ≥ V4.roleUpMinGames unflagged games the prior is neutral like roleUp (`priorNeutral`). */
+  teamChanged: boolean;
+  /** The prior entered at his current-role rate (roleUp, or teamChanged with an established new role). */
+  priorNeutral: boolean;
   /** Model rate with the borrowed-role games at full weight (signals `vacated.fullExpPts`); null = none. */
   modelFull: number | null;
   /** Borrowed role that is his own (teammate not expected back in the window): no discount; weeks and who for the why. */
@@ -394,7 +403,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       ppg25: hasPrior ? score(scoring, p.prior!.line, p.pos) / p.prior!.games : 0,
       trend: weeks.length >= 3 ? mean(exp.slice(-2)) - mean(exp) : 0,
     };
-    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorUsed: null, priorW: 0, roleUp: false, td: null, modelFull: null };
+    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorUsed: null, priorW: 0, roleUp: false, teamChanged: false, priorNeutral: false, td: null, modelFull: null };
     const sig0 = sigOf(p);
     // Borrowed role whose teammate is not expected back in the window: the role is his (signals without detection).
     const ownRole = !!sig0?.vacated && !borrowedIsTemporary(p, sig0.vacated);
@@ -412,18 +421,22 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const t = sig?.talent;
     const priorRate =
       t && t.priorGames >= V4.priorMinGames && t.priorExpPpg !== null && t.priorActPpg !== null ? (t.priorExpPpg + t.priorActPpg) / 2 : null;
+    // Team change (fix 2026-10-30): last season is another offense and goal-line role. Unknown team ≠ changed.
+    const teamChanged = !!t?.priorTeam && p.team !== "FA" && !!p.team && t.priorTeam !== p.team;
     // Touchdowns are the noisiest part of expected points: the TD part regresses per opportunity (tdRegression.ts),
     // the rest is unchanged. Not on the actual-points fallback (no expected TDs there).
     let td: TdShrink | null = null;
     if (!missingExp && expRate !== null && sig) {
       const r = sig.rates;
-      const usePrior = !!t && t.priorGames >= V4.priorMinGames && t.priorTds !== null;
+      // His own 2025 TD rate only from the same team and a full-ish sample; else the position baseline.
+      const usePrior = !!t && !teamChanged && t.priorGames >= V4.tdPriorMinGames && t.priorTds !== null;
       td = regressTds({
         xTd: { pass: r.expPassTd ?? 0, rush: r.expRushTd ?? 0, rec: r.expRecTd ?? 0 },
         opp: { pass: r.passAtt ?? 0, rush: r.carries ?? 0, rec: r.targets ?? 0 },
         n: sampleGames,
         k: V4.tdK,
         prior: usePrior ? { tds: t!.priorTds!, opps: t!.priorOpps } : null,
+        priorExcluded: !!t && t.priorGames >= V4.priorMinGames && !usePrior,
         position: tdBaseline.of(p.pos, sig),
         minGames: V4.priorMinGames,
         points: tdPointsOf(scoring),
@@ -432,18 +445,21 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     // A backup-turned-starter: last season's smaller role must not outweigh his new one. Usage = expected points after
     // the TD regression (a one-off goal-line spike is not a new role); not on the actual-points fallback.
     const roleUp = priorRate !== null && !missingExp && expRate !== null && isRoleUp(expRate - (td?.ptsDelta ?? 0), t!.priorExpPpg!, (sig?.weeks ?? []).filter((w) => !w.flagged && !w.flags.vacated).map((w) => w.expPts));
+    // Role grew or team changed: last season is another situation and enters neutral. A team change needs the role
+    // change's evidence bar (≥ roleUpMinGames unflagged games): one partial game on the new team is no role yet.
+    const priorNeutral = roleUp || (teamChanged && unflagged >= V4.roleUpMinGames);
     // Never more pseudo-games than the prior season actually had (a 4-game 2025 counts as ≤ 4 games).
-    const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames, roleUp), t!.priorGames) : 0;
-    // Role grew (fix round 1, 2026-10-30): last season's smaller role carries neither its volume nor a second copy of
-    // its efficiency (finishing and the TD baseline already hold what the model uses), so the prior enters at his
-    // current-role rate: neutral. Each model blends with the prior at its own current rate.
-    const blend = (cur: number) => (priorRate === null ? cur : roleUp ? cur : (sampleGames * cur + priorW * priorRate) / (sampleGames + priorW));
+    const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames, priorNeutral), t!.priorGames) : 0;
+    // Neutral prior (fix round 1, 2026-10-30; team change 2026-10-30): last season's other role carries neither its
+    // volume nor a second copy of its efficiency (finishing and the TD baseline already hold what the model uses), so
+    // the prior enters at his current-role rate. Each model blends with the prior at its own current rate.
+    const blend = (cur: number) => (priorRate === null ? cur : priorNeutral ? cur : (sampleGames * cur + priorW * priorRate) / (sampleGames + priorW));
     let model: number | null = null;
     let priorUsed = priorRate;
     if (expRate !== null && sampleGames > 0) {
       const cur = (expRate - (td?.ptsDelta ?? 0)) * eff;
       model = blend(cur);
-      if (roleUp) priorUsed = cur;
+      if (priorNeutral) priorUsed = cur;
     } else if (priorRate !== null) model = priorRate;
     // The same model with the borrowed-role games at full weight: the rate while the teammate he replaced stays out.
     let modelFull: number | null = null;
@@ -451,7 +467,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       const cur = (sig.vacated.fullExpPts - (td?.ptsDelta ?? 0)) * eff;
       modelFull = blend(cur);
     }
-    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorUsed, priorW, roleUp, td, modelFull, ...(borrowedOwn ? { borrowedOwn } : {}) };
+    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorUsed, priorW, roleUp, teamChanged, priorNeutral, td, modelFull, ...(borrowedOwn ? { borrowedOwn } : {}) };
   };
   const bases = all.map(makeBase);
   const baseById = new Map(bases.map((b) => [b.p.id, b]));
@@ -850,6 +866,8 @@ function explainItems(
       const grew = x.roleUp && x.expRate !== null ? ` (role grew: ${f1(x.expRate - (x.td?.ptsDelta ?? 0))} vs ${f1(x.sig!.talent.priorExpPpg!)} expected/g)` : "";
       add("2025", `${f1(x.priorRate)} pts/game, counts as ${w} games${grew}`);
       if (x.roleUp && x.priorUsed !== null) add("2025 at new role", `${f1(x.priorUsed)} pts/game: counted at this year's role and finishing`);
+      else if (x.priorNeutral && x.teamChanged && x.priorUsed !== null)
+        add("2025 on another team", `${x.sig!.talent.priorTeam} in 2025: counted at this year's role, ${f1(x.priorUsed)} pts/game`);
     }
   }
   if (x.gamesLeft > 0 && Math.abs(x.avgMatchup - 1) >= 0.01) add("Matchups", `×${x.avgMatchup.toFixed(2)} on average (opponents' points allowed)`);

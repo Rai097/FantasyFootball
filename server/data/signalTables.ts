@@ -256,9 +256,10 @@ export function parseSnaps(csv: string, pfrToGsis: Map<string, string>): Map<str
   return out;
 }
 
-/** Last season's regular-season totals per player. */
+/** Last season's regular-season totals per player; `lastTeam` = the team of his latest week (rows are unsorted). */
 export function buildPrior(rows: EpRow[]): Map<string, PriorSeason> {
   const out = new Map<string, PriorSeason>();
+  const lastWeek = new Map<string, number>();
   for (const r of rows) {
     const p = out.get(r.playerId) ?? { games: 0, actual: emptyLine(), expected: emptyLine(), opps: { passAtt: 0, carries: 0, targets: 0 } };
     p.games += 1;
@@ -267,6 +268,10 @@ export function buildPrior(rows: EpRow[]): Map<string, PriorSeason> {
     p.opps!.passAtt += r.passAttempts;
     p.opps!.carries += r.carries;
     p.opps!.targets += r.targets;
+    if (r.team && r.week >= (lastWeek.get(r.playerId) ?? -Infinity)) {
+      lastWeek.set(r.playerId, r.week);
+      p.lastTeam = r.team;
+    }
     out.set(r.playerId, p);
   }
   return out;
