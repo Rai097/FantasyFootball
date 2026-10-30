@@ -466,7 +466,12 @@ describe("server integration (demo/42)", { timeout: 300_000 }, () => {
       assert.ok(t.me.scoreDelta >= 0.95, `${t.key}: me.scoreDelta ${t.me.scoreDelta}`);
       assert.ok(t.me.gives.length <= 3 && t.them.gives.length <= 2);
       for (const p of [...t.me.gives, ...t.them.gives]) {
-        assert.ok(!["QB", "K", "DEF"].includes(p.pos), `${t.key}: ${p.pos} ${p.name}`);
+        assert.ok(!["K", "DEF"].includes(p.pos), `${t.key}: ${p.pos} ${p.name}`);
+        // A QB moves only under the QB rule (a spare QB to a team that needs one; DESIGN "Trade finder v3").
+        if (p.pos === "QB") {
+          const rule = t.details.find((d: { label: string; value: string }) => d.label === "QB rule" && d.value.startsWith(`${p.name} `));
+          assert.ok(rule && / allowed: /.test(rule.value) && !/NOT allowed/.test(rule.value), `${t.key}: QB ${p.name} without an allowed QB rule`);
+        }
         assert.ok((p.market ?? p.value) >= 3 || p.value >= 3, `${t.key}: waiver-level ${p.name}`);
       }
       assert.equal(typeof t.pitch, "string");
