@@ -2,6 +2,7 @@
 
 ## Resume here
 Owner (2026-10-26): Claude is the architect; work the queue autonomously, stop only for critical issues.
+ROLE-CHANGE PRIOR AT CURRENT VOLUME (2026-10-30, DESIGN "Fix: role-change prior at current volume"): BUILT, awaiting adversarial test (HIGH: alters core valuation). Not deployed.
 AVAILABLE-PLAYER PROJECTIONS (2026-10-28, import v6, DESIGN "Available-player projections"): SHIPPED (live 4906de5). VERIFIED on the owner's v6 import 2026-10-28: week 193/193 available players, rest of season 151/193, view "Week 8 (proj)" = projWeek 8 (Yahoo form field stat1); 0.0 = bye week or no role (Yahoo's own value). Bookmarklet
    reads "Week N (proj)" (+ rest-of-season if offered) for available K / DEF / offense; Waivers streams K / DEF on Yahoo's
    week projection (≥ +1.0, free agents only). Risk MEDIUM: developer tests + coordinator review, no separate adversarial tester.

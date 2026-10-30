@@ -70,6 +70,18 @@ export function isRoleUp(expPpg: number, priorExpPpg: number, recentExp: readonl
   return expPpg >= bar && recentExp.slice(-V4.roleUpMinGames).every((x) => x >= bar);
 }
 
+/**
+ * Role change prior at current volume (fix 2026-10-30): a prior from a smaller role informs efficiency, not volume.
+ * It enters at this season's usage (expected pts/game, TD part regressed) × last season's points per expected point
+ * (`priorRate / priorExpPpg`, clamped to V4.roleUpPriorEffClamp). Non-finite input → null (caller keeps the raw prior).
+ */
+export function roleUpPrior(usage: number, priorRate: number, priorExpPpg: number): number | null {
+  const ratio = priorRate / priorExpPpg;
+  if (!Number.isFinite(usage) || !Number.isFinite(ratio) || !(priorExpPpg > 0)) return null;
+  const [lo, hi] = V4.roleUpPriorEffClamp;
+  return usage * Math.min(hi, Math.max(lo, ratio));
+}
+
 export const emptyTables = (): ProjectionTables => ({ signals: new Map(), schedule: new Map(), allowed: new Map(), leagueAllowed: {} });
 
 // ---------------------------------------------------------------- config (calibration values)
@@ -89,6 +101,9 @@ export const V4 = {
   roleUpMinGain: 3,
   /** Each of his last this-many unflagged games must clear the bar. */
   roleUpMinGames: 2,
+  /** Role grew: clamp on last season's points per expected point when his prior enters at this season's usage
+   *  (roleUpPrior). Calibration value tuned on one league-week (2026-10-30). */
+  roleUpPriorEffClamp: [0.7, 1.3] as const,
   /** Expected TDs per opportunity regress toward a baseline with this many games × his opportunity rate (last season's
    *  actual TDs per opportunity when he played ≥ priorMinGames, else the position's mean actual rate this season). */
   tdK: 8,
@@ -231,6 +246,8 @@ interface Base {
   unflagged: number;
   flagged: number;
   priorRate: number | null;
+  /** The prior that enters the model: priorRate, or on roleUp last season's efficiency at this season's usage. */
+  priorUsed: number | null;
   /** Pseudo-games last season's rate counts as (priorWeight). */
   priorW: number;
   /** His role grew since last season (isRoleUp): the prior keeps the base weight only. */
@@ -392,7 +409,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       ppg25: hasPrior ? score(scoring, p.prior!.line, p.pos) / p.prior!.games : 0,
       trend: weeks.length >= 3 ? mean(exp.slice(-2)) - mean(exp) : 0,
     };
-    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorW: 0, roleUp: false, td: null, modelFull: null };
+    if (base.kdef) return { ...base, sig: null, model: null, expRate: null, eff: 1, effRaw: null, sampleGames: 0, missingExp: 0, unflagged: 0, flagged: 0, priorRate: null, priorUsed: null, priorW: 0, roleUp: false, td: null, modelFull: null };
     const sig0 = sigOf(p);
     // Borrowed role whose teammate is not expected back in the window: the role is his (signals without detection).
     const ownRole = !!sig0?.vacated && !borrowedIsTemporary(p, sig0.vacated);
@@ -432,18 +449,20 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const roleUp = priorRate !== null && !missingExp && expRate !== null && isRoleUp(expRate - (td?.ptsDelta ?? 0), t!.priorExpPpg!, (sig?.weeks ?? []).filter((w) => !w.flagged && !w.flags.vacated).map((w) => w.expPts));
     // Never more pseudo-games than the prior season actually had (a 4-game 2025 counts as ≤ 4 games).
     const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames, roleUp), t!.priorGames) : 0;
+    // Role grew: last season's prior keeps its pseudo-game weight but enters at this season's volume (its efficiency only).
+    const priorUsed = priorRate !== null && roleUp ? (roleUpPrior(expRate! - (td?.ptsDelta ?? 0), priorRate, t!.priorExpPpg!) ?? priorRate) : priorRate;
     let model: number | null = null;
     if (expRate !== null && sampleGames > 0) {
       const cur = (expRate - (td?.ptsDelta ?? 0)) * eff;
-      model = priorRate !== null ? (sampleGames * cur + priorW * priorRate) / (sampleGames + priorW) : cur;
+      model = priorUsed !== null ? (sampleGames * cur + priorW * priorUsed) / (sampleGames + priorW) : cur;
     } else if (priorRate !== null) model = priorRate;
     // The same model with the borrowed-role games at full weight: the rate while the teammate he replaced stays out.
     let modelFull: number | null = null;
     if (sig?.vacated && !missingExp && expRate !== null && sampleGames > 0) {
       const cur = (sig.vacated.fullExpPts - (td?.ptsDelta ?? 0)) * eff;
-      modelFull = priorRate !== null ? (sampleGames * cur + priorW * priorRate) / (sampleGames + priorW) : cur;
+      modelFull = priorUsed !== null ? (sampleGames * cur + priorW * priorUsed) / (sampleGames + priorW) : cur;
     }
-    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorW, roleUp, td, modelFull, ...(borrowedOwn ? { borrowedOwn } : {}) };
+    return { ...base, sig, model, expRate, eff, effRaw: sig?.efficiency?.raw ?? null, sampleGames, missingExp, unflagged, flagged, priorRate, priorUsed, priorW, roleUp, td, modelFull, ...(borrowedOwn ? { borrowedOwn } : {}) };
   };
   const bases = all.map(makeBase);
   const baseById = new Map(bases.map((b) => [b.p.id, b]));
@@ -841,6 +860,7 @@ function explainItems(
       const w = Number.isInteger(x.priorW) ? x.priorW : x.priorW.toFixed(1);
       const grew = x.roleUp && x.expRate !== null ? ` (role grew: ${f1(x.expRate - (x.td?.ptsDelta ?? 0))} vs ${f1(x.sig!.talent.priorExpPpg!)} expected/g)` : "";
       add("2025", `${f1(x.priorRate)} pts/game, counts as ${w} games${grew}`);
+      if (x.roleUp && x.priorUsed !== null && x.priorUsed !== x.priorRate) add("2025 at new role", `${f1(x.priorUsed)} pts/game: last year's efficiency at this year's usage`);
     }
   }
   if (x.gamesLeft > 0 && Math.abs(x.avgMatchup - 1) >= 0.01) add("Matchups", `×${x.avgMatchup.toFixed(2)} on average (opponents' points allowed)`);

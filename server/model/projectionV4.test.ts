@@ -416,9 +416,12 @@ test("role change exempts the small-sample prior boost: a backup-turned-starter 
   assert.equal(priorRate, 4);
   // Riser: priorK = 2 pseudo-games, not max(2, 8 − 4) = 4.
   assert.match(why("riser", "2025")!, /counts as 2 games \(role grew: 16\.0 vs 4\.0 expected\/g\)/);
-  const k2 = (4 * 16 + V4.priorK * 4) / (4 + V4.priorK);
+  // Fix 2026-10-30: the 2 pseudo-games enter at this season's usage × last season's efficiency (16 × 4/4 = 16), not at
+  // the backup's 4 pts/game: (4 × 16 + 2 × 16) / 6 = 16.
+  const k2 = (4 * 16 + V4.priorK * 16) / (4 + V4.priorK);
   const boosted = (4 * 16 + 4 * 4) / 8;
-  assert.ok(Math.abs(model("riser") - k2) <= 0.5, `riser model ${model("riser")} vs priorK=2 result ${k2}`);
+  assert.ok(Math.abs(model("riser") - k2) <= 0.1, `riser model ${model("riser")} vs prior-at-current-volume result ${k2}`);
+  assert.equal(why("riser", "2025 at new role"), "16.0 pts/game: last year's efficiency at this year's usage");
   assert.ok(model("riser") - boosted >= 1, `not pulled to the backup role: ${boosted} → ${model("riser")}`);
   // Held steady with a tiny sample: the boost applies (8 − 3 = 5 games) and he moves toward the 18-ppg prior.
   assert.match(why("held", "2025")!, /^18\.0 pts\/game, counts as 5 games$/);
