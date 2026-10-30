@@ -1487,6 +1487,33 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
   new listings are all 2-for-2 swaps, e.g. a bench RB + TE for a starting RB + WR (+2.8/wk playoff lineup, ~58%).
 * Tests: `tradesV3.test.ts` "consolidation premium: only uneven deals pay it".
 
+## Fix: role-change trust ramp (2026-10-30) — overrides "Fix: role-change prior at current volume" on how far the prior moves
+
+* **Problem**: the role-change prior was binary. Once `isRoleUp` held (2 unflagged games above the bar) last season's
+  prior entered fully at the current-role rate. A TE whose usage cleared the bar only in his last 2 unflagged games
+  (earlier games far below) jumped about 1.8 pts/g on those 2 games.
+* **Owner's rationale**: trust in a new role should grow with evidence; a role with a known, lasting cause (the
+  starter ahead of him is out for the season or gone) deserves more trust than a short performance trend.
+* **Rule** (`projectionV4.ts` `makeBase`, `roleRunGames`, `roleTrustOf`): on a role change the prior enters at
+  last season's rate + trust × (current-role rate − last season's rate); `modelFull` uses its own current rate.
+  * Games in the new role = unflagged, non-borrowed games at or above the role-change bar, counted from the first
+    such game; a below-bar game after it is not counted and does not reset the count.
+  * `V4.roleTrust` = { 2: 0.5, 3: 0.8 }, ≥ 4 games → 1.0 (calibration values, tuned on one league).
+  * Known cause: the role came from a teammate out for the season / gone (the borrowed-role path where the role is
+    his) → trust 1.0 as soon as the role change holds.
+  * Team change: unchanged — ≥ 4 own-role games on the new team → trust 1.0; under 4 no neutral prior (not ramped).
+  * Weight stays `priorK` (2 pseudo-games); trust 0 would be the raw prior, trust 1 the old neutral prior.
+* **Why-line**: "2025 at new role: 13.4 pts/game: 50% toward this year's role (2 games in it)"; known cause "…: full
+  trust (role vacated for the season)"; ≥ 4 games keeps "counted at this year's role and finishing".
+* **Unchanged**: `isRoleUp` and its bar (now shared via `roleUpBar`), TD regression, ECR anchor, finishing, recency
+  half-life, team-change rules.
+* **Real-data effect** (owner league snapshot, lineup pts/g ≥ 0.5): the 2-game TE 16.65 → 15.75 (model 16.8 → 15.7);
+  two 2-game backup QBs (free agents) 15.57 → 13.41 and 14.40 → 13.35; a 3-game backup RB model 9.1 → 8.8 (80%);
+  a lead back whose starter is out for the season unchanged (full trust); established role changes (≥ 4 games)
+  unchanged. Playoff totals of the top 6: only the owner's team moves (141.9 → 141.2); no rank changes.
+* Tests: `projectionV4.roleTrust.test.ts`; two 2-game assertions in `projectionV4.roleUpPrior.adversarial.test.ts`
+  now expect the 50% prior.
+
 ## Projection accuracy log (2026-10-30)
 - Purpose: per player and overall, how the app's weekly projection and Yahoo's weekly projection compare with what
   actually happened (League tab card "Projection accuracy"; "Vs Yahoo" bullet in a player's value details).

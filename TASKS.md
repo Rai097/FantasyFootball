@@ -2,6 +2,7 @@
 
 ## Resume here
 Owner (2026-10-26): Claude is the architect; work the queue autonomously, stop only for critical issues.
+ROLE-CHANGE TRUST RAMP (2026-10-30, DESIGN "Fix: role-change trust ramp"): BUILT, not deployed; prior moves 50% / 80% / 100% toward the new role at 2 / 3 / 4+ games, full on a role vacated for the season (real data: the 2-game TE 16.65 → 15.75 lineup pts/g).
 CONSOLIDATION PREMIUM ONLY FOR UNEVEN DEALS (2026-10-30, DESIGN "Fix: consolidation premium only for uneven deals"): BUILT, not deployed; even 2-for-2 swaps no longer pay the 110% premium (real data: smaller edges 2 → 4, near misses 6 → 7).
 PROJECTION ACCURACY LOG (2026-10-30, DESIGN "Projection accuracy log"): BUILT, not deployed (risk MEDIUM: coordinator review next). Starts collecting with the first import before kickoff after deploy; unverified: card at exactly 390 / 1280 px (browser stayed at 500 px).
 TEAM-CHANGE PRIOR + TD BASELINE (2026-10-30, DESIGN "Fix: team-change prior and TD baseline"): SHIPPED live e15a541 (adversarial ccbb42a, fix round 1). No rostered label flips on real data. Residuals: traded back to his 2025 team = same team; mid-2025 trade TDs mixed. Backlog: big-usage WR held down by one low-TD year; injury-shortened games counted as normal; ECR stale after a suspension/injury return; 2-game riser sensitivity (half-life 2); projection-accuracy log (projected vs actual, incl. Yahoo weekly proj).

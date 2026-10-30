@@ -166,7 +166,10 @@ describe("role-change prior at current volume (adversarial)", () => {
     assert.ok(grew(v), dump(v));
     assert.equal(priorW(v), V4.priorK);
     const used = num(v, "2025 at new role");
-    assert.ok(Math.abs(used - usageOf(v) * 1) <= 0.05, `efficiency 1.0 prior enters at usage: ${used} vs ${usageOf(v)}`);
+    // Trust ramp (2026-10-30): 2 games in the new role → the prior moves V4.roleTrust[2] of the way to the usage.
+    const want = num(v, "2025") + V4.roleTrust[2] * (usageOf(v) * 1 - num(v, "2025"));
+    assert.ok(Math.abs(used - want) <= 0.1, `efficiency 1.0, 2 games: prior enters halfway to usage: ${used} vs ${want}`);
+    assert.match(item(v, "2025 at new role")!, /50% toward this year's role \(2 games in it\)$/);
   });
 
   test("actual-points fallback (missing usage data) and a prior under priorMinGames: no new-role bullet, finite model", () => {
@@ -196,7 +199,9 @@ describe("role-change prior at current volume (adversarial)", () => {
     const used = num(v, "2025 at new role");
     const usage = usageOf(v);
     assert.ok(usage < 12, `usage is TD-regressed: ${usage}`);
-    assert.ok(Math.abs(used - usage) <= 0.1, `efficiency 1.0 prior at the regressed usage: ${used} vs ${usage}: ${dump(v)}`);
+    // Trust ramp (2026-10-30): 2 games → halfway from the 2025 rate to the regressed usage (never toward the raw spike).
+    const want = num(v, "2025") + V4.roleTrust[2] * (usage - num(v, "2025"));
+    assert.ok(Math.abs(used - want) <= 0.1, `efficiency 1.0 prior halfway to the regressed usage: ${used} vs ${want}: ${dump(v)}`);
   });
 
   test("TE path and the why-bullet: plain, ≤ 90 characters with QB-sized numbers, shown only on a role change", () => {
