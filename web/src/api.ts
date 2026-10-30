@@ -269,8 +269,8 @@ export const api = {
       `${base(a)}/trades2${qs({ team: a.team, mode: q.mode ?? "balanced", partner: q.partner, wantPos: q.wantPos, maxGive: q.maxGive ?? 2, maxGet: q.maxGet ?? 2 })}`,
     ),
   benchUpgrades: (a: Active, mode: TradeMode = "balanced") => request<Trade[]>("GET", `${base(a)}/bench-upgrades${qs({ team: a.team, mode })}`),
-  evaluateTrade: (a: Active, partner: string, give: string[], get: string[]) =>
-    request<Trade & { verdict: string }>("POST", `${base(a)}/trade/evaluate`, { team: a.team, partner, give, get }),
+  evaluateTrade: (a: Active, partner: string, give: string[], get: string[], mode: TradeMode = "balanced") =>
+    request<Trade & { verdict: string }>("POST", `${base(a)}/trade/evaluate`, { team: a.team, partner, give, get, mode }),
   /** League tab: standings, power-score parts, who is above me and why. */
   leagueView: (a: Active) => request<LeagueView>("GET", `${base(a)}/league${qs({ team: a.team })}`),
   /** League tab "Projection accuracy" card: app vs Yahoo weekly projections against actual points (import leagues). */

@@ -1,16 +1,23 @@
-import { useMemo, useState } from "react";
-import { api, type Active, type Analysis, type VP } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, type Active, type Analysis, type TradeMode, type VP } from "../api";
 import type { ApiError } from "../lib/errors";
 import { f1 } from "../lib/format";
 import { toApiError } from "../lib/useAsync";
 import { ErrorBox, Loading, PosBadge } from "./common";
 import { PlayerChip } from "./PlayerChip";
-import { ExpandableList } from "./ExpandableRow";
-import { TradeCard } from "./TradeCard";
+import { TradeResult } from "./TradeResult";
 
 type Result = Awaited<ReturnType<typeof api.evaluateTrade>>;
 
-export function TradeBuilder({ analysis, active }: { analysis: Analysis; active: Active & { team: string } }) {
+/** A suggestion sent to the builder: the nonce makes sending the same trade twice work. */
+export interface BuilderPrefill {
+  nonce: number;
+  partner: string;
+  give: string[];
+  get: string[];
+}
+
+export function TradeBuilder({ analysis, active, mode, prefill }: { analysis: Analysis; active: Active & { team: string }; mode: TradeMode; prefill?: BuilderPrefill }) {
   const others = analysis.teams.filter((t) => t.team.id !== active.team);
   const [partner, setPartner] = useState(others[0]?.team.id ?? "");
   const [give, setGive] = useState<string[]>([]);
@@ -30,12 +37,12 @@ export function TradeBuilder({ analysis, active }: { analysis: Analysis; active:
   const theirs = useMemo(() => rosterOf(partner), [analysis, partner]); // eslint-disable-line react-hooks/exhaustive-deps
   const partnerName = others.find((t) => t.team.id === partner)?.team.name ?? "partner";
 
-  const evaluate = async () => {
+  const evaluate = async (p = partner, g = give, t = get) => {
     setBusy(true);
     setErr(undefined);
     setResult(undefined);
     try {
-      setResult(await api.evaluateTrade(active, partner, give, get));
+      setResult(await api.evaluateTrade(active, p, g, t, mode));
     } catch (e) {
       setErr(toApiError(e));
     } finally {
@@ -43,9 +50,26 @@ export function TradeBuilder({ analysis, active }: { analysis: Analysis; active:
     }
   };
 
+  // A new mode makes the shown verdict stale.
+  const firstMode = useRef(true);
+  useEffect(() => {
+    if (firstMode.current) firstMode.current = false;
+    else setResult(undefined);
+  }, [mode]);
+
+  // "Open in builder" on a suggestion: prefill both sides and evaluate at once.
+  const lastNonce = useRef(0);
+  useEffect(() => {
+    if (!prefill || prefill.nonce === lastNonce.current) return;
+    lastNonce.current = prefill.nonce;
+    setPartner(prefill.partner);
+    setGive(prefill.give);
+    setGet(prefill.get);
+    void evaluate(prefill.partner, prefill.give, prefill.get);
+  }, [prefill]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <section className="card builder">
-      <h2>Trade builder</h2>
       <label className="field">
         <span>Partner</span>
         <select
@@ -69,7 +93,7 @@ export function TradeBuilder({ analysis, active }: { analysis: Analysis; active:
         <Picker title={`You get from ${partnerName}`} roster={theirs} selected={get} onChange={(v) => (setGet(v), setResult(undefined))} />
       </div>
       <div className="row gap">
-        <button className="btn primary" disabled={busy || !partner || !give.length || !get.length} onClick={evaluate}>
+        <button className="btn primary" disabled={busy || !partner || !give.length || !get.length} onClick={() => evaluate()}>
           {busy ? "Evaluating…" : "Evaluate"}
         </button>
         {(give.length > 0 || get.length > 0) && (
@@ -89,9 +113,7 @@ export function TradeBuilder({ analysis, active }: { analysis: Analysis; active:
       {busy && <Loading label="Rebuilding both lineups…" />}
       {err && <ErrorBox error={err} />}
       {result && (
-        <ExpandableList className="trade-list" label="Evaluated trade">
-          <TradeCard trade={result} partnerName={partnerName} verdict={result.verdict} defaultOpen />
-        </ExpandableList>
+        <TradeResult trade={result} partnerName={partnerName} verdict={result.verdict} />
       )}
     </section>
   );

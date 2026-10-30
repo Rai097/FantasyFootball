@@ -59,11 +59,8 @@ a { color: var(--accent); }
 .row.between.wrap { gap: 12px; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--gap); }
 .grid-main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
-.grid-trades { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
-.grid-trades > aside { position: sticky; top: 12px; min-width: 0; }
 @media (max-width: 980px) {
-  .grid-main, .grid-trades { grid-template-columns: minmax(0, 1fr); }
-  .grid-trades > aside { position: static; }
+  .grid-main { grid-template-columns: minmax(0, 1fr); }
 }
 
 .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; min-width: 0; }
@@ -236,20 +233,11 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .league-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .league-list li.active { border-color: var(--accent); }
 .current .field { margin-top: 14px; max-width: 420px; }
-.verdict { display: inline-block; margin-top: 4px; font-weight: 750; font-size: 13px; padding: 3px 10px; border-radius: 999px; }
+.verdict { display: inline-block; font-weight: 750; font-size: 13px; padding: 3px 10px; border-radius: 999px; }
 .verdict.good { background: var(--pos-bg); color: var(--pos); }
 .verdict.warn { background: var(--warn-bg); color: var(--warn); }
 .verdict.bad { background: var(--neg-bg); color: var(--neg); }
-.trade-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
-.trade-side { background: var(--bg-2); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .side-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 2px; }
-.side-player { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
-.side-player .chip { flex: 0 1 auto; }
-.drop-note { margin-top: 2px; }
-.trade-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.metric { display: flex; flex-direction: column; background: var(--bg-2); border-radius: var(--radius-sm); padding: 8px 10px; }
-.metric-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
-.metric-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .tags { display: flex; flex-wrap: wrap; }
 .finder-summary { font-size: 14px; }
 .fold { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
@@ -257,8 +245,6 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .fold > summary .muted { font-weight: 400; }
 .fold[open] > summary { border-bottom: 1px solid var(--border); }
 .fold-body { padding: 12px; display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
-.changes { margin: 0; padding-left: 18px; font-size: 13px; }
-.changes li { margin-bottom: 4px; }
 
 .builder { display: flex; flex-direction: column; gap: 12px; }
 .builder h2 { margin-bottom: 0; }
@@ -407,11 +393,8 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
   .hide-sm { display: none; }
   .table th, .table td { padding: 6px 6px; }
   .card { padding: 12px; }
-  .trade-cols, .builder-cols { grid-template-columns: minmax(0, 1fr); }
-  .trade-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .builder-cols { grid-template-columns: minmax(0, 1fr); }
   .fold-body { padding: 8px; }
-  .metric { padding: 6px 8px; }
-  .metric-value { font-size: 14px; }
   .strength-row { grid-template-columns: 38px minmax(40px, 1fr) 66px 74px; gap: 6px; }
   .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat-value { font-size: 19px; }
@@ -421,9 +404,6 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 
 /* ---------- layout fixes from screenshot review ---------- */
 .stack-sm > .btn { align-self: flex-start; }
-.side-player { flex-direction: column; align-items: flex-start; row-gap: 2px; }
-.side-player .chip { min-width: 0; max-width: 100%; }
-.side-meta { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
 .player-cell .strong { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
 @media (max-width: 700px) {
@@ -471,8 +451,6 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .strip-wk { font-size: 9.5px; line-height: 1.1; }
 
 /* ---- Trade finder v4: their-view / lineup / market lines, pitch, notes, partners */
-.trade-labels { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
-.trade-labels li.neg { color: var(--neg); }
 .pitch { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; background: var(--bg-2); border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin: 10px 0; font-size: 13px; }
 .pitch-text { font-style: italic; min-width: 0; overflow-wrap: anywhere; }
 .tag.tag-good { background: var(--pos-bg); border-color: rgba(62, 207, 122, 0.4); }
@@ -517,26 +495,12 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .flush-body { padding: 0; gap: 0; }
 
 /* Trade rows: summary (partner above) | your team | accept | chevron. */
-.trade-list .xlist-head, .trade-row .xrow-head { grid-template-columns: minmax(0, 1fr) 56px 56px 16px; }
-.tr-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.tr-eyebrow { font-size: 11.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.tr-eyebrow .verdict { margin-top: 0; font-size: 11.5px; padding: 1px 8px; }
-.tr-summary { font-size: 13px; overflow-wrap: anywhere; }
-.tr-team, .tr-accept { font-weight: 700; font-variant-numeric: tabular-nums; }
 .accept-chip.good { color: var(--pos); }
 .accept-chip.warn { color: var(--warn); }
 .accept-chip.bad { color: var(--neg); }
-.trade-row .xrow-details { gap: 10px; }
-.trade-row .pitch { margin: 0; }
-.side-players { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.side-players .side-player { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.trade-row .trade-metrics { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 
 /* Best-fit partners: # | team | why they fit | fit | chevron. */
-.fit-list .xlist-head, .partner-row .xrow-head { grid-template-columns: 22px minmax(120px, 190px) minmax(0, 1fr) 52px 16px; }
 .p-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.p-summary { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.p-summary-open { font-size: 13px; }
 
 /* Breakout target rows: # | player | score | owner | role | chevron. */
 .target-list .xlist-head, .target-row .xrow-head { grid-template-columns: 34px minmax(0, 1fr) 52px minmax(70px, 160px) 44px 16px; }
@@ -550,15 +514,6 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .tier-title { display: flex; align-items: center; gap: 6px; padding-bottom: 8px; }
 
 @media (max-width: 700px) {
-  .trade-row .xrow-head { grid-template-columns: minmax(0, 1fr) 48px 44px 16px; padding: 10px 12px; }
-  .tr-summary { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  .trade-row.open .tr-summary { -webkit-line-clamp: unset; }
-  .partner-row .xrow-head { grid-template-columns: 18px minmax(0, 1fr) 44px 16px; grid-template-areas: "rank name fit chev" "sum sum sum chev"; padding: 10px 12px; }
-  .partner-row .xrow-head > :nth-child(1) { grid-area: rank; }
-  .partner-row .p-name { grid-area: name; }
-  .partner-row .p-summary { grid-area: sum; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .partner-row .xrow-head > :nth-child(4) { grid-area: fit; }
-  .partner-row .xrow-chevron { grid-area: chev; }
   .target-row .xrow-head { grid-template-columns: 30px minmax(0, 1fr) 40px 16px; grid-template-areas: "rank player score chev" "rank owner role chev"; padding: 8px 10px; row-gap: 0; }
   .target-row .t-rank { grid-area: rank; }
   .target-row .t-player { grid-area: player; }
@@ -631,3 +586,87 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
   .acc-row .xrow-chevron { grid-area: chev; }
   .acc-lists { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- Trade Finder layout v2 (2026-10-30): one column, three views ---------- */
+.trades-page { max-width: 1100px; margin: 0 auto; width: 100%; }
+.trades-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; }
+.view-seg .seg-btn { padding: 6px 14px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.small-btn { padding: 4px 12px; font-size: 12.5px; min-height: 44px; min-width: 44px; }
+
+/* Trade rows: Partner | You give | You get | Your gain | Accept | chevron. */
+.trade-list .xlist-head, .trade-row .xrow-head { grid-template-columns: minmax(110px, 160px) minmax(0, 1fr) minmax(0, 1fr) 92px 84px 16px; }
+.trade-row .xrow-head > span:not(.xrow-chevron) { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.tr-gain, .tr-accept { font-weight: 700; }
+.accept-chip.good { color: var(--pos); }
+.accept-chip.warn { color: var(--warn); }
+.accept-chip.bad { color: var(--neg); }
+.trade-row .xrow-details { padding: 12px; }
+
+/* Best-fit partners: Team | Their need | You can offer | Fit | chevron. */
+.fit-list .xlist-head, .partner-row .xrow-head { grid-template-columns: minmax(110px, 190px) minmax(0, 1fr) minmax(0, 1fr) 52px 16px; }
+.p-need, .p-offer { font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+
+/* The shared result: verdict bar, KPI tiles, tables. */
+.tres { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.verdict-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; }
+.verdict-bar .verdict { margin: 0; font-size: 14px; }
+.verdict-reason { flex: 1 1 220px; min-width: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.verdict-bar .btn { margin-left: auto; }
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.kpi { display: flex; flex-direction: column; gap: 2px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; min-width: 0; }
+.kpi-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.kpi-value { font-size: 18px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.tscroll { overflow-x: auto; min-width: 0; }
+.rtable { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.rtable caption { text-align: left; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding: 0 0 4px; }
+.rtable th, .rtable td { padding: 6px 8px; text-align: left; border-bottom: 1px solid rgba(43, 52, 65, 0.6); vertical-align: middle; }
+.rtable thead th { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 650; white-space: nowrap; }
+.rtable .num { text-align: right; white-space: nowrap; }
+.rtable tfoot td { font-weight: 700; border-bottom: none; }
+.rtable .group-row th { background: var(--bg-2); font-size: 12px; font-weight: 700; color: var(--text); text-transform: uppercase; letter-spacing: 0.04em; }
+.rtable td.pos { color: var(--pos); }
+.rtable td.neg { color: var(--neg); }
+.rtable td.warn { color: var(--warn); }
+.checks-table td:first-child { width: 34%; }
+.checks-table .icon-col { width: 36px; text-align: center; font-weight: 700; }
+.players-table td .tag { margin: 0 4px 0 0; }
+.lineup-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.tres .pitch { margin: 0; }
+
+/* Build a trade: pickers side by side from 900 px, stacked below. */
+.builder .builder-cols { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) {
+  .builder .builder-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+@media (max-width: 700px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi-value { font-size: 16px; }
+  .players-table .chip-team, .players-table td .why { display: none; }
+  .players-table th, .players-table td { padding: 6px 4px; }
+  .players-table .chip-name { max-width: 110px; }
+  .labels-col { display: none; }
+  .players-table .labels-inline { display: block; margin-top: 3px; }
+  .trade-row .xrow-head {
+    grid-template-columns: minmax(0, 1fr) 54px 46px 16px;
+    grid-template-areas: "partner gain acc chev" "give give give chev" "get get get chev";
+    padding: 10px 12px;
+    row-gap: 2px;
+  }
+  .trade-row .tr-partner { grid-area: partner; }
+  .trade-row .tr-give { grid-area: give; }
+  .trade-row .tr-get { grid-area: get; }
+  .trade-row .tr-gain { grid-area: gain; }
+  .trade-row .tr-accept { grid-area: acc; }
+  .trade-row .xrow-chevron { grid-area: chev; }
+  .partner-row .xrow-head { grid-template-columns: minmax(0, 1fr) 44px 16px; grid-template-areas: "name fit chev" "need need chev" "offer offer chev"; padding: 10px 12px; row-gap: 2px; }
+  .partner-row .p-name { grid-area: name; }
+  .partner-row .p-need { grid-area: need; }
+  .partner-row .p-offer { grid-area: offer; }
+  .partner-row .xrow-head > :nth-child(4) { grid-area: fit; }
+  .partner-row .xrow-chevron { grid-area: chev; }
+  .tr-give::before, .tr-get::before, .p-need::before, .p-offer::before { content: attr(data-label) ": "; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+}
+.kpi-sub { display: block; font-size: 11.5px; font-weight: 500; }
+.labels-inline { display: none; }

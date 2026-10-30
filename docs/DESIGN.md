@@ -1633,3 +1633,13 @@ owner's league (same day's data, week 8, weeks 9–17 summed; per-player "proj. 
   optimal lineup with byes, stale this-week number not subtracted, Yahoo-sourced injured player at Yahoo's number
   (replaces "weeks our model has him out are 0 on Yahoo's view too") and Yahoo-sourced unconfirmed return without
   the scenario mix (replaces "Yahoo and estimate agree (Jensen case)").
+
+## Trade Finder layout v2 (2026-10-30) — overrides the two-column Trade Finder / Trade builder layout
+
+Display only (web/src); the one API change: `POST /trade/evaluate` now sends `mode` (the server already read it).
+- Page: mode switch (Win now / Balanced / Playoffs) above a segmented control **Suggestions | Build a trade | Partners**; one column, max 1100 px.
+- Suggestions: Trades as a table (Partner | You give | You get | Your gain | Accept), collapsed rows; Smaller edges, Near misses and Bench upgrades are closed folds with counts. Tap a row for the shared result; "Open in builder" sends the trade to Build a trade, prefilled and evaluated.
+- Partners: table Team | Their need | You can offer | Fit; a missing detail shows a dash.
+- Build a trade: partner + give/get pickers (stacked below 900 px), Evaluate, then the same result component.
+- Result (`TradeResult`, shared by builder and rows): verdict bar (chip, the deciding reason, mode), four KPI tiles (your playoff gain, their lineup, acceptance, what Yahoo shows them you / them), players table (our pts/g, market, labels), lineup-change tables with a total row, tags, "Why this verdict" checks table grouped Your side / Their side / Market / Other (no detail is dropped; unknown labels go to Other; icons from the tone), "Message to send" toggle with Copy. Pure helpers and tests: `web/src/lib/tradeView.ts`.
+- `npm test` now also runs `web/src/**/*.test.ts`. Screenshots: `docs/screenshots/trades-v2-*`.
