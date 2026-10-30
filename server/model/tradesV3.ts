@@ -13,7 +13,7 @@ import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
 import { marketTag } from "./labels.js";
 import { RETURNS, returnText } from "./returns.js";
-import { isSpike, perceivedLineupTotal, perceptionOf, yahooCoverage } from "./perception.js";
+import { evaluatorWeeks, isSpike, perceivedLineupTotal, perceptionOf, yahooCoverage } from "./perception.js";
 import { DEPTH_WEIGHT, teamStrength } from "./teamStrength.js";
 import { expectedWeeklyPoints } from "./rosterScore.js";
 
@@ -612,7 +612,7 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     const theirRosterAfter = their.roster.filter((p) => !getIds.has(p.id)).concat(give);
     const myPerceived = perceivedLineupTotal(S, myRosterAfter, my.irIds) - my.perceived;
     const theirPerceived = perceivedLineupTotal(S, theirRosterAfter, their.irIds) - their.perceived;
-    const nWeeks = Math.max(1, S.finalWeek - S.currentWeek + 1);
+    const nWeeks = Math.max(1, evaluatorWeeks(S));
     const perceivedLoss = r1(theirPerceived) < 0;
     const perceivedSource = [...give, ...get].every((p) => perceptionOf(p, S).source === "yahoo") ? "yahoo" : "estimate";
     const gapFavor = get.reduce((a, p) => a + perceptionOf(p, S).gap, 0) - give.reduce((a, p) => a + perceptionOf(p, S).gap, 0);
@@ -854,7 +854,7 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
     `${markedNames(give)} for ${markedNames(get)}: playoff lineup ${fmtSigned(poLineup)}/wk, your team ${fmtSigned(j.myDelta)}.`,
     `${j.perceivedSource === "yahoo" ? "Yahoo shows" : "Yahoo likely shows"} them ${fmtSigned(j.theirPerceived)} pts, ~${p100}% accept.`,
   );
-  const nWeeks = Math.max(1, S.finalWeek - S.currentWeek + 1);
+  const nWeeks = Math.max(1, evaluatorWeeks(S));
   const { items: details, add } = detailBuilder();
   add("Playoff lineup", `${fmtSigned(poLineup)} pts/wk in weeks ${S.regularSeasonEnd + 1}–${S.finalWeek}`, toneOf(poLineup));
   add("Playoff strength", `${fmtSigned(j.strengthDelta)} pts/wk (lineup + ${DEPTH_WEIGHT} × bench cover)`, toneOf(j.strengthDelta));
@@ -865,7 +865,7 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   for (const d of j.items31) add(d.label, d.value, d.tone);
   for (const d of j.coverItems) add(d.label, d.value, d.tone);
   add(j.perceivedSource === "yahoo" ? "What Yahoo shows" : "Yahoo view (estimate)", `you ${fmtSigned(j.myPerceived)}, them ${fmtSigned(j.theirPerceived)} pts rest of season`, toneOf(j.theirPerceived));
-  if (j.perceivedSource !== "yahoo") add("Their view from", "FantasyPros ROS rank + last 3 games: Yahoo projections not captured yet", "warn");
+  if (j.perceivedSource !== "yahoo") add("Their view from", "FantasyPros ROS rank: Yahoo projections not captured yet", "warn");
   add("Their weekly lineup", `${fmtSigned(j.theirLineup)} pts (our projections)`, toneOf(j.theirLineup));
   for (const p of j.spikes) {
     const pc = perceptionOf(p, S);
@@ -1124,7 +1124,7 @@ function summarize(
     "Their view",
     coverage.captured
       ? `Yahoo projections: ${coverage.captured} of ${coverage.total} rostered players captured`
-      : "Estimate (FantasyPros ROS rank + last 3 games): Yahoo projections not captured yet",
+      : "Estimate (FantasyPros ROS rank): Yahoo projections not captured yet",
     coverage.captured ? undefined : "warn",
   );
   add("Market values", source === "fantasycalc" ? "FantasyCalc (a minor part of acceptance)" : "Unavailable: our values used, no market edges");

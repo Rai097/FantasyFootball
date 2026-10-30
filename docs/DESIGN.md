@@ -1598,3 +1598,38 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
 * Tests: `tradesV3.test.ts` "finder rules (fix 2026-10-30)…", the real-case fixture at its real 0.67 market ratio and as
   a riser; the "never sell a riser" checks in `tradesV4.adversarial`, `fix1027.demo.adversarial` and
   `tradesV3.returns.adversarial` now assert the clear-gain bar (bench upgrades: still never).
+
+## Fix: Yahoo evaluator emulation (2026-10-30) — overrides "Model v4" section 5 / release (d) "Perceived value" on the weekly view and the lineup total
+
+Yahoo's Evaluate Trade tool compares each team's projected optimal lineup (league slots) in every remaining fantasy week,
+summed; the current week shows "even" (a trade processes after it). Checked against 8 real evaluator screens from the
+owner's league (same day's data, week 8, weeks 9–17 summed; per-player "proj. pts remaining" visible).
+
+* **Diagnosis** (old app vs Yahoo): (1) the lineup weeks used the perceived *rate* = 0.7 × projection + 0.3 × last 3
+  games — Yahoo's tool has no recency; this alone moved "them" by +26 to +42 on three deals (a hot QB/RB). (2) The
+  current week was summed (Yahoo: even). (3) Yahoo's rest-of-season total runs from the capture week through **NFL week
+  18**, not the league's final week: (Yahoo's remaining 9–17) / (captured total) = 0.80 for players with a bye still
+  ahead and 0.82 with it behind = games(9–17) / games(8–18); through week 17 would be 0.89. The old spread read ~10%
+  high per game (the old note above flagged this assumption). (4) Our availability zeroed weeks of Yahoo-sourced injured
+  players and mixed in our return scenario; Yahoo's number already prices the injury.
+* **Rule** (`perception.ts`): Yahoo source, captured this week with this week's number → per game = (total − this
+  week's number) ÷ his games from next week through the schedule's last week (`PERCEPTION.nflLastWeek` 18 when no
+  schedule); otherwise total ÷ his games from the capture week (games since played counted by bye) through that week.
+  Flat in every game week, byes 0, no availability filter. Estimate source (FantasyPros rank as points, else our rate):
+  base (no recency) in weeks our model has him available; an unconfirmed return keeps the scenario mix. `rate` keeps the
+  recency blend for the perception gap, spikes and "scored X last game" only.
+* **Lineup total** (`perceivedLineupTotal`): Σ over `evaluatorWeeks(S)` (next week → final week;
+  `PERCEPTION.evaluatorSkipsCurrentWeek`) of the greedy optimal lineup; IR-slot players only in weeks our model has
+  them back. Acceptance's per-week figure divides by the same week count.
+* **Real-data check** (8 cases, 16 sides, app vs Yahoo): mean abs error you 9.1 → 2.8, them 14.4 → 3.8; within ±5:
+  7 → 12 of 16; wrong sign: 3 → 1 (a "you" side at −1.3 real vs +2.6). "Them" signs (which cap acceptance) all match.
+* **Unavoidable gap**: we capture Yahoo's rest-of-season total and this week's number, not its per-week numbers. A flat
+  spread misses matchup swings, which matter when two near-equal players share a slot (the evaluator's best-of-two is
+  worth more than either's average), and a player on bye this week with no weekly number captured (questionable)
+  can't have his total split. Remaining misses: two deals with one partner, "them" −6 and −11, "you" +5 and +6. With
+  Yahoo's exact per-player remaining totals all 16 sides land within ±5, so the method is right and the residual is
+  the total-to-window conversion plus weekly shape.
+* Tests: `perception.test.ts` — spread through week 18 (schedule and bye-only), current week excluded, per-week
+  optimal lineup with byes, stale this-week number not subtracted, Yahoo-sourced injured player at Yahoo's number
+  (replaces "weeks our model has him out are 0 on Yahoo's view too") and Yahoo-sourced unconfirmed return without
+  the scenario mix (replaces "Yahoo and estimate agree (Jensen case)").
