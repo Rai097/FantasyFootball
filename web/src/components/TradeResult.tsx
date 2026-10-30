@@ -13,7 +13,7 @@ import { PlayerChip } from "./PlayerChip";
 export const TRADE_TIPS = {
   team: "Your weighted roster score change for the chosen mode (this week, rest of season, playoffs, bench depth).",
   accept: "Chance the other manager accepts, judged from his side: mostly what Yahoo's evaluator shows his lineup, lower if he gives a player right after a big game.",
-  playoffGain: "Your lineup's change per week in the playoff weeks (15–17), by our projections. It decides the verdict.",
+  playoffGain: "Your lineup's change per week in the playoff weeks (15–17), by our projections. The verdict uses the selected mode's bar (Playoffs: this plus 0.25 × bench cover).",
   theirLineup: "Their weekly lineup points over the rest of the season, by our projections.",
   marketValue: "FantasyCalc trade-market value they get vs give. It matters only a little: managers judge by Yahoo's lineup numbers.",
   yahoo: "Lineup change Yahoo's trade evaluator would show, next week through the final week (Yahoo projections), you / them in total points. 'Estimate' = not captured yet: FantasyPros rank.",
