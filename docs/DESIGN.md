@@ -1495,7 +1495,8 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
   free-agent QB/RB/WR/TE whose NFL team plays in W (K / DEF excluded: no actual-points source). Per player: id, name,
   pos, NFL team, fantasy team id (null = free agent), starter (Yahoo slot not BN / IR at capture), app = projection v4
   `weekly[W]` (matchup + availability included; an Out player's 0 is a real projection; no weekly = skipped, never 0),
-  yahoo = `yahooProjWeekly` only when the import's `projWeek` = W (absent otherwise), capturedAt = the import time.
+  yahoo = `yahooProjWeekly` only when the import's `projWeek` = W (absent otherwise), capturedAt = the server's clock
+  at save (never the payload's `importedAt`, which a first import keeps).
 - Merge rule per (week, player): keep the latest capture taken BEFORE that player's kickoff; a capture at or after his
   kickoff never overwrites anything. Kickoff = nflverse games.csv gameday + gametime read as US/Eastern
   (`GameInfo.kickoff`, offset from the runtime's tz data). Team kickoff unknown → the week's first kickoff is the
@@ -1515,3 +1516,5 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
   cached under `import:<id>:accuracy`). Payload ≈ 3 KB (no raw log). Value details: "Vs Yahoo: +2.1 pts/wk over 4 wks
   (beat 3 of 4)" from 3 compared weeks.
 - Needs the owner (or a member) to import before kickoff every week; no backfill (history files hold no projections).
+- Screenshot `docs/screenshots/league-accuracy-500.jpg`: anonymized scratch copy with SYNTHETIC weeks 5–7 (week-8
+  projections replayed against real actuals): layout only, not a real accuracy result.

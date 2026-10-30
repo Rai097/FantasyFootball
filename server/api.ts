@@ -403,7 +403,7 @@ async function resolvedRows(db: PlayerDb, league: League, id: string): Promise<R
  */
 let projCaptures: Promise<unknown> = Promise.resolve();
 export const projCaptureIdle = (): Promise<unknown> => projCaptures;
-function captureProjections(stored: StoredImport): void {
+function captureProjections(stored: StoredImport, capturedAt: string): void {
   const run = (async () => {
     const l = await loadContext("import", stored.id, false);
     const week = l.league.settings.currentWeek;
@@ -416,7 +416,7 @@ function captureProjections(stored: StoredImport): void {
       return typeof x === "number" && Number.isFinite(x) ? x : undefined;
     };
     const entries = projCaptureEntries(l.db, stored, week, appWeek, (t) => teams.has(t));
-    const r = await recordProjLog(stored.id, { season: l.db.season, week, capturedAt: stored.importedAt, entries, kickoffs, maxWeek: l.league.settings.finalWeek });
+    const r = await recordProjLog(stored.id, { season: l.db.season, week, capturedAt, entries, kickoffs, maxWeek: l.league.settings.finalWeek });
     if (r.kept) invalidate(`import:${stored.id}:accuracy`);
     console.log(`[projlog] import=${stored.id} week=${week} kept=${r.kept} ignored=${r.ignored}`);
   })().catch((e) => console.warn(`[projlog] capture failed for ${stored.id}: ${(e as Error).message}`));
@@ -759,7 +759,9 @@ apiRouter.post(
     await saveImport(stored);
     await recordHistory(stored, previous);
     invalidateLeague("import", stored.id);
-    captureProjections(stored);
+    // Capture time = the server's clock at save (never the payload's importedAt, which a first import may carry over):
+    // later than the bookmarklet's read, so the before-kickoff rule errs on the safe side.
+    captureProjections(stored, new Date().toISOString());
     res.json({
       id: stored.id,
       name: stored.name,

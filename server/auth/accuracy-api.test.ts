@@ -114,7 +114,8 @@ function yLeague(): any {
       return { yahooId: p.ids?.yahoo, name: p.name, pos: p.pos, team: p.team, slot: j < 2 ? p.pos : "BN", yahooProjWeekly: 10 };
     }),
   }));
-  return { id: "yY", leagueId: "555", name: "League Y", numTeams: 12, slots: ["QB", "WR", "WR", "RB", "TE", "W/R/T", "W/R/T", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN", "IR", "IR"], scoring: { rec: 1 }, settingsSource: "page", teams, myTeamId: "1" };
+  // A first import carrying an old importedAt (replayed payload): the capture must use the server's clock.
+  return { importedAt: "2020-01-01T00:00:00.000Z", id: "yY", leagueId: "555", name: "League Y", numTeams: 12, slots: ["QB", "WR", "WR", "RB", "TE", "W/R/T", "W/R/T", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN", "IR", "IR"], scoring: { rec: 1 }, settingsSource: "page", teams, myTeamId: "1" };
 }
 
 before(
@@ -150,6 +151,7 @@ describe("projection accuracy API", { timeout: 300_000 }, () => {
     const log: ProjLog | null = fs.existsSync(logFile()) ? JSON.parse(fs.readFileSync(logFile(), "utf8")) : null;
     const entries: ProjEntry[] = Object.values(log?.weeks?.[String(week)] ?? {});
     for (const e of entries) {
+      assert.ok(Date.parse(e.capturedAt) > Date.parse("2025-01-01"), `${e.name}: capturedAt ${e.capturedAt} taken from the payload`);
       assert.ok(["QB", "RB", "WR", "TE"].includes(e.pos), `${e.name} ${e.pos}`);
       const k = kick.get(e.team);
       assert.ok(k !== undefined && Date.parse(e.capturedAt) < k, `${e.name} (${e.team}) captured at/after kickoff`);
