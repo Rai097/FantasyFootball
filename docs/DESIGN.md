@@ -1442,10 +1442,12 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
   = the team of his latest 2025 regular-season game (ep_weekly `posteam`; traded mid-2025 = the later team).
   `teamChanged` = that team is known and differs from his current team (FA or unknown = not changed: the player-DB
   prior and fixtures have no team, so they keep the old behaviour).
-* **Prior** (`projectionV4.ts` `makeBase`): `priorNeutral = roleUp || (teamChanged && unflagged ≥ V4.roleUpMinGames)`
-  — the same mechanism and evidence bar as a role change: weight `priorK`, entering at his current-role rate. Under
-  2 unflagged games on the new team the prior blends as before (one partial game is no role yet). Works both ways: a
-  player with a smaller role on his new team also loses his old-team prior.
+* **Prior** (`projectionV4.ts` `makeBase`): `priorNeutral = roleUp || (teamChanged && unflagged ≥ V4.lateGames)` —
+  the same mechanism as a role change (weight `priorK`, entering at his current-role rate). A team change needs 4
+  unflagged games on the new team (coordinator amendment): the same threshold where the ECR anchor drops to 10%,
+  i.e. where this season's sample is trusted on its own. A 3-game, partly injury-hit start must not erase a full prior
+  season in either direction; under 4 games the prior blends as before. `roleUp` keeps its own 2-game bar. Works both
+  ways once established: a player with a smaller role on his new team also loses his old-team prior.
 * **TD baseline**: last season's own TDs per opportunity only when `!teamChanged` and he played ≥ `V4.tdPriorMinGames`
   = 8 games (calibration value); otherwise the position's baseline. A player whose real 2025 (≥ `priorMinGames`) is
   excluded this way (`regressTds` `priorExcluded`) regresses toward the position at any sample size; the
@@ -1454,9 +1456,10 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
   path applied and the role-change line did not); Touchdowns shows "(RB average 0.73)" when the baseline is the
   position's.
 * **Unchanged**: `isRoleUp` and its bar, the ECR anchor, finishing, vacated-role and spike logic.
-* **Real-data effect** (owner league snapshot, 28 players move ≥ 1 pt/g): the lead back 16.4 → 19.5; a QB with a
-  short 2025 20.7 → 17.6; backup and depth players on new teams drop 1–4 pts/g (their old-team starter priors);
-  a star receiver on a new team with 3 games and poor finishing 12.7 → 10.8.
+* **Real-data effect** (owner league snapshot, 16 players move ≥ 1 pt/g): the lead back 16.4 → 19.5; a QB with a
+  short 2025 20.7 → 17.6; depth players on new teams with ≥ 4 games drop 1–3 pts/g (their old-team starter priors);
+  a star receiver on a new team with 3 games keeps his prior blend (12.7 → 12.6; first build without the 4-game bar:
+  10.8).
 * **Residual**: a player traded TO his current team mid-2025 counts as same-team, with TDs mixed from both teams
   (no per-team split).
 * Tests: `projectionV4.teamChange.test.ts`, `tdRegression.test.ts` (priorExcluded), `signalTables.test.ts` (lastTeam).

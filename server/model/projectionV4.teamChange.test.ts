@@ -65,8 +65,9 @@ const tenPpg = (games: number, lastTeam?: string): PriorSeason => ({
 // 2026: 14 expected / 14 actual pts/game: 1.4× and +4 — just under the role-change bar max(1.5 × 10, 10 + 3) = 15.
 const jump = (n: number) => repeat(n, { a: { rec: 6, recYd: 80 }, e: { rec: 6, recYd: 80 } });
 
-test("team changer with a just-under-bar jump: prior neutral, rate = his current-role rate", () => {
-  const out = run([input("moved", jump(3), tenPpg(16, "BUF")), input("stayed", jump(3), tenPpg(16, CUR))]);
+test("team changer with a just-under-bar jump over lateGames games: prior neutral, rate = his current-role rate", () => {
+  assert.equal(V4.lateGames, 4);
+  const out = run([input("moved", jump(4), tenPpg(16, "BUF")), input("stayed", jump(4), tenPpg(16, CUR))]);
   const moved = out.get("moved")!;
   const stayed = out.get("stayed")!;
   assert.equal(grew(moved), false, "not a role change: the jump is under the bar");
@@ -78,8 +79,8 @@ test("team changer with a just-under-bar jump: prior neutral, rate = his current
   assert.match(line25, /^BUF in 2025: counted at this year's role, [\d.]+ pts\/game$/);
   assert.ok(`2025 on another team: ${line25}`.length <= 90);
   assert.equal(item(moved, "2025 at new role"), undefined);
-  // Same jump on the same team: the small-sample prior still pulls (8 − 3 = 5 pseudo-games at 10.0).
-  assert.equal(priorW(stayed), V4.priorKSmall - 3);
+  // Same jump on the same team: the small-sample prior still pulls (8 − 4 = 4 pseudo-games at 10.0).
+  assert.equal(priorW(stayed), V4.priorKSmall - 4);
   assert.equal(item(stayed, "2025 on another team"), undefined);
   assert.ok(num(moved, "Our model") - num(stayed, "Our model") >= 1.5, `moved ${item(moved, "Our model")} vs stayed ${item(stayed, "Our model")}`);
 });
@@ -119,21 +120,25 @@ test("TD baseline: own 2025 rate only from the same team and ≥ tdPriorMinGames
   assert.ok(posBase < base - 0.3, `position ${posBase} vs own ${base}`);
 });
 
-test("team change needs the role change's evidence bar: one unflagged game on the new team keeps the plain prior blend", () => {
-  const out = run([input("one", jump(1), tenPpg(16, "BUF")), input("oneSame", jump(1), tenPpg(16, CUR))]);
-  const one = out.get("one")!;
-  assert.equal(priorW(one), V4.priorKSmall - 1);
-  assert.equal(item(one, "2025 on another team"), undefined);
+test("team change under lateGames unflagged games on the new team (1 or 3): the plain prior blend stays", () => {
+  const out = run([input("one", jump(1), tenPpg(16, "BUF")), input("three", jump(3), tenPpg(16, "BUF")), input("oneSame", jump(1), tenPpg(16, CUR))]);
   assert.equal(priorW(out.get("oneSame")!), V4.priorKSmall - 1);
-  // Plain blend: (1 × current rate + 7 × 10.0) / 8; the current rate carries the position TD baseline.
-  const cur = (14 + tdAdd(one)) * finishing(one);
-  assert.ok(Math.abs(num(one, "Our model") - (cur + 7 * 10) / 8) <= 0.1, `${item(one, "Our model")} vs ${((cur + 70) / 8).toFixed(2)}`);
+  for (const [id, n] of [["one", 1], ["three", 3]] as const) {
+    const v = out.get(id)!;
+    assert.equal(priorW(v), V4.priorKSmall - n, item(v, "2025"));
+    assert.equal(item(v, "2025 on another team"), undefined);
+    // Plain blend: (n × current rate + (8 − n) × 10.0) / 8; the current rate carries the position TD baseline.
+    const cur = (14 + tdAdd(v)) * finishing(v);
+    const want = (n * cur + (V4.priorKSmall - n) * 10) / V4.priorKSmall;
+    assert.ok(Math.abs(num(v, "Our model") - want) <= 0.1, `${id}: ${item(v, "Our model")} vs ${want.toFixed(2)}`);
+  }
 });
 
 test("team changer under priorMinGames sample games: TD regression toward the position baseline (not skipped)", () => {
   const full = tdCase("short", 16, "BUF");
   const v = run([{ ...full, games: full.games.slice(0, 3) }]).get("short")!;
   assert.equal(tdSource(v), "WR average", item(v, "Touchdowns"));
-  // The prior is still neutral (3 unflagged games; at 17 expected/g this jump also clears the role-change bar).
-  assert.ok(item(v, "2025 on another team") ?? item(v, "2025 at new role"), item(v, "2025"));
+  // 3 games is under lateGames for the team change, but at 17 expected/g this jump clears the role-change bar.
+  assert.equal(item(v, "2025 on another team"), undefined);
+  assert.ok(item(v, "2025 at new role"), item(v, "2025"));
 });

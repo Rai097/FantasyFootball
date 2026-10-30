@@ -242,7 +242,7 @@ interface Base {
   /** His role grew since last season (isRoleUp): the prior keeps the base weight only. */
   roleUp: boolean;
   /** His latest 2025 team differs from his current team (unknown = false): his 2025 TD rate is not the TD baseline,
-   *  and from ≥ V4.roleUpMinGames unflagged games the prior is neutral like roleUp (`priorNeutral`). */
+   *  and from ≥ V4.lateGames unflagged games the prior is neutral like roleUp (`priorNeutral`). */
   teamChanged: boolean;
   /** The prior entered at his current-role rate (roleUp, or teamChanged with an established new role). */
   priorNeutral: boolean;
@@ -445,9 +445,10 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     // A backup-turned-starter: last season's smaller role must not outweigh his new one. Usage = expected points after
     // the TD regression (a one-off goal-line spike is not a new role); not on the actual-points fallback.
     const roleUp = priorRate !== null && !missingExp && expRate !== null && isRoleUp(expRate - (td?.ptsDelta ?? 0), t!.priorExpPpg!, (sig?.weeks ?? []).filter((w) => !w.flagged && !w.flags.vacated).map((w) => w.expPts));
-    // Role grew or team changed: last season is another situation and enters neutral. A team change needs the role
-    // change's evidence bar (≥ roleUpMinGames unflagged games): one partial game on the new team is no role yet.
-    const priorNeutral = roleUp || (teamChanged && unflagged >= V4.roleUpMinGames);
+    // Role grew or team changed: last season is another situation and enters neutral. A team change needs ≥ V4.lateGames
+    // unflagged games on the new team (where the ECR anchor drops to 10%: the sample speaks for itself); a short or
+    // injury-hit start must not erase a full prior season in either direction. roleUp keeps its own 2-game bar.
+    const priorNeutral = roleUp || (teamChanged && unflagged >= V4.lateGames);
     // Never more pseudo-games than the prior season actually had (a 4-game 2025 counts as ≤ 4 games).
     const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames, priorNeutral), t!.priorGames) : 0;
     // Neutral prior (fix round 1, 2026-10-30; team change 2026-10-30): last season's other role carries neither its
