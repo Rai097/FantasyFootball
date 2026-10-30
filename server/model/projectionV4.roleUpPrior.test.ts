@@ -82,6 +82,7 @@ test("backup-turned-starter: rate stays within 1 pt/g of his current usage × ef
   const cur = curOf(model, 5, V4.priorK, used);
   assert.ok(Math.abs(model - cur) <= 1, `model ${model} vs current usage × efficiency ${cur.toFixed(2)}`);
   const before = (5 * cur + V4.priorK * priorRate) / (5 + V4.priorK);
+  assert.ok(model >= 15, `model ${model}: near his 16 expected × ~0.95 efficiency`);
   assert.ok(model - before >= 2.5, `old prior at the backup volume: ${before.toFixed(2)} → ${model}`);
 });
 
