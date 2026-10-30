@@ -32,7 +32,7 @@ describe("fix 2026-10-27 on demo/42: trade cards", { timeout: 600_000 }, () => {
     ctx = c;
   });
 
-  test("every listed trade (all teams, all modes): label verdict / tones follow the lineup sign, the mode's listing bar holds, no NaN, no riser given", () => {
+  test("every listed trade (all teams, all modes): label verdict / tones follow the lineup sign, the mode's listing bar holds, no NaN, a riser only for a clear gain", () => {
     let listed = 0;
     let depthOnly = 0;
     let slowest = 0;
@@ -66,7 +66,8 @@ describe("fix 2026-10-27 on demo/42: trade cards", { timeout: 600_000 }, () => {
           assert.equal(st!.tone, sv > 0 ? "pos" : sv < 0 ? "neg" : undefined, `${tr.key}: strength tone`);
           assert.ok(tr.summary.includes(`playoff lineup ${lu!.value.split(" ")[0]}/wk`), `${tr.key}: ${tr.summary}`);
           for (const x of d) assert.ok(!/NaN|Infinity|undefined/.test(x.value), `${tr.key} ${x.label}: ${x.value}`);
-          for (const p of tr.me.gives) assert.ok(!p.riser, `${tr.key}: sells riser ${p.name}`);
+          // Fix 2026-10-30: a riser is sold only for a clear gain (mode gain ≥ riserSellMult × minMyGain).
+          if (tr.me.gives.some((p) => p.riser)) assert.ok((mode === "playoffs" ? sv : ts) >= V3.riserSellMult * V3.minMyGain - 0.05, `${tr.key}: sells a riser for ${mode === "playoffs" ? sv : ts}`);
         }
       }
     }

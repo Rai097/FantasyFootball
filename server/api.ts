@@ -541,7 +541,7 @@ apiRouter.get(
     const { l, team } = await loadForTeam(req, provider, req.params.id, isRefresh(req));
     const mode = parseMode(req.query.mode);
     const key = `${provider}:${req.params.id}:bench:${team}:${mode}`;
-    // v3 engine: same eligibility and QB rule as the finder; both players market ≥ 3 and value ≥ 3, the one I get market ≥ 8 or value ≥ 5; my season lineup +0.8 pts/week.
+    // v3 engine: same eligibility and QB rule (spare QB projected top-14, to a team it upgrades by ≥ 1.0 pts/g or whose best is outside the market top 18) as the finder; both players market ≥ 3 and value ≥ 3, the one I get market ≥ 8 or value ≥ 5; my season lineup +0.8 pts/week.
     res.json(await cached<Trade[]>(key, false, async () => findBenchUpgrades(l.ctx, team, { mode })));
   }),
 );

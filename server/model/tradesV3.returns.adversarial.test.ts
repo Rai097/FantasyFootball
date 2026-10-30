@@ -3,7 +3,7 @@
 // out player never makes an absurd trade look good.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evaluateTradeV3, findTradesV3 } from "./tradesV3.js";
+import { V3, evaluateTradeV3, findTradesV3 } from "./tradesV3.js";
 import type { TradeContext } from "./tradeKit.js";
 import { analyzeTeams } from "./analysis.js";
 import { attachMarket } from "./market.js";
@@ -67,12 +67,15 @@ test("evaluate: an out player I GIVE is valued on his return estimate (true valu
 test("finder (owner 2026-10-26): a return-unconfirmed piece with trade value may appear, always carded as a bet on his recovery; out for the season never; riser / gain < 1.0 still hold", () => {
   const c = make();
   c.players.get("mRB3")!.riser = true;
+  // Fix 2026-10-30 (protectTop): at a 70 return value mIR is one of my top 2 and never offered; at 25 he is a piece.
+  c.players.get("mIR")!.ret = UNK(25);
   const r = findTradesV3(c, "me", { valueSource: "model", limit: 50 });
   const all = [...r.trades, ...r.smallerEdges, ...r.nearMisses];
   assert.ok(all.length > 0, "baseline finds trades");
   assert.ok(all.some((t) => [...t.me.gives, ...t.them.gives].some((p) => p.id === "mIR" || p.id === "tIR")), "an unconfirmed piece with trade value is actually offered");
   for (const t of all) {
-    assert.ok(!t.me.gives.some((p) => p.id === "mRB3"), `${t.key} sells the riser`);
+    // Fix 2026-10-30: a riser is sold only for a clear gain (mode gain ≥ riserSellMult × minMyGain).
+    if (t.me.gives.some((p) => p.id === "mRB3")) assert.ok((t.me.scoreDelta ?? 0) >= V3.riserSellMult * V3.minMyGain - 1e-9, `${t.key} sells the riser for ${t.me.scoreDelta}`);
     assert.ok(t.me.scoreDelta === undefined || t.me.scoreDelta >= 1.0 - 1e-9, `${t.key}: gain ${t.me.scoreDelta}`);
     for (const p of [...t.me.gives, ...t.them.gives].filter((x) => x.id === "mIR" || x.id === "tIR")) {
       assert.ok(t.details!.some((d) => /^Injured, you (give|get)$/.test(d.label) && d.value.startsWith(`${p.id}: return unconfirmed, a bet on his recovery`)), `${t.key}: card for ${p.id}`);

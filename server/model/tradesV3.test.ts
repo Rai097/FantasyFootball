@@ -22,6 +22,8 @@ import {
   modeGain,
   packageValue,
   qbTradeable,
+  riserSaleOk,
+  coreIds,
   spareQb,
   teamV3,
 } from "./tradesV3.js";
@@ -302,11 +304,12 @@ test("true-value bar per mode (fix 2026-10-30): Playoffs may cost up to 3% of th
 test("real case (generic, fix 2026-10-30): bench QB + TE for a workhorse RB + a returning RB lists in Playoffs, not Balanced", () => {
   // Me: two startable QBs (the spare projects 19.2, QB10), two good TEs, thin at RB. Partner: a name-brand QB (market
   // QB2) projecting 17.7 (QB16), RB depth, a weak TE. The deal costs me ~2% of its true value and adds playoff strength.
-  // Market values sit inside the finder's pre-fair window (preFairLo); the TE carries no riser flag (never sold).
+  // Market ratio as in the real deal: 20.7 + 0.85·16.8 = 35 vs 39 + 0.85·16 = 52.6 → 0.67, inside preFairLo 0.5 (was
+  // pruned at 0.75). The TE carries no riser flag here (riser sales: "finder rules" test).
   const m = (market: number, trueMarket: number, posRank: number, marketPosRank: number) => ({ ...G, market, trueMarket, posRank, marketPosRank });
   const a = [
     vp("aQB", "QB", 23, 20, m(31, 22, 3, 3)), vp("aQB2", "QB", 19.2, 4.5, m(16.8, 10, 10, 8)),
-    vp("aTE", "TE", 19, 70, m(60, 80, 1, 1)), vp("aTE2", "TE", 15.8, 38, m(28, 45, 3, 5)),
+    vp("aTE", "TE", 19, 70, m(60, 80, 1, 1)), vp("aTE2", "TE", 15.8, 38, m(20.7, 45, 3, 5)),
     vp("aWR1", "WR", 23, 100, m(95, 100, 1, 1)), vp("aWR2", "WR", 15, 30, m(20, 38, 13, 24)), vp("aWR3", "WR", 12, 12, m(8, 19, 30, 37)),
     vp("aRB1", "RB", 12, 6, m(14, 10, 27, 20)), vp("aRB2", "RB", 9, 3, m(6, 5, 40, 40)), vp("aWR4", "WR", 9, 1, m(4.6, 4.6, 56, 47)),
     vp("aK", "K", 8, 1, G), vp("aDEF", "DEF", 7, 1, G),
@@ -335,6 +338,33 @@ test("real case (generic, fix 2026-10-30): bench QB + TE for a workhorse RB + a 
   const ba = evaluateTradeV3(c, "me", "them", ["aQB2", "aTE2"], ["bRB1", "bRB2"], "balanced");
   assert.equal(ba.verdict, "Fair, lean decline");
   assert.ok(ba.details!.some((d) => d.label === "For you" && /^you pay market price: true value −1\.7 \(Balanced needs \+3\.2, 3% of the deal\)$/.test(d.value)), JSON.stringify(ba.details));
+  // As a riser (the real TE was one) he counts ×1.15, so the RB is worth a bit more here to stay within −3%; playoff
+  // strength +6.0 ≥ 2 × minMyGain, so he may still be sold in Playoffs.
+  c.players.get("aTE2")!.riser = true;
+  c.players.get("bRB1")!.trueMarket = 52;
+  assert.ok(listed("playoffs").includes(key), "riser sold for a clear playoff gain");
+});
+
+test("finder rules (fix 2026-10-30): preFairLo 0.5, riser sale bar, protect my top 2", () => {
+  assert.equal(V3.preFairLo, 0.5);
+  assert.equal(V3.riserSellMult, 2);
+  assert.equal(V3.protectTop, 2);
+  // riserSaleOk: no riser → always; a riser → mode gain ≥ 2.0 (Playoffs: playoff strength; else the team score).
+  const riser = { ...P("mRB3"), riser: true };
+  assert.equal(riserSaleOk({ give: [P("mRB3")], strengthDelta: 1.0, myDelta: 1.0 }, "playoffs"), true);
+  assert.equal(riserSaleOk({ give: [riser], strengthDelta: 1.9, myDelta: 5 }, "playoffs"), false);
+  assert.equal(riserSaleOk({ give: [riser], strengthDelta: 1.96, myDelta: 0 }, "playoffs"), true, "0.1-rounded like the card");
+  assert.equal(riserSaleOk({ give: [riser], strengthDelta: 5, myDelta: 1.5 }, "balanced"), false);
+  assert.equal(riserSaleOk({ give: [riser], strengthDelta: 0, myDelta: 2.0 }, "now"), true);
+  // Core: my top 2 by our (trade) value; never offered on any finder list, flagged on Evaluate.
+  assert.deepEqual([...coreIds(mine)].sort(), ["mRB1", "mRB2"]);
+  for (const mode of ["playoffs", "balanced", "now"] as const) {
+    const r = findTradesV3(ctx, "me", { mode, limit: 50 });
+    for (const t of [...r.trades, ...r.smallerEdges, ...r.nearMisses]) assert.ok(!t.me.gives.some((p) => p.id === "mRB1" || p.id === "mRB2"), `${mode} ${t.key} gives a core player`);
+  }
+  const ev = evaluateTradeV3(ctx, "me", "them", ["mRB1"], ["tWR1"]);
+  assert.ok(ev.details!.some((d) => d.label === "Core player" && d.value === "mRB1 is one of your top 2 — not suggested" && d.tone === "warn"), JSON.stringify(ev.details));
+  assert.ok(!evaluateTradeV3(ctx, "me", "them", ["mRB3"], ["tWR3"]).details!.some((d) => d.label === "Core player"));
 });
 
 test("drop cost: the side receiving more players nets the player it must cut (≥ 3)", () => {
@@ -528,7 +558,7 @@ test("IR slot: teamV3 never starts a healthy IR-slotted player and scores the ro
   assert.ok(me.parts.now < teamV3(ctx, "me").parts.now);
 });
 
-test("finder never suggests selling a riser or a noise-level gain (any list); buying a TD-luck spike is tagged", () => {
+test("finder sells a riser only for a clear gain, never a noise-level gain (any list); buying a TD-luck spike is tagged", () => {
   const before = findTradesV3(ctx, "me", { valueSource: "model", limit: 50 });
   const listed = (r: typeof before) => [...r.trades, ...r.smallerEdges, ...r.nearMisses];
   assert.ok(listed(before).length > 0, "baseline finds trades");
@@ -537,7 +567,11 @@ test("finder never suggests selling a riser or a noise-level gain (any list); bu
   P(giver).riser = true;
   try {
     const after = findTradesV3(ctx, "me", { valueSource: "model", limit: 50 });
-    for (const t of listed(after)) assert.ok(!t.me.gives.some((p) => p.id === giver), `${t.key} sells riser ${giver}`);
+    // Fix 2026-10-30: a riser may go only when the mode gain (Balanced: team score) ≥ riserSellMult × minMyGain.
+    for (const t of listed(after))
+      if (t.me.gives.some((p) => p.id === giver)) assert.ok((t.me.scoreDelta ?? 0) >= V3.riserSellMult * V3.minMyGain - 1e-9, `${t.key} sells riser ${giver} for ${t.me.scoreDelta}`);
+    const small = listed(before).filter((t) => t.me.gives.some((p) => p.id === giver) && (t.me.scoreDelta ?? 0) < V3.riserSellMult * V3.minMyGain);
+    for (const t of small) assert.ok(!listed(after).some((x) => x.key === t.key), `${t.key}: below the riser bar, dropped once he is a riser`);
   } finally {
     delete P(giver).riser;
   }

@@ -42,10 +42,12 @@ describe("Trades v4 on demo/42", { timeout: 600_000 }, () => {
     }
   });
 
-  test("never sell a riser: no list (main, smaller edges, near misses, bench upgrades) has me giving a riser", () => {
-    for (const [team, l] of lists)
-      for (const t of [...l.main, ...l.edges, ...l.near, ...l.bench])
-        for (const p of t.me.gives) assert.ok(!ctx.players.get(p.id)?.riser, `team ${team}: ${t.key} sells riser ${p.name}`);
+  test("riser sold only for a clear gain (fix 2026-10-30): finder lists need mode gain ≥ 2 × minMyGain; bench upgrades never", () => {
+    for (const [team, l] of lists) {
+      for (const t of [...l.main, ...l.edges, ...l.near])
+        if (t.me.gives.some((p) => ctx.players.get(p.id)?.riser)) assert.ok((t.me.scoreDelta ?? 0) >= V3.riserSellMult * V3.minMyGain - 1e-9, `team ${team}: ${t.key} sells a riser for ${t.me.scoreDelta}`);
+      for (const t of l.bench) for (const p of t.me.gives) assert.ok(!ctx.players.get(p.id)?.riser, `team ${team}: ${t.key} sells riser ${p.name}`);
+    }
   });
 
   test("no market-value claim in any pitch or row summary, on every list", () => {

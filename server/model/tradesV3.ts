@@ -73,6 +73,10 @@ export const V3 = {
   thinPenalty: 1.0,
   /** v3.1: giving a riser costs ×1.15 of his value (selling upside); same for the partner. */
   riserPremium: 1.15,
+  /** Finder (fix 2026-10-30): a riser of mine may be sold only when the deal's mode gain ≥ this × minMyGain. */
+  riserSellMult: 2,
+  /** Finder (fix 2026-10-30): my top-N players by our value are never offered (Evaluate still judges them). */
+  protectTop: 2,
   /** No suggestion below this playoff-lineup (team strength) gain for me, pts/week — except a "marginal" near miss
    *  (my side fails its bar), which needs only a positive gain. */
   minMyGain: 1.0,
@@ -81,7 +85,9 @@ export const V3 = {
   /** Search bounds. */
   poolSize: 14,
   comboCap: 4000,
-  preFairLo: 0.75,
+  /** Market ratio (my package / theirs) kept by the search. Calibration (fix 2026-10-30): 0.5 — a real 2-for-2 at
+   *  ~0.57 was accepted; the market is only 20% of acceptance. */
+  preFairLo: 0.5,
   preFairHi: 1.45,
 } as const;
 
@@ -951,6 +957,19 @@ function reasonOf(c: Cand): string {
   return `Marginal: ${c.j.myFail}.`;
 }
 
+/**
+ * Selling a riser (fix 2026-10-30, was "never"): the finder lists a deal giving one of my risers only for a clear gain,
+ * mode gain (0.1-rounded, as listsInMode) ≥ riserSellMult × minMyGain; his value still counts ×riserPremium.
+ */
+export function riserSaleOk(j: Pick<Judged3, "give" | "strengthDelta" | "myDelta">, mode: TradeMode): boolean {
+  return !j.give.some((p) => p.riser) || r1(modeGain(j, mode)) >= V3.riserSellMult * V3.minMyGain;
+}
+
+/** My core (fix 2026-10-30, owner: best WR and TE untouchable): my top protectTop players by our value. */
+export function coreIds(roster: ValuedPlayer[]): Set<string> {
+  return new Set([...roster].sort((a, b) => tradeValueOf(b) - tradeValueOf(a) || a.id.localeCompare(b.id)).slice(0, V3.protectTop).map((p) => p.id));
+}
+
 /** Diversity: ≤ perPartner per partner, ≤ perGive per player I give, one per (partner, my best piece, their best piece). */
 function diversify(sorted: Cand[], limit: number, seenKeys = new Set<string>(), perPartner: number = V3.perPartner): Cand[] {
   const byPartner = new Map<string, number>();
@@ -982,7 +1001,8 @@ function packagesFor(my: TeamV3, their: TeamV3, opts: { maxGive: number; maxGet:
     if (qb && !ps.includes(qb)) ps.push(qb);
     return ps.sort((a, b) => Math.max(marketOf(b), trueOf(b)) - Math.max(marketOf(a), trueOf(a))).slice(0, V3.poolSize);
   };
-  const myPool = pool(my, qbTradeable(my.roster, their.roster));
+  const core = coreIds(my.roster);
+  const myPool = pool(my, qbTradeable(my.roster, their.roster)).filter((p) => !core.has(p.id));
   const theirPool = pool(their, qbTradeable(their.roster, my.roster));
   // 3-for-1 only when I give quantity to a struggling (0-3 / 1-2) team.
   const give3 = opts.maxGive >= 2 && their.bad;
@@ -1037,9 +1057,8 @@ export function findTradesV3(ctx: TradeContext, myTeamId: string, opts: TradeOpt
         simulated++;
         // Never sell a player whose role is rising, and never suggest a noise-level gain in the chosen mode (owner,
         // Model v4; mode-aware since 2026-10-27: listsInMode); a "marginal" near miss only needs a real gain (> 0).
-        if (give.some((p) => p.riser)) continue;
         const cls = classify(j);
-        if (cls && listsInMode(j, mode, cls === "marginal")) cands.push({ j, their, cls });
+        if (cls && listsInMode(j, mode, cls === "marginal") && riserSaleOk(j, mode)) cands.push({ j, their, cls });
       }
     }
   };
@@ -1158,6 +1177,8 @@ export function evaluateTradeV3(
   // The mode bar is one of several bars (both sides, acceptance): green only when the whole verdict is Accept.
   add(`${MODE_LABEL[mode]} bar`, modeBarText(j, mode), listsInMode(j, mode) && /^Accept/.test(verdict) ? "pos" : undefined);
   for (const [p, r] of flagged) add("Outside the rules", `${p.name}: ${r.startsWith("QB rule") ? "QB rule" : r}`, "warn");
+  const core = coreIds(my.roster);
+  for (const p of give) if (core.has(p.id)) add("Core player", `${p.name} is one of your top ${V3.protectTop} — not suggested`, "warn");
   if (tradeDeadlinePassed(ctx.league)) add("Deadline", "The trade deadline has passed", "warn");
   return { ...trade, details: [...pre, ...(trade.details ?? [])], verdict };
 }

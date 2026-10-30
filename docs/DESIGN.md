@@ -1571,10 +1571,30 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
 * Unchanged: acceptance weights, riser ×1.15, consolidation rule, `minMyGain`, all other constants.
 * **Why**: a hand-found deal (bench QB + TE for a workhorse RB + a returning RB; playoff strength +2.2, ~70% accept)
   was "Decline — QB rule" and "you pay market price: true value −0.5 (needs +4.0)". Now evaluate says Accept in Playoffs.
-* **Still not on the finder's lists**: that deal's market ratio is 0.66, below the pre-fair window (`preFairLo` 0.75),
-  and its TE is a riser (the finder never sells a riser). Both are separate owner decisions, unchanged here.
+* **Finder gates on that deal** (market ratio 0.66 below `preFairLo` 0.75; riser TE never sold): see "Fix: finder
+  search window, riser sales and core players" below.
 * **Real-data effect** (owner league snapshot): counts unchanged in both modes (trades 2, smaller edges 4, near misses 7);
   Playoffs: 1 new smaller edge (top TE + spare QB for two RBs; +2.1/wk playoff lineup, 66%), 4 new near misses;
   Balanced: 1 new smaller edge (spare QB + bench TE for a TE; 92%), 4 new near misses.
 * Tests: `tradesV3.test.ts` "QB rule (fix 2026-10-30)…", "true-value bar per mode…", "real case (generic…)";
   `integration.test.ts` QB-rule check mirrors the new rule.
+
+## Fix: finder search window, riser sales and core players (2026-10-30) — overrides "Trade finder v3" / Model v4 "never sell a riser" in the finder
+
+* **Search window** (`V3.preFairLo` 0.75 → 0.5, calibration value): the market ratio (my package / theirs) is only 20%
+  of acceptance, and a real manager accepted a 2-for-2 at ~0.57; pruning at 0.75 dropped deals managers accept.
+  Chosen over the "keep 0.75 unless the partner's perceived gain > 0" variant: simpler, and the trades2 time budget
+  holds (integration < 15 s and the timing step pass; real league trades2 ~1 s). `preFairHi`, the loose true-value
+  prune and `comboCap` unchanged.
+* **Riser sales** (`riserSaleOk`): the finder lists a deal giving one of my risers only when its mode gain (Playoffs:
+  playoff strength; Balanced / Win now: team score; 0.1-rounded) ≥ `V3.riserSellMult` (2) × `minMyGain`. Otherwise
+  the old block stays. The riser still counts ×1.15 on my side. Bench upgrades still never sell a riser.
+* **Core players** (`coreIds`, `V3.protectTop` 2): my top 2 players by our trade value (`tradeValueOf`, so an injured
+  star's return value counts) are never offered on any finder list (trades, smaller edges, near misses). Evaluate still
+  judges any deal and adds "Core player: X is one of your top 2 — not suggested" (warn). Owner: best WR and TE untouchable.
+* **Real-data effect** (owner league snapshot, live 6f2c01a vs this tree): Playoffs trades 2 → 6, smaller edges 4 → 4,
+  near misses 7 → 7; Balanced trades 2 → 4, smaller edges 4 → 5, near misses 7 → 8. No listing gives either core player
+  (before, three listings gave one). Riser listings all clear +2.0 (playoff strength +2.2 to +3.9).
+* Tests: `tradesV3.test.ts` "finder rules (fix 2026-10-30)…", the real-case fixture at its real 0.67 market ratio and as
+  a riser; the "never sell a riser" checks in `tradesV4.adversarial`, `fix1027.demo.adversarial` and
+  `tradesV3.returns.adversarial` now assert the clear-gain bar (bench upgrades: still never).
