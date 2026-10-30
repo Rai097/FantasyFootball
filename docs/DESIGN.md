@@ -1411,16 +1411,19 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
 * **Practice**: projection systems separate opportunity (volume) from efficiency per opportunity — e.g. Mike Clay's
   ESPN projections are projected opportunity × per-opportunity rates. A prior from a smaller role informs efficiency,
   not volume.
-* **Rule** (`projectionV4.ts` `roleUpPrior`, `makeBase`): on `roleUp` the prior keeps its pseudo-game weight (`priorK`,
-  still ≤ the prior's games) but enters as this season's usage (expected pts/game, TD part regressed) × last season's
-  points per expected point (`priorRate / priorExpPpg`). The same prior enters `modelFull` (borrowed role at full
-  weight).
-* **Guard**: the efficiency ratio is clamped to `V4.roleUpPriorEffClamp` [0.7, 1.3] (calibration value tuned on one
-  league-week); a non-finite input keeps the raw prior.
+* **Rule** (fix round 1, replaces the first build's "prior at this season's usage × last season's points per expected
+  point, clamped to [0.7, 1.3]"; `projectionV4.ts` `makeBase`): on `roleUp` the prior enters at his current-role rate —
+  the same (expected pts/game − TD regression) × finishing the model uses; `modelFull` uses its own current rate. The
+  prior is neutral: the rate is his current role plus the usual ECR anchor.
+* **Why neutral** (adversarial test 53c90fd): last season's efficiency was counted twice — the model already has a
+  finishing factor (this season's, shrunk toward 1.0 and capped per position by `EFF_CAPS`) and the TD baseline uses
+  last season's TD rate. The [0.7, 1.3] clamp was looser than `EFF_CAPS` and a 4-game prior counted like 16: a QB
+  with a lucky 4-game 2025 (1.28 pts per expected point) read 21.9 pts/g, above his 15.8 actual.
 * **Unchanged**: `isRoleUp` and its bar, the 2-unflagged-game rule, `priorWeight` / `priorKSmall` for players without a
-  role change, TD regression, the ECR anchor, vacated-role and spike logic.
-* **Why-lines**: "2025" stays "3.6 pts/game, counts as 2 games (role grew: 15.9 vs 3.7 expected/g)"; a new bullet
-  "2025 at new role: 15.5 pts/game: last year's efficiency at this year's usage" (bullets are capped at 90 characters,
-  so it is its own idea).
-* **Effect on test fixtures**: a 4-ppg backup now at 16 pts/game over 4 games: 12.0 → 16.0. A 3.7-ppg backup
-  (0.92 pts per expected point) now 16 expected / ~15.5 rate over 5 games: 12.1 → 15.3.
+  role change, TD regression, the ECR anchor, vacated-role and spike logic. The "counts as 2 games" bookkeeping stays
+  (the 2 games are at his current rate).
+* **Why-lines**: "2025" stays "3.6 pts/game, counts as 2 games (role grew: 15.9 vs 3.7 expected/g)"; a role change
+  adds "2025 at new role: 14.8 pts/game: counted at this year's role and finishing" (≤ 90 characters).
+* **Effect on test fixtures**: a 4-ppg backup now at 16 pts/game over 4 games: 12.0 → 16.0. A 3.7-ppg backup now at
+  16 expected / ~15.5 rate over 5 games: 12.1 → 15.5 (first build: 15.3). Any 2025 efficiency (lucky, poor, 4-game)
+  now gives the same rate on a role change.

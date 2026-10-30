@@ -1,9 +1,10 @@
-// Fix 2026-10-30 (DESIGN "Fix: role-change prior at current volume"): on a role change last season's prior keeps its
-// pseudo-game weight but enters at this season's usage × last season's points per expected point (roleUpPrior).
+// Fix 2026-10-30 (DESIGN "Fix: role-change prior at current volume", fix round 1): on a role change last season's
+// prior enters at his current-role rate (usage × this season's finishing): neutral, neither its volume nor its
+// efficiency counts a second time.
 // Synthetic players only (generic ids).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { V4, emptyTables, roleUpPrior, valuePlayers, type ProjectionTables } from "./projectionV4.js";
+import { V4, emptyTables, valuePlayers, type ProjectionTables } from "./projectionV4.js";
 import { computePlayerSignals } from "./signals/index.js";
 import { league, line, rawPlayer, team } from "./testkit.js";
 import { PPR } from "../data/fixtures/signals2026.js";
@@ -52,21 +53,12 @@ const repeat = <T>(n: number, x: T): T[] => Array.from({ length: n }, () => x);
 /** Rate without the prior from the model and the prior that entered: cur = ((n + w) × model − w × prior) / n. */
 const curOf = (model: number, n: number, w: number, prior: number) => ((n + w) * model - w * prior) / n;
 
-test("roleUpPrior: this season's usage × last season's points per expected point; clamped; non-finite → null", () => {
-  assert.equal(roleUpPrior(16, 3.6, 4), 16 * 0.9);
-  assert.equal(roleUpPrior(16, 4, 4), 16);
-  const [lo, hi] = V4.roleUpPriorEffClamp;
-  assert.equal(roleUpPrior(16, 1, 4), 16 * lo, "0.25 points per expected point clamps up");
-  assert.equal(roleUpPrior(16, 12, 4), 16 * hi, "3.0 clamps down");
-  assert.equal(roleUpPrior(16, 3, 0), null, "no prior usage");
-  assert.equal(roleUpPrior(16, 3, -1), null);
-  assert.equal(roleUpPrior(Number.NaN, 3, 4), null);
-  assert.equal(roleUpPrior(Number.POSITIVE_INFINITY, 3, 4), null);
-  assert.equal(roleUpPrior(16, Number.NaN, 4), null);
-});
+/** The TD-regressed usage the role-change check used ("role grew: X vs …"). */
+const usageOf = (v: ValuedPlayer) => Number(item(v, "2025")!.match(/role grew: ([\d.]+) vs/)![1]);
+const finishing = (v: ValuedPlayer) => Number(item(v, "Finishing")?.match(/×([\d.]+)/)?.[1] ?? 1);
 
-test("backup-turned-starter: rate stays within 1 pt/g of his current usage × efficiency, not dragged to the backup prior", () => {
-  // 2025: 16 games as a backup, 4.0 expected / 3.4 actual pts/game → prior 3.7, 0.92 points per expected point.
+test("backup-turned-starter: rate = his current usage × finishing, not dragged to the backup prior", () => {
+  // 2025: 16 games as a backup, 4.0 expected / 3.4 actual pts/game → prior 3.7.
   const prior: PriorSeason = { games: 16, expected: line({ rec: 32, recYd: 320 }), actual: line({ rec: 28, recYd: 260 }) };
   // 2026: 5 games as the lead, 16 expected / 14.8 actual pts/game.
   const v = run([input("lead", repeat(5, { a: { rec: 5.6, recYd: 92 }, e: { rec: 6, recYd: 100 } }), prior)]).get("lead")!;
@@ -74,32 +66,33 @@ test("backup-turned-starter: rate stays within 1 pt/g of his current usage × ef
   assert.equal(priorW(v), V4.priorK);
   const priorRate = num(v, "2025");
   assert.ok(Math.abs(priorRate - 3.7) <= 0.05, `prior ${priorRate}`);
-  // The prior enters at 16 × 3.7 / 4.0 ≈ 14.8 pts/game and the why says so.
-  const used = num(v, "2025 at new role");
-  assert.ok(Math.abs(used - 16 * (3.7 / 4)) <= 0.1, `prior at the new role ${used}`);
-  assert.match(item(v, "2025 at new role")!, /last year's efficiency at this year's usage$/);
+  const cur = usageOf(v) * finishing(v);
   const model = num(v, "Our model");
-  const cur = curOf(model, 5, V4.priorK, used);
-  assert.ok(Math.abs(model - cur) <= 1, `model ${model} vs current usage × efficiency ${cur.toFixed(2)}`);
+  assert.ok(Math.abs(model - cur) <= 0.1, `model ${model} = current-role rate ${cur.toFixed(2)}`);
+  assert.ok(Math.abs(num(v, "2025 at new role") - model) <= 0.05, item(v, "2025 at new role"));
+  assert.match(item(v, "2025 at new role")!, /^[\d.]+ pts\/game: counted at this year's role and finishing$/);
+  assert.ok(model >= 15, `model ${model}: near his 16 expected × ~0.95 finishing`);
   const before = (5 * cur + V4.priorK * priorRate) / (5 + V4.priorK);
-  assert.ok(model >= 15, `model ${model}: near his 16 expected × ~0.95 efficiency`);
   assert.ok(model - before >= 2.5, `old prior at the backup volume: ${before.toFixed(2)} → ${model}`);
 });
 
-test("role change with a very efficient or very poor 2025: the efficiency ratio is clamped to V4.roleUpPriorEffClamp", () => {
-  const [lo, hi] = V4.roleUpPriorEffClamp;
+test("role change: last season's efficiency never counts a second time (lucky, poor or 4-game priors are neutral)", () => {
   const e = line({ rec: 32, recYd: 320 }); // 4.0 expected pts/game
-  const games = repeat(5, { a: { rec: 6, recYd: 100 }, e: { rec: 6, recYd: 100 } }); // 16 pts/game
+  const games = repeat(5, { a: { rec: 6, recYd: 100 }, e: { rec: 6, recYd: 100 } }); // 16 pts/game, finishing 1.0
   const out = run([
-    input("hot", games, { games: 16, expected: e, actual: line({ rec: 96, recYd: 960 }) }), // 12 actual → prior 8, ratio 2
-    input("cold", games, { games: 16, expected: e, actual: line({}) }), // 0 actual → prior 2, ratio 0.5
+    input("hot", games, { games: 16, expected: e, actual: line({ rec: 96, recYd: 960 }) }), // 12 actual: 3.0 per expected point
+    input("cold", games, { games: 16, expected: e, actual: line({}) }), // 0 actual
+    input("short", games, { games: 4, expected: line({ rec: 8, recYd: 80 }), actual: line({ rec: 10, recYd: 130 }) }), // 4-game, 1.5×
+    input("plain", games, { games: 16, expected: e, actual: e }),
   ]);
-  const hot = out.get("hot")!;
-  const cold = out.get("cold")!;
-  assert.ok(grew(hot) && grew(cold));
-  assert.ok(Math.abs(num(hot, "2025 at new role") - 16 * hi) <= 0.1, item(hot, "2025 at new role"));
-  assert.ok(Math.abs(num(cold, "2025 at new role") - 16 * lo) <= 0.1, item(cold, "2025 at new role"));
-  for (const v of [hot, cold]) assert.ok(Number.isFinite(v.ppg) && !/NaN|Infinity/.test(JSON.stringify(v.whyItems)));
+  for (const id of ["hot", "cold", "short", "plain"]) {
+    const v = out.get(id)!;
+    assert.ok(grew(v), `${id}: ${item(v, "2025")}`);
+    assert.ok(Math.abs(num(v, "Our model") - 16) <= 0.05, `${id}: model ${item(v, "Our model")}`);
+    assert.ok(Math.abs(num(v, "2025 at new role") - 16) <= 0.05, `${id}: ${item(v, "2025 at new role")}`);
+    assert.ok(Number.isFinite(v.ppg) && !/NaN|Infinity/.test(JSON.stringify(v.whyItems)));
+    assert.ok(`2025 at new role: ${item(v, "2025 at new role")}`.length <= 90);
+  }
 });
 
 test("no role change: a small-sample steady player and a one-game fill-in keep the raw prior and the priorKSmall boost", () => {
