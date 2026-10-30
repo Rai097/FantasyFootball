@@ -142,3 +142,29 @@ test("team changer under priorMinGames sample games: TD regression toward the po
   assert.equal(item(v, "2025 on another team"), undefined);
   assert.ok(item(v, "2025 at new role"), item(v, "2025"));
 });
+
+test("fix round 1: borrowed-role (vacated) weeks do not count toward the team-change gate, as for roleUp", async () => {
+  const { computeAllSignals } = await import("./signals/index.js");
+  const { signalInputFromPlayer } = await import("./projectionV4.js");
+  const g = (week: number, t: number): WeekLine => {
+    const a: Partial<StatLine> = { rec: t * 0.65, recYd: t * 8 };
+    return { season: 2026, week, team: "AAA", actual: line(a), expected: line(a), opp: { targets: t, carries: 0, airYards: t * 9 } };
+  };
+  const ws = (ts: (number | null)[]) => ts.flatMap((t, i) => (t === null ? [] : [g(i + 1, t)]));
+  // A TE on a new team: 3 normal games, then 2 games with targets 3 → 9 while the team's lead WR was out.
+  const te = rawPlayer("te2", "TE", { team: "AAA", weeks: ws([3, 2, 3, 9, 9]), prior: { games: 16, line: line({ rec: 80, recYd: 960 }) } }); // 11 pts/g: no role-change jump
+  const wr = rawPlayer("wr1", "WR", { team: "AAA", weeks: ws([9, 10, 9, null, null]) });
+  const value = (players: Player[]) => {
+    const inputs = players.map(signalInputFromPlayer).filter((x): x is PlayerSignalInput => !!x);
+    for (const i of inputs) if (i.prior) i.prior.lastTeam = "BBB";
+    const tables: ProjectionTables = { ...emptyTables(), signals: computeAllSignals(inputs, { season: 2026, scoring: PPR, asOf: ASOF }) };
+    return valuePlayers(L(), [...POOL, ...players], tables).players.get("te2")!;
+  };
+  const borrowed = value([te, wr]);
+  assert.match(item(borrowed, "Borrowed role") ?? "", /wk 4, 5/, item(borrowed, "Borrowed role"));
+  assert.equal(item(borrowed, "2025 on another team"), undefined, "3 own-role games on the new team: under lateGames");
+  assert.notEqual(priorW(borrowed), V4.priorK);
+  // Control: no teammate out → the same 5 games are all his own role → neutral.
+  const alone = value([te]);
+  assert.ok(item(alone, "2025 on another team"), item(alone, "2025"));
+});

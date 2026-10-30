@@ -15,6 +15,7 @@ import { SKILL_POSITIONS } from "./types.js";
 import { recFormat, score } from "./scoring.js";
 import { clampItem } from "./details.js";
 import { CONVEXITY, KDEF_CURVE, POSITIONS, curveAt, ecrCurve, injuryKind, isQuestionable, replacementRanks, valuationNotes } from "./projection.js";
+import { normTeam } from "../data/names.js";
 import { computePlayerSignals } from "./signals/index.js";
 import type { PlayerSignalInput, PlayerSignals, SkillPos } from "./signals/types.js";
 import { luckLabel, luckText } from "./labels.js";
@@ -422,7 +423,9 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     const priorRate =
       t && t.priorGames >= V4.priorMinGames && t.priorExpPpg !== null && t.priorActPpg !== null ? (t.priorExpPpg + t.priorActPpg) / 2 : null;
     // Team change (fix 2026-10-30): last season is another offense and goal-line role. Unknown team ≠ changed.
-    const teamChanged = !!t?.priorTeam && p.team !== "FA" && !!p.team && t.priorTeam !== p.team;
+    const curTeam = normTeam(p.team);
+    const priorTeam = t?.priorTeam ? normTeam(t.priorTeam) : "FA";
+    const teamChanged = priorTeam !== "FA" && curTeam !== "FA" && priorTeam !== curTeam;
     // Touchdowns are the noisiest part of expected points: the TD part regresses per opportunity (tdRegression.ts),
     // the rest is unchanged. Not on the actual-points fallback (no expected TDs there).
     let td: TdShrink | null = null;
@@ -448,7 +451,10 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     // Role grew or team changed: last season is another situation and enters neutral. A team change needs ≥ V4.lateGames
     // unflagged games on the new team (where the ECR anchor drops to 10%: the sample speaks for itself); a short or
     // injury-hit start must not erase a full prior season in either direction. roleUp keeps its own 2-game bar.
-    const priorNeutral = roleUp || (teamChanged && unflagged >= V4.lateGames);
+    // Only games ON the new team count (a player traded mid-2026 away from his 2025 team), unflagged and not in a
+    // borrowed role (as for roleUp).
+    const newTeamGames = teamChanged ? (sig?.weeks ?? []).filter((w) => !w.flagged && !w.flags.vacated && normTeam(w.team) === curTeam).length : 0;
+    const priorNeutral = roleUp || (teamChanged && newTeamGames >= V4.lateGames);
     // Never more pseudo-games than the prior season actually had (a 4-game 2025 counts as ≤ 4 games).
     const priorW = priorRate !== null ? Math.min(priorWeight(sampleGames, priorNeutral), t!.priorGames) : 0;
     // Neutral prior (fix round 1, 2026-10-30; team change 2026-10-30): last season's other role carries neither its

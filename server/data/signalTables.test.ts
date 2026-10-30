@@ -176,3 +176,13 @@ test("prior season: lastTeam is the team of his latest week (unsorted rows, mult
   assert.equal(prior.get("b")!.lastTeam, "CCC");
   assert.equal(prior.get("c")!.lastTeam, undefined, "no team in the rows: unknown");
 });
+
+test("prior season: a blank / NA posteam (normTeam → FA) is never the 2025 team and never overwrites a real one", () => {
+  const row = (playerId: string, week: number, team: string): EpRow => ({
+    week, gameId: `g${week}`, team, playerId, name: playerId, pos: "WR", passAttempts: 0, targets: 7, carries: 0, airYards: 0, actual: emptyLine(), expected: emptyLine(),
+  });
+  const prior = buildPrior([row("a", 3, "BUF"), row("a", 17, "FA"), row("b", 1, "FA"), row("b", 2, "FA")]);
+  assert.equal(prior.get("a")!.lastTeam, "BUF");
+  assert.equal(prior.get("a")!.games, 2, "the FA row still counts as a game");
+  assert.equal(prior.get("b")!.lastTeam, undefined);
+});

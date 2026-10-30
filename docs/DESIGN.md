@@ -1460,6 +1460,15 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
   short 2025 20.7 → 17.6; depth players on new teams with ≥ 4 games drop 1–3 pts/g (their old-team starter priors);
   a star receiver on a new team with 3 games keeps his prior blend (12.7 → 12.6; first build without the 4-game bar:
   10.8).
+* **Fix round 1 (tester ccbb42a)**:
+  * The 4-game gate counts only unflagged games ON the new team (`w.team` = his current team, after `normTeam`), and
+    not borrowed-role (vacated) weeks, as `roleUp` excludes them: a receiver on his 2025 team for weeks 1–4 and traded
+    after it read neutral after 2 games on the new team (now keeps the blend: 7.3 → 8.6 pts/g, e3913dc 8.7).
+  * `buildPrior` never stores "FA" (a blank / NA posteam after `normTeam`) as the 2025 team, and a blank latest row
+    never overwrites a real team; the model also reads a "FA" prior team as unknown (second guard).
+  * Traded back to his 2025 team = same team (unchanged, see residual).
+* **Real-data effect after fix round 1**: 15 players move ≥ 1 pt/g vs e3913dc; the lead back 16.4 → 19.5, the star
+  receiver on a new team 12.7 → 12.6.
 * **Residual**: a player traded TO his current team mid-2025 counts as same-team, with TDs mixed from both teams
   (no per-team split).
 * Tests: `projectionV4.teamChange.test.ts`, `tdRegression.test.ts` (priorExcluded), `signalTables.test.ts` (lastTeam).

@@ -268,7 +268,8 @@ export function buildPrior(rows: EpRow[]): Map<string, PriorSeason> {
     p.opps!.passAtt += r.passAttempts;
     p.opps!.carries += r.carries;
     p.opps!.targets += r.targets;
-    if (r.team && r.week >= (lastWeek.get(r.playerId) ?? -Infinity)) {
+    // "FA" = a blank / NA posteam (normTeam): never a 2025 team, and never overwrites a real one.
+    if (r.team && r.team !== "FA" && r.week >= (lastWeek.get(r.playerId) ?? -Infinity)) {
       lastWeek.set(r.playerId, r.week);
       p.lastTeam = r.team;
     }
