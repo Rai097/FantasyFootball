@@ -210,7 +210,8 @@ describe("role-change prior at current volume (adversarial)", () => {
       const v = out.get(id)!;
       assert.ok(grew(v), `${id}: ${dump(v)}`);
       const b = item(v, "2025 at new role")!;
-      assert.match(b, /^\d+\.\d pts\/game: last year's efficiency at this year's usage$/);
+      // Neutral-prior design (fix round 1): the bullet states the prior counts at his current role, not last year's efficiency.
+      assert.match(b, /^\d+\.\d pts\/game: counted at this year's role and finishing$/);
       assert.ok(`2025 at new role: ${b}`.length <= 90, b);
       assert.ok(item(v, "2025")!.length <= 90, item(v, "2025"));
     }
