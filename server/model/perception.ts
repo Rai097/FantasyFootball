@@ -218,15 +218,28 @@ export function isSpike(pc: Perception): boolean {
  * our points); a Yahoo-sourced player counts at Yahoo's number.
  */
 export function perceivedLineupTotal(S: LeagueSettings, roster: ValuedPlayer[], irIds: ReadonlySet<string> = new Set()): number {
+  return perceivedLineupWeeks(S, roster, irIds).reduce((a, v) => a + v, 0);
+}
+
+/** The evaluator's first week (next week when it skips the current one). */
+export function evaluatorFirstWeek(S: LeagueSettings): number {
+  return S.finalWeek - evaluatorWeeks(S) + 1;
+}
+
+/**
+ * perceivedLineupTotal week by week (weeks evaluatorFirstWeek..finalWeek, unrounded): the per-week strip of Yahoo's
+ * Evaluate Trade view. Σ = perceivedLineupTotal exactly.
+ */
+export function perceivedLineupWeeks(S: LeagueSettings, roster: ValuedPlayer[], irIds: ReadonlySet<string> = new Set()): number[] {
   const order = fillOrder(S.slots);
   const active = roster.filter((p) => !irIds.has(p.id) || irSlotReturns(p));
   const n = Math.max(0, S.finalWeek - S.currentWeek + 1);
   const split = returnSplit(S, active.filter((p) => perceptionOf(p, S).source !== "yahoo"));
-  let total = 0;
+  const out: number[] = [];
   for (let i = n - evaluatorWeeks(S); i < n; i++) {
-    total += mixedWeekLineup(order, active, split, i, (p) => (irIds.has(p.id) && ourWeek(p, S, i) <= 0 ? 0 : (perceptionOf(p, S).weekly[i] ?? 0)));
+    out.push(mixedWeekLineup(order, active, split, i, (p) => (irIds.has(p.id) && ourWeek(p, S, i) <= 0 ? 0 : (perceptionOf(p, S).weekly[i] ?? 0))));
   }
-  return total;
+  return out;
 }
 
 /** How many rostered skill players carry a captured Yahoo projection, rest of season or this week ("captured" vs "not captured yet"). */

@@ -13,7 +13,7 @@ import { FLOOR, overlapFactor, scaledPlayer } from "./signals.js";
 import { detailBuilder, makeSummary, toneOf } from "./details.js";
 import { marketTag } from "./labels.js";
 import { RETURNS, returnText } from "./returns.js";
-import { evaluatorWeeks, isSpike, perceivedLineupTotal, perceptionOf, yahooCoverage } from "./perception.js";
+import { evaluatorFirstWeek, evaluatorWeeks, isSpike, perceivedLineupWeeks, perceptionOf, yahooCoverage } from "./perception.js";
 import { DEPTH_WEIGHT, teamStrength } from "./teamStrength.js";
 import { expectedWeeklyPoints } from "./rosterScore.js";
 
@@ -92,6 +92,7 @@ export const V3 = {
 } as const;
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
+const sum = (xs: number[]) => xs.reduce((a, v) => a + v, 0);
 
 /**
  * The gain a mode lists and ranks on (fix 2026-10-27): Playoffs = playoff strength (team strength, pts/wk); Balanced /
@@ -350,6 +351,8 @@ export interface TeamV3 extends TeamBase {
   strength: number;
   /** The rest-of-season lineup total Yahoo's evaluator would show (perceived values). */
   perceived: number;
+  /** The same, per evaluator week (perceivedLineupWeeks). */
+  perceivedWeeks: number[];
 }
 
 export function teamV3(ctx: TradeContext, teamId: string): TeamV3 {
@@ -400,8 +403,9 @@ export function teamV3(ctx: TradeContext, teamId: string): TeamV3 {
   const starterList = s.base.lineup.map((l) => l.player).filter((p): p is ValuedPlayer => !!p);
   const core = [...starterList, ...[...s.base.bench].sort((a, b) => effPpg(b) - effPpg(a)).slice(0, 3)];
   const strength = teamStrength(S, s.roster, s.irIds).total;
-  const perceived = perceivedLineupTotal(S, s.roster, s.irIds);
-  return { ...s, analysis, pieces, deficit, weakest, surplus, surplusNames, topMarketId: top?.id ?? null, starters, core, starterList, bad, strength, perceived };
+  const perceivedWeeks = perceivedLineupWeeks(S, s.roster, s.irIds);
+  const perceived = sum(perceivedWeeks);
+  return { ...s, analysis, pieces, deficit, weakest, surplus, surplusNames, topMarketId: top?.id ?? null, starters, core, starterList, bad, strength, perceived, perceivedWeeks };
 }
 
 const deficitFor = (t: TeamV3, pos: "RB" | "WR" | "TE") => Math.max(t.deficit[pos], 0.5 * t.deficit.FLEX);
@@ -459,6 +463,9 @@ export interface Judged3 {
   /** What Yahoo's evaluator would show over the rest of the season (perceived values): me / them, total points. */
   myPerceived: number;
   theirPerceived: number;
+  /** The same per evaluator week (unrounded; Σ = myPerceived / theirPerceived before rounding). */
+  myPerceivedWeeks: number[];
+  theirPerceivedWeeks: number[];
   /** "yahoo" when every player in the deal carries a captured Yahoo projection, else "estimate". */
   perceivedSource: "yahoo" | "estimate";
   /** Their perceived lineup total falls (rounded to 0.1): capped acceptance, never on the main list. */
@@ -610,8 +617,10 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     const getIds = new Set(get.map((p) => p.id));
     const myRosterAfter = my.roster.filter((p) => !giveIds.has(p.id)).concat(get);
     const theirRosterAfter = their.roster.filter((p) => !getIds.has(p.id)).concat(give);
-    const myPerceived = perceivedLineupTotal(S, myRosterAfter, my.irIds) - my.perceived;
-    const theirPerceived = perceivedLineupTotal(S, theirRosterAfter, their.irIds) - their.perceived;
+    const myPerceivedWeeks = weekDeltas(perceivedLineupWeeks(S, myRosterAfter, my.irIds), my.perceivedWeeks);
+    const theirPerceivedWeeks = weekDeltas(perceivedLineupWeeks(S, theirRosterAfter, their.irIds), their.perceivedWeeks);
+    const myPerceived = sum(myPerceivedWeeks);
+    const theirPerceived = sum(theirPerceivedWeeks);
     const nWeeks = Math.max(1, evaluatorWeeks(S));
     const perceivedLoss = r1(theirPerceived) < 0;
     const perceivedSource = [...give, ...get].every((p) => perceptionOf(p, S).source === "yahoo") ? "yahoo" : "estimate";
@@ -644,7 +653,7 @@ export function judge3(ctx: TradeContext, my: TeamV3, their: TeamV3, mode: Trade
     const coverItems = give.length ? coverLost(S, my, give, get) : [];
     return {
       give, get, myParts, theirParts, myDrops: me.drops, theirDrops: th.drops, myDelta, theirLineup, strengthDelta: r1(strengthDelta),
-      myPerceived: r1(myPerceived), theirPerceived: r1(theirPerceived), perceivedSource, perceivedLoss, gapFavor: r1(gapFavor), spikes, coverItems,
+      myPerceived: r1(myPerceived), theirPerceived: r1(theirPerceived), myPerceivedWeeks, theirPerceivedWeeks, perceivedSource, perceivedLoss, gapFavor: r1(gapFavor), spikes, coverItems,
       marketGive, marketGet, trueGive, trueGet, fairness, theirMarketChange, myTrueChange, bestToMe, premiumOk,
       myOk: !myFail, partnerOk: !theirFail, acceptance, fixesWorst, losesTheirTop, score, edgeSum, myFail, theirFail, tags31, items31, slotPenalty, overlap,
     };
@@ -844,7 +853,7 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
   if (j.theirPerceived > 0 && j.myParts.season > 0) tags.push("helps both");
   if (j.coverItems.length) tags.push("loses bye cover");
   for (const p of j.spikes) tags.push(`just spiked: ${p.name}`);
-  const yahoo = yahooViewOf(j);
+  const yahoo = yahooViewOf(j, evaluatorFirstWeek(S));
   // One playoff engine (fix 2026-10-27): the playoff lineup is rosterParts' playoffs part (= teamStrength's lineup on the
   // same roster); strengthDelta is the team-strength total (lineup + DEPTH_WEIGHT × bench cover) the finder ranks on.
   const poLineup = r1(j.myParts.playoffs);
@@ -900,20 +909,33 @@ export function buildTrade3(ctx: TradeContext, j: Judged3, my: TeamV3, their: Te
     lineupLabel: lineup,
     marketLabel: market,
     yahooView: yahoo,
+    playoffWeeks: { from: S.regularSeasonEnd + 1, to: S.finalWeek },
     pitch: tradePitch(S, j, their),
     packages: { marketGive: r1(j.marketGive), marketGet: r1(j.marketGet), trueGive: r1(j.trueGive), trueGet: r1(j.trueGet), myTrueChange: r1(j.myTrueChange), theirMarketChange: r1(j.theirMarketChange) },
   };
 }
 
 /** "What Yahoo shows them: you +12.0, them −13.4 pts" (or the estimate wording when projections are not captured). */
-export function yahooViewOf(j: Pick<Judged3, "myPerceived" | "theirPerceived" | "perceivedSource">): NonNullable<Trade["yahooView"]> {
+export function yahooViewOf(
+  j: Pick<Judged3, "myPerceived" | "theirPerceived" | "perceivedSource"> & Partial<Pick<Judged3, "myPerceivedWeeks" | "theirPerceivedWeeks">>,
+  firstWeek?: number,
+): NonNullable<Trade["yahooView"]> {
   const nums = `you ${fmtSigned(j.myPerceived)}, them ${fmtSigned(j.theirPerceived)} pts`;
+  const mine = j.myPerceivedWeeks;
+  const theirs = j.theirPerceivedWeeks;
   return {
     you: j.myPerceived,
     them: j.theirPerceived,
     source: j.perceivedSource,
     label: j.perceivedSource === "yahoo" ? `What Yahoo shows them: ${nums}` : `What Yahoo likely shows them: ${nums} (estimate)`,
+    // Per-week strip (Yahoo's Evaluate Trade layout): one decimal per week, ~30 bytes a week in the payload.
+    ...(mine && theirs && firstWeek !== undefined ? { weeks: mine.map((v, i) => ({ week: firstWeek + i, you: r1(v), them: r1(theirs[i] ?? 0) })) } : {}),
   };
+}
+
+/** after[i] − before[i] (the evaluator weeks of one roster before and after a trade). */
+function weekDeltas(after: number[], before: number[]): number[] {
+  return after.map((v, i) => v - (before[i] ?? 0));
 }
 
 // ---------------------------------------------------------------- search

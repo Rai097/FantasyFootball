@@ -631,8 +631,20 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .checks-table td:first-child { width: 34%; }
 .checks-table .icon-col { width: 36px; text-align: center; font-weight: 700; }
 .players-table td .tag { margin: 0 4px 0 0; }
+/* Long lineup titles ("<Partner>'s lineup — rest of season, pts/g") wrap instead of widening the table. */
+.rtable caption .th-why { white-space: normal; display: inline; }
 .lineup-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
 .tres .pitch { margin: 0; }
+/* Yahoo week strip: weeks across, scrolls inside its own box (the page never scrolls sideways). */
+.week-strip { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card); }
+.week-table { width: auto; min-width: 100%; white-space: nowrap; }
+.week-table caption { padding: 8px 10px 4px; }
+.week-table th, .week-table td { padding: 5px 8px; }
+.week-table .ws-team { position: sticky; left: 0; z-index: 1; background: var(--card); max-width: 120px; overflow: hidden; text-overflow: ellipsis; text-align: left; font-weight: 650; }
+.week-table .ws-po { background: rgba(79, 140, 255, 0.10); }
+.week-table .ws-group th { padding: 3px 8px; border-bottom: none; }
+.week-table .ws-group .ws-po { text-align: center; color: var(--text); border-radius: 4px 4px 0 0; }
+.week-table .ws-total { border-left: 1px solid var(--border); font-weight: 700; }
 
 /* Build a trade: pickers side by side from 900 px, stacked below. */
 .builder .builder-cols { grid-template-columns: minmax(0, 1fr); }

@@ -92,3 +92,29 @@ export function toneIcon(tone: DetailItem["tone"]): { icon: string; label: strin
   if (tone === "warn") return { icon: "!", label: "check this" };
   return { icon: "·", label: "information" };
 }
+
+/** The Trade Finder's opening mode follows the app's value mode (playoffs for a team holding a playoff spot). */
+export function initialTradeMode(valueMode: "playoffs" | "balanced" | undefined): "playoffs" | "balanced" {
+  return valueMode === "playoffs" ? "playoffs" : "balanced";
+}
+
+/** One column of the Yahoo week strip. */
+export interface WeekCol {
+  week: number;
+  you: number;
+  them: number;
+  playoff: boolean;
+}
+
+/** The Yahoo week strip's columns, playoff weeks flagged; empty when the payload has no weeks (never invented). */
+export function weekStrip(trade: Pick<Trade, "yahooView" | "playoffWeeks">): { cols: WeekCol[]; playoffCount: number } {
+  const from = trade.playoffWeeks?.from;
+  const cols = (trade.yahooView?.weeks ?? []).map((w) => ({ ...w, playoff: from !== undefined && w.week >= from }));
+  return { cols, playoffCount: cols.filter((c) => c.playoff).length };
+}
+
+/** "Your gain, weeks 15–17" (the playoff KPI); without the league's playoff weeks: "Your playoff gain". */
+export function playoffGainLabel(pw: Trade["playoffWeeks"]): string {
+  if (!pw) return "Your playoff gain";
+  return pw.from === pw.to ? `Your gain, week ${pw.from}` : `Your gain, weeks ${pw.from}–${pw.to}`;
+}

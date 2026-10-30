@@ -1643,3 +1643,22 @@ Display only (web/src); the one API change: `POST /trade/evaluate` now sends `mo
 - Build a trade: partner + give/get pickers (stacked below 900 px), Evaluate, then the same result component.
 - Result (`TradeResult`, shared by builder and rows): verdict bar (chip, the deciding reason, mode), four KPI tiles (your playoff gain, their lineup, acceptance, what Yahoo shows them you / them), players table (our pts/g, market, labels), lineup-change tables with a total row, tags, "Why this verdict" checks table grouped Your side / Their side / Market / Other (no detail is dropped; unknown labels go to Other; icons from the tone), "Message to send" toggle with Copy. Pure helpers and tests: `web/src/lib/tradeView.ts`.
 - `npm test` now also runs `web/src/**/*.test.ts`. Screenshots: `docs/screenshots/trades-v2-*`.
+
+## Trade result: Yahoo week strip, default mode, labels (2026-10-30) — extends "Trade Finder layout v2"
+
+- **Payload.** `Trade.yahooView.weeks: { week, you, them }[]` = the perceived (Yahoo-emulated) lineup change per evaluator
+  week, next week … final week (`perceivedLineupWeeks`, the same per-week optimal lineup `perceivedLineupTotal` sums; one
+  decimal; Σ ≈ `you` / `them` within 0.05 × weeks). `Trade.playoffWeeks: { from, to }` = regularSeasonEnd + 1 … finalWeek.
+  Both on evaluate, trades2 and bench upgrades (~30 bytes a week per trade; demo trades2 394 KB vs 387 KB without).
+  Missing weeks (hand-made trades) = no strip, never zeros.
+- **Week strip.** Right under the KPI tiles: weeks across ("Wk N", playoff weeks shaded under a "Playoffs" header), rows
+  "You" and the partner, signed one-decimal values green/red, "Total" = the "Yahoo shows them" totals. Scrolls inside its
+  own box (team column sticky); the page never scrolls sideways at 390 px. Tooltip: "What Yahoo's Evaluate Trade likely
+  shows each week (our estimate of Yahoo's projections, not our model)."
+- **Default mode.** The Trade Finder opens in the team's value mode (`Analysis.valueMode` = projectionV4 `defaultMode`:
+  Playoffs for a team holding a playoff spot, else Balanced; `initialTradeMode`). A click wins while the page is open; the
+  old localStorage memory of the mode is removed (a stale "Balanced" kept overriding the rule).
+- **Labels.** KPI "Your gain, weeks 15–17" (the league's playoff weeks, by our model with matchups); lineup-change tables
+  "Your lineup — rest of season, pts/g" / "<Partner>'s lineup — rest of season, pts/g". Each tooltip says in one sentence
+  why the two numbers differ (playoff weeks with matchups vs rest-of-season per-game average).
+

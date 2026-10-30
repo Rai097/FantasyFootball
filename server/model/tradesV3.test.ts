@@ -26,6 +26,7 @@ import {
   coreIds,
   spareQb,
   teamV3,
+  yahooViewOf,
 } from "./tradesV3.js";
 import type { TradeContext } from "./tradeKit.js";
 import { FLEX_SLOTS } from "./lineup.js";
@@ -34,7 +35,7 @@ import { attachMarket } from "./market.js";
 import { rosterParts } from "./rosterScore.js";
 import { perceptionOf } from "./perception.js";
 import { detailProblems, league, summaryProblems, team, vp } from "./testkit.js";
-import type { League, ValuedPlayer } from "./types.js";
+import type { League, Trade, ValuedPlayer } from "./types.js";
 import type { MarketValue } from "../data/fantasycalc.js";
 
 const G = { remainingGames: 14 };
@@ -910,4 +911,25 @@ test("Win now help describes the 'now' part as the lineup's average points per g
   const now = src.match(/\n  now: \[([\s\S]*?)\],\n/)![1];
   assert.match(now, /average points per game from now on, missed games counted/);
   assert.doesNotMatch(now, /this week/);
+});
+
+test("Yahoo view week by week: next week … final week, one decimal, Σ = the you / them totals within rounding", () => {
+  const S = ctx.league.settings;
+  const check = (t: { key?: string; yahooView?: Trade["yahooView"]; playoffWeeks?: Trade["playoffWeeks"] }, label: string) => {
+    const y = t.yahooView!;
+    const w = y.weeks!;
+    assert.equal(w.length, S.finalWeek - S.currentWeek, label);
+    assert.equal(w[0].week, S.currentWeek + 1, label);
+    assert.equal(w[w.length - 1].week, S.finalWeek, label);
+    for (const x of w) for (const v of [x.you, x.them]) assert.equal(Math.round(v * 10) / 10, v, `${label}: one decimal`);
+    const tol = 0.05 * w.length + 1e-9;
+    assert.ok(Math.abs(w.reduce((a, x) => a + x.you, 0) - y.you) <= tol, `${label}: you ${y.you}`);
+    assert.ok(Math.abs(w.reduce((a, x) => a + x.them, 0) - y.them) <= tol, `${label}: them ${y.them}`);
+    assert.deepEqual(t.playoffWeeks, { from: S.regularSeasonEnd + 1, to: S.finalWeek }, label);
+  };
+  check(evaluateTradeV3(ctx, "me", "them", ["mRB3"], ["tWR3"]), "evaluate");
+  const r = findTradesV3(ctx, "me", { maxGive: 2, maxGet: 2 });
+  for (const t of [...r.trades, ...r.smallerEdges, ...r.nearMisses]) check(t, t.key);
+  // A hand-made Judged3 without the week arrays still yields the totals (no weeks field).
+  assert.equal(yahooViewOf({ myPerceived: 1, theirPerceived: 2, perceivedSource: "estimate" }).weeks, undefined);
 });

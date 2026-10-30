@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkGroupOf, groupChecks, lineupTotal, parseLineupChange, toneIcon, verdictClass, verdictReason } from "./tradeView";
+import { checkGroupOf, groupChecks, initialTradeMode, lineupTotal, parseLineupChange, playoffGainLabel, toneIcon, verdictClass, verdictReason, weekStrip } from "./tradeView";
 
 test("lineup change line becomes slot, out, in and a delta", () => {
   const r = parseLineupChange("RB1: Bijan Robinson 12.3 → Jahmyr Gibbs 14.0");
@@ -56,4 +56,32 @@ test("tone icons", () => {
   assert.equal(toneIcon("pos").icon, "✓");
   assert.equal(toneIcon("neg").icon, "✗");
   assert.equal(toneIcon("warn").icon, "!");
+});
+
+test("Trade Finder opens in Playoffs for a team holding a playoff spot, else Balanced (unknown = Balanced)", () => {
+  assert.equal(initialTradeMode("playoffs"), "playoffs");
+  assert.equal(initialTradeMode("balanced"), "balanced");
+  assert.equal(initialTradeMode(undefined), "balanced");
+});
+
+test("Yahoo week strip: one column per payload week, playoff weeks flagged; no weeks → empty, never invented", () => {
+  const yahooView = {
+    you: 1.3,
+    them: -0.4,
+    source: "yahoo" as const,
+    label: "x",
+    weeks: [13, 14, 15, 16, 17].map((week) => ({ week, you: 0.3, them: -0.1 })),
+  };
+  const s = weekStrip({ yahooView, playoffWeeks: { from: 15, to: 17 } });
+  assert.deepEqual(s.cols.map((c) => c.week), [13, 14, 15, 16, 17]);
+  assert.deepEqual(s.cols.map((c) => c.playoff), [false, false, true, true, true]);
+  assert.equal(s.playoffCount, 3);
+  assert.deepEqual(weekStrip({ yahooView: { ...yahooView, weeks: undefined } }), { cols: [], playoffCount: 0 });
+  assert.equal(weekStrip({ yahooView }).playoffCount, 0, "unknown playoff weeks: nothing shaded");
+});
+
+test("playoff KPI label names the league's playoff weeks", () => {
+  assert.equal(playoffGainLabel({ from: 15, to: 17 }), "Your gain, weeks 15–17");
+  assert.equal(playoffGainLabel({ from: 16, to: 16 }), "Your gain, week 16");
+  assert.equal(playoffGainLabel(undefined), "Your playoff gain");
 });

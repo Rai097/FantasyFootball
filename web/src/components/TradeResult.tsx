@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { DetailItem, Trade } from "../../../server/model/types";
 import type { VP } from "../api";
 import { deltaClass, f1, signed } from "../lib/format";
-import { groupChecks, lineupTotal, parseLineupChange, toneIcon, verdictClass, verdictReason } from "../lib/tradeView";
+import { groupChecks, lineupTotal, parseLineupChange, playoffGainLabel, toneIcon, verdictClass, verdictReason, weekStrip } from "../lib/tradeView";
 import { Disclosure } from "./ExpandableRow";
 import { ColumnHelp, HelpTip } from "./HelpTip";
 import { PlayerChip } from "./PlayerChip";
@@ -13,7 +13,11 @@ import { PlayerChip } from "./PlayerChip";
 export const TRADE_TIPS = {
   team: "Your weighted roster score change for the chosen mode (this week, rest of season, playoffs, bench depth).",
   accept: "Chance the other manager accepts, judged from his side: mostly what Yahoo's evaluator shows his lineup, lower if he gives a player right after a big game.",
-  playoffGain: "Your lineup's change per week in the playoff weeks (15–17), by our projections. The verdict uses the selected mode's bar (Playoffs: this plus 0.25 × bench cover).",
+  playoffGain:
+    "Your lineup's change per week in the playoff weeks only, by our projections with each week's matchups, so it differs from the rest-of-season lineup tables below. The verdict uses the selected mode's bar (Playoffs: this plus 0.25 × bench cover).",
+  lineupTables: "Starters' average points per game over the whole rest of the season (our projections, no matchups), so the total differs from the playoff-weeks gain above.",
+  weekly: "What Yahoo's Evaluate Trade likely shows each week (our estimate of Yahoo's projections, not our model).",
+  weeklyTotal: "Sum of the weeks: the same you / them totals as the 'Yahoo shows them' tile.",
   theirLineup: "Their weekly lineup points over the rest of the season, by our projections.",
   marketValue: "FantasyCalc trade-market value they get vs give. It matters only a little: managers judge by Yahoo's lineup numbers.",
   yahoo: "Lineup change Yahoo's trade evaluator would show, next week through the final week (Yahoo projections), you / them in total points. 'Estimate' = not captured yet: FantasyPros rank.",
@@ -62,7 +66,7 @@ export function TradeResult({
       </div>
 
       <div className="kpis">
-        <Kpi label="Your playoff gain" tip={TRADE_TIPS.playoffGain}>
+        <Kpi label={playoffGainLabel(trade.playoffWeeks)} tip={TRADE_TIPS.playoffGain}>
           <Num v={me.playoffDelta} unit=" /wk" />
         </Kpi>
         <Kpi label="Their lineup" tip={TRADE_TIPS.theirLineup}>
@@ -82,6 +86,8 @@ export function TradeResult({
           )}
         </Kpi>
       </div>
+
+      <WeekStrip trade={trade} partnerName={partnerName} />
 
       <div className="tscroll">
         <table className="rtable players-table">
@@ -103,8 +109,8 @@ export function TradeResult({
       </div>
 
       <div className="lineup-tables">
-        <LineupTable title="Your lineup" lines={me.lineupChanges} />
-        <LineupTable title={`${partnerName}'s lineup`} lines={them.lineupChanges} />
+        <LineupTable title="Your lineup — rest of season, pts/g" lines={me.lineupChanges} />
+        <LineupTable title={`${partnerName}'s lineup — rest of season, pts/g`} lines={them.lineupChanges} />
       </div>
 
       {trade.tags.length > 0 && (
@@ -226,7 +232,9 @@ function LineupTable({ title, lines }: { title: string; lines: string[] }) {
   return (
     <div className="tscroll">
       <table className="rtable lineup-change">
-        <caption>{title}</caption>
+        <caption>
+          <ColumnHelp tip={TRADE_TIPS.lineupTables}>{title}</ColumnHelp>
+        </caption>
         <thead>
           <tr>
             <th>Slot</th>
@@ -278,6 +286,67 @@ function LineupTable({ title, lines }: { title: string; lines: string[] }) {
             </tr>
           </tfoot>
         )}
+      </table>
+    </div>
+  );
+}
+
+/** Yahoo's Evaluate Trade layout: weeks across, You / partner down, signed per-week change, Total = the tile's numbers. */
+function WeekStrip({ trade, partnerName }: { trade: Trade; partnerName: string }) {
+  const yv = trade.yahooView;
+  const { cols, playoffCount } = weekStrip(trade);
+  if (!yv || cols.length === 0) return null;
+  const regular = cols.length - playoffCount;
+  const row = (label: string, pick: (c: { you: number; them: number }) => number) => (
+    <tr>
+      <th scope="row" className="ws-team">
+        {label}
+      </th>
+      {cols.map((c) => (
+        <td key={c.week} className={`num${c.playoff ? " ws-po" : ""}`}>
+          <Num v={pick(c)} />
+        </td>
+      ))}
+      <td className="num ws-total">
+        <Num v={pick(yv)} />
+      </td>
+    </tr>
+  );
+  return (
+    <div className="tscroll week-strip">
+      <table className="rtable week-table">
+        <caption>
+          <ColumnHelp tip={TRADE_TIPS.weekly}>What Yahoo shows, week by week{yv.source === "estimate" ? " (est.)" : ""}</ColumnHelp>
+        </caption>
+        <thead>
+          {playoffCount > 0 && (
+            <tr className="ws-group">
+              <th />
+              {regular > 0 && <th colSpan={regular} />}
+              <th colSpan={playoffCount} className="ws-po">
+                Playoffs
+              </th>
+              <th />
+            </tr>
+          )}
+          <tr>
+            <th className="ws-team">
+              <span className="sr-only">Team</span>
+            </th>
+            {cols.map((c) => (
+              <th key={c.week} className={`num${c.playoff ? " ws-po" : ""}`}>
+                Wk {c.week}
+              </th>
+            ))}
+            <th className="num ws-total">
+              <ColumnHelp tip={TRADE_TIPS.weeklyTotal}>Total</ColumnHelp>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {row("You", (c) => c.you)}
+          {row(partnerName, (c) => c.them)}
+        </tbody>
       </table>
     </div>
   );

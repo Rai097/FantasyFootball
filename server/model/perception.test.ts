@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PERCEPTION, attachPerception, evaluatorWeeks, isSpike, perceive, perceivedLineupTotal, perceptionOf, scheduleCheck, yahooCoverage } from "./perception.js";
+import { PERCEPTION, attachPerception, evaluatorFirstWeek, evaluatorWeeks, isSpike, perceive, perceivedLineupTotal, perceivedLineupWeeks, perceptionOf, scheduleCheck, yahooCoverage } from "./perception.js";
 import { league, line, vp } from "./testkit.js";
 import type { WeekLine } from "./types.js";
 
@@ -192,4 +192,21 @@ test("evaluator spread: the schedule's last week (NFL week 18) bounds Yahoo's to
   assert.equal(pc.weekly.slice(1).reduce((a, v) => a + v, 0), 96);
   // Without a schedule the bye-only check runs to week 18 as well.
   assert.equal(perceive(vp("b", "WR", 10, 20, { bye: 10, yahooProj: 120, yahooProjWeekly: 12 }), S).base, 12);
+});
+
+test("evaluator weeks: one value per week next week … final week, summing to the total; the bye week shows the backup", () => {
+  const S2 = league([], ["QB", "WR", "BN", "BN"], { currentWeek: 8 }).settings;
+  const qb = vp("qb", "QB", 18, 20, { bye: 7, yahooProj: 220, yahooProjWeekly: 20 });
+  const star = vp("star", "WR", 15, 30, { bye: 12, yahooProj: 150, yahooProjWeekly: 15 });
+  const back = vp("back", "WR", 6, 5, { bye: 7, yahooProj: 66, yahooProjWeekly: 6 });
+  const weeks = perceivedLineupWeeks(S2, [qb, star, back]);
+  assert.equal(weeks.length, evaluatorWeeks(S2));
+  assert.equal(evaluatorFirstWeek(S2), 9);
+  assert.equal(weeks.reduce((a, v) => a + v, 0), perceivedLineupTotal(S2, [qb, star, back]));
+  assert.equal(weeks[12 - 9], 20 + 6, "week 12: star on bye, the backup starts");
+  assert.equal(weeks[0], 35);
+  // Final week: nothing left for the evaluator.
+  const last = league([], ["QB", "WR"], { currentWeek: S2.finalWeek }).settings;
+  assert.deepEqual(perceivedLineupWeeks(last, [qb, star]), []);
+  assert.equal(evaluatorFirstWeek(last), last.finalWeek + 1);
 });

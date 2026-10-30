@@ -379,7 +379,16 @@ export interface Trade {
    * The rest-of-season lineup change Yahoo's evaluator would show (perceived values): you / them in total points,
    * source "yahoo" when every player in the deal has a captured Yahoo projection, else "estimate".
    */
-  yahooView?: { you: number; them: number; source: "yahoo" | "estimate"; label: string };
+  yahooView?: {
+    you: number;
+    them: number;
+    source: "yahoo" | "estimate";
+    label: string;
+    /** The same change week by week (evaluator weeks: next week … final week; one decimal, Σ ≈ you / them). */
+    weeks?: { week: number; you: number; them: number }[];
+  };
+  /** The league's playoff weeks (the "Your gain, weeks 15–17" KPI and the shaded weeks in the Yahoo strip). */
+  playoffWeeks?: { from: number; to: number };
   /** One line I could paste to the other manager. */
   pitch?: string;
   /** Package values (best + 0.85·second + 0.70·third), market and true, net of drop cost on the receiving side. */

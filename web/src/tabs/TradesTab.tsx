@@ -8,6 +8,7 @@ import { TradeBuilder, type BuilderPrefill } from "../components/TradeBuilder";
 import { TradeTable } from "../components/TradeTable";
 import { useAsync } from "../lib/useAsync";
 import { f1 } from "../lib/format";
+import { initialTradeMode } from "../lib/tradeView";
 
 const POSITIONS = ["QB", "RB", "WR", "TE"];
 
@@ -24,18 +25,10 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "partners", label: "Partners" },
 ];
 
-const MODE_KEY = "ftd.tradeMode";
-function loadMode(): TradeMode {
-  try {
-    const m = localStorage.getItem(MODE_KEY);
-    return m === "now" || m === "playoffs" || m === "balanced" ? m : "balanced";
-  } catch {
-    return "balanced";
-  }
-}
-
 export function TradesTab({ analysis, active }: { analysis: Analysis; active: Active & { team: string } }) {
-  const [mode, setModeState] = useState<TradeMode>(loadMode);
+  // Opens in the app's value mode for this team (Playoffs when it holds a playoff spot); a click wins while on the page.
+  const [picked, setPicked] = useState<TradeMode | null>(null);
+  const mode: TradeMode = picked ?? initialTradeMode(analysis.valueMode);
   const [view, setView] = useState<View>("suggestions");
   const [prefill, setPrefill] = useState<BuilderPrefill>();
   const [partner, setPartner] = useState("");
@@ -47,13 +40,8 @@ export function TradesTab({ analysis, active }: { analysis: Analysis; active: Ac
   const me = analysis.teams.find((t) => t.team.id === active.team);
   const nameOf = (t: Trade) => names.get(t.them.teamId) ?? t.them.teamId;
   const setMode = (m: TradeMode) => {
-    setModeState(m);
+    setPicked(m);
     setShown(10);
-    try {
-      localStorage.setItem(MODE_KEY, m);
-    } catch {
-      /* private mode: not remembered */
-    }
   };
   const openInBuilder = (t: Trade) => {
     setPrefill({ nonce: Date.now(), partner: t.them.teamId, give: t.me.gives.map((p) => p.id), get: t.them.gives.map((p) => p.id) });
