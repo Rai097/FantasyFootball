@@ -2,8 +2,8 @@
 
 ## Resume here
 Owner (2026-10-26): Claude is the architect; work the queue autonomously, stop only for critical issues.
-TEAM-CHANGE PRIOR + TD BASELINE (2026-10-30, DESIGN "Fix: team-change prior and TD baseline"): BUILT, gate green; needs adversarial test + review (HIGH: changes valuations). Not deployed.
-ROLE-CHANGE PRIOR AT CURRENT VOLUME (2026-10-30, DESIGN "Fix: role-change prior at current volume"): fix round 1 BUILT (prior neutral on a role change); 1 adversarial wording assertion (53c90fd, "last year's efficiency at this year's usage") no longer applies, coordinator to decide. Not deployed.
+TEAM-CHANGE PRIOR + TD BASELINE (2026-10-30, DESIGN "Fix: team-change prior and TD baseline"): SHIPPED live e15a541 (adversarial ccbb42a, fix round 1). No rostered label flips on real data. Residuals: traded back to his 2025 team = same team; mid-2025 trade TDs mixed. Backlog: big-usage WR held down by one low-TD year; injury-shortened games counted as normal; ECR stale after a suspension/injury return; 2-game riser sensitivity (half-life 2); projection-accuracy log (projected vs actual, incl. Yahoo weekly proj).
+ROLE-CHANGE PRIOR AT CURRENT VOLUME (2026-10-30, DESIGN "Fix: role-change prior at current volume"): SHIPPED live e3913dc (prior neutral on a role change; adversarial 53c90fd, fix round 1).
 AVAILABLE-PLAYER PROJECTIONS (2026-10-28, import v6, DESIGN "Available-player projections"): SHIPPED (live 4906de5). VERIFIED on the owner's v6 import 2026-10-28: week 193/193 available players, rest of season 151/193, view "Week 8 (proj)" = projWeek 8 (Yahoo form field stat1); 0.0 = bye week or no role (Yahoo's own value). Bookmarklet
    reads "Week N (proj)" (+ rest-of-season if offered) for available K / DEF / offense; Waivers streams K / DEF on Yahoo's
    week projection (≥ +1.0, free agents only). Risk MEDIUM: developer tests + coordinator review, no separate adversarial tester.
