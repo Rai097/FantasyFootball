@@ -1717,7 +1717,7 @@ STOPGAP: retire it when the Yahoo API app is approved. Read-only toward Yahoo (t
 - **Browser.** `server/autoimport/collector.ts`: playwright-core `chromium.launchPersistentContext(profileDir,
   { channel: "chrome", headless: true })` = system Google Chrome, never a downloaded browser. Profile: dedicated
   `<cwd>/.data/yahoo-chrome-profile` (live: ~/FantasyFootball-run/.data/yahoo-chrome-profile), signed in by the owner
-  with `npm run yahoo:login` (headed, no automation). The code never reads or logs its cookies. Opens
+  with `npm run yahoo:login` (plain headed Chrome, no Playwright: Google refuses "Sign in with Google" in an automation-controlled browser; it gets `--use-mock-keychain --password-store=basic` so the headless run can read the sign-in). The code never reads or logs its cookies. Opens
   `https://football.fantasysports.yahoo.com/f1/<league>`; landing on login.yahoo.com = `signed_out`; guce/consent or a
   captcha path = `captcha`; any other page = `error`; then `page.evaluate` of the bundle; 0 teams = `empty`. Before
   launching, a process already carrying exactly `--user-data-dir=<profile>` (e.g. the owner's `yahoo:login` window)
