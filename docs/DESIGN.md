@@ -1770,3 +1770,90 @@ STOPGAP: retire it when the Yahoo API app is approved. Read-only toward Yahoo (t
 - **Unverified:** real Yahoo under headless Chrome (bot checks, a different page shell, the exact sign-in / consent
   URLs). A `yahoo:login` window open during a run → `profile_in_use` (tested with a headless stand-in, not the headed
   window). Residual: an import that hangs inside the import lock (local disk I/O only) would still hold that lock.
+
+## Matchups and results log (2026-10-31) — new "Matchup" tab; extends "Projection accuracy log"
+Owner ask: a Yahoo-style matchup view with OUR projections (see how the opponent is projected) and a record of results
+to see how well our projections hold up. Established practice: Yahoo / ESPN / Sleeper matchup screens = two lineups
+side by side by slot, projected and live totals, win probability; we add our projection beside Yahoo's.
+
+**Source (verified on the owner's league, 2026-10-31, real pages):**
+- League home module `<base>?matchup_week=W&module=matchups`: header "Week W Matchups" + status ("In progress" /
+  "Final results"); per pairing a `li[data-target="/f1/<league>/matchup?week=W&mid1=A&mid2=B"]`, each side: team name,
+  record, rank, points (live or final) and Yahoo's projected total.
+- Matchup page `<base>/matchup?week=W&mid1=A&mid2=B`, table `#matchups` ("Stats | Player | Proj | Fan Pts | Pos …
+  mirrored"): per slot row (QB, WR, RB, TE, W/R/T, K, DEF) both teams' player, Yahoo's projection ("Proj") and Yahoo's
+  fantasy points ("Fan Pts", "–" = not played yet), a Total row (proj, pts), and the bench after "Show Bench Players"
+  (BN rows; bench is in the same HTML). On a final week "Proj" is Yahoo's pre-game projection (week 7: 123.86 proj vs
+  165.78 actual). Points include K and DEF (Yahoo's official numbers; stat corrections until Thursday).
+
+**Capture (collect.ts, shared by the bookmark and the auto-import):** after the league page reads, W = Yahoo's current
+matchup week (the module's selected week on the league home page, already fetched):
+1. module for W and W−1 (W−1 skipped when W = 1): pairings + per side {teamId, points, yahooProj} + status.
+2. matchup page for the owner's pairing in W (live per-player points as of the import) and for EVERY pairing in W−1
+   (final starters and points of all teams). At most 2 + 1 + numTeams/2 fetches (owner league: 9).
+3. Per matchup page: per team, rows {slot (Yahoo label), yahooId, name, yahooProj | null, points | null} for starters
+   and bench, and the Total row. Player identity = yahooId (the same id the roster uses).
+Any failure = a diagnostics note (step "matchups"); the payload's `matchups` is then absent or partial. A missing or
+partial matchups section NEVER refuses an import (partial.ts unchanged for it) and never deletes stored results.
+
+**Storage:** `.data/matchlog-<importId>.json` (compact JSON), keyed week → { pairings, status, fetchedAt, details by
+pairing }. Merge: a newer fetch of a week replaces that week's module data and any matchup page it carries (stat
+corrections land); a fetch never removes a stored matchup page it did not re-fetch. New season replaces the log;
+deleted with the league. Size ≈ 9 weeks × 6 pairings × 30 rows ≈ < 0.3 MB a season. Written under the same import lock
+discipline as projlog (`withLock("matchlog:<id>")`), after the import save, never failing the import.
+
+**Our locked projections:** the projection accuracy log (projlog) becomes the one per-player record of pre-kickoff
+projections: its capture is extended to K and DEF (app = projection v4 `weekly[W]`; yahoo = `yahooProjWeekly` when
+projWeek = W). Accuracy metrics keep scoring skill players only (K / DEF have no nflverse actuals) — the filter moves
+from capture to the report. DEF identity: the same resolved player id the model uses for the team defense.
+
+**Numbers shown (pure module `server/model/matchup.ts`, sibling tests):**
+- Team projection (ours) for week W = Σ over the team's starters of each starter's projection: for a player whose
+  game has started, his LOCKED projlog value (latest capture before his kickoff); before kickoff, today's `weekly[W]`.
+  Starters = the matchup page's starters when the week is final, else Yahoo slots at the latest import. A starter with
+  no projection (e.g. added after the last capture before his kickoff) → the team total shows "incomplete (n not
+  projected)" and is excluded from the record's metrics; never counted as 0. Bye / Out starters count their real 0.
+- Yahoo projection = Yahoo's own: matchup page Total "Proj" when we have the page, else the module's projected total.
+- Points = Yahoo's (module totals; per player from the matchup page), "as of <import time>" while in progress.
+- Win chance (ours) = Φ(margin / MATCHUP.marginSd), marginSd = 35 pts (calibration value: two teams' weekly SD ≈ 25
+  each; refit from the log once ≥ 30 final matchups are recorded). Shown as a % with a tooltip, labelled an estimate.
+- Record (final weeks with our pre-game projection): per pairing our margin vs Yahoo's vs actual; "called it" = the
+  projected winner won (a tie projection = no call). Summary: winner calls app x/n vs Yahoo x/n, mean absolute error of
+  team totals app vs Yahoo, mean bias (actual − projected), over the SAME team-weeks. Owner's games listed first.
+- Weeks before the first recorded capture (owner league: weeks 1–7) have Yahoo results but no projection of ours: the
+  record shows them as "not recorded" for ours (no backfill: the model's past projections were not kept).
+
+**API:** `GET /api/league/import/:id/matchup?week=W` (guard: league rule, handler re-checks ownership; demo / yahoo →
+404; cached under `import:<id>:matchup:<W>`, invalidated by import and matchlog writes). Returns { week, currentWeek,
+weeks (selectable: recorded weeks + current), status, asOf, mine: { sides[2] {teamId, name, record, ours, oursIncomplete,
+yahoo, points, winPct}, rows [{slot, a, b}], bench [{a, b}] }, others [{ sides[2] {teamId, name, ours, yahoo, points} ,
+status }], record: { weeks [...], summary } }. Player cell: { id, name, pos, nflTeam, ours | null, yahoo | null,
+points | null, status chip (Q / D / O / IR), locked (game started) }. ≤ 30 KB.
+
+**UI (new tab "Matchup", between My Team and League):** week picker; header card: the two teams, big totals row
+"Ours 128.4 – 121.0", "Yahoo 131.8 – 121.1", "Score 0.0 – 0.0 (as of 12:00)", win chance chip; slot table mirrored
+like Yahoo (player · ours · Yahoo · pts | slot | pts · Yahoo · ours · player) — at 390 px each side collapses to player
++ ours + pts with Yahoo behind the row tap; bench collapsed. "Other matchups" rows (two names, ours, Yahoo, score),
+collapsed. "Track record" card: summary chips first (winner calls, avg miss ours vs Yahoo), then week rows (opponent,
+ours, Yahoo, final, ✓ / ✗ per source), details on tap. Every number has a "why" tooltip.
+
+**Decisions after review (override the text above where they differ):**
+- v1 capture scope: module for W and W−1 + the OWNER's matchup page for W (live) and W−1 (final lineup) = at most 4
+  extra Yahoo page fetches per import (~1 MB each; ~25 imports a week ≈ 100 MB/week of Yahoo page reads). Other teams'
+  starters for a week = Yahoo slots at the latest import before the week's first Sunday kickoff ("lineup as of last
+  import" label). The all-pairings W−1 matchup-page sweep (+5 pages per import) is a later, optional extra.
+- Collector: a separate `collectMatchups()` run AFTER the existing collect, its errors caught at the call site
+  (diagnostics only); the existing collect() flow stays byte-identical and its tests pass with no matchup fixtures.
+- Yahoo's pre-game number is LOCKED like ours: per pairing side, Yahoo projected total = the latest module / matchup
+  page capture taken before the week's first kickoff; only when none exists (weeks recorded late, e.g. 1–7) the final
+  matchup page's / module's "Proj" is used (Yahoo keeps the pre-game projection on final pages: fixture week 7).
+  Live module projections after kickoff never overwrite the locked value; points and status always update.
+- One week source: the payload carries Yahoo's matchup week (`matchupWeek`); projlog's capture week and matchlog's
+  week are the same number; a mismatch with the server's NFL week is a diagnostics note and the capture uses Yahoo's
+  week (rollover Tuesday/Wednesday tested).
+- Win chance = pre-game projection margin only (no live blend in v1), labelled "pre-game estimate".
+- projlog K / DEF: capture extended; the accuracy report and the "Vs Yahoo" bullet filter to skill positions
+  (projLog tests updated on purpose + a test that no K / DEF row reaches the accuracy card). Ships first, on its own.
+- New collect code ⇒ bookmark "Trade Desk import v9" (the owner re-drags it; auto-import picks it up on deploy).
+- Fixtures (anonymized: teams "Team A–L", no manager names, no profile links): league-home module week 8 in progress
+  and week 7 final; matchup page week 8 pre-game and week 7 final (both with bench).
