@@ -45,9 +45,11 @@ Open work and "Resume here" live in TASKS.md.
   table as the starting lineup, never a different two-column list). Charts, graphs and tables before text.
 - Never commit `.env`, `.cache/`, `.data/` (already in .gitignore).
 - Leftovers (owner, 2026-10-30/31): Claude and its agents delete their OWN scratch files and finished agent worktrees
-  themselves (`rm -rf` under the session scratchpad /private/tmp/claude-501/…, `git worktree remove`/`prune`,
-  `git branch -d` of merged agent branches) without asking or listing them for the owner. Never `.data/`, backups
-  (`*.bak-*`), ~/FantasyFootball-run or the Yahoo Chrome profile. Allow/deny rules: .claude/settings.local.json.
+  themselves without asking or listing them for the owner. Scratch files: ONLY `~/.claude/bin/clean-scratch PATH…`
+  (pre-approved; refuses anything outside /private/tmp/claude-501/) as its own command, never `rm` (the global
+  settings force a prompt on every `rm -rf`/`rm -f`, which stalls the build). Worktrees: `git worktree remove`/`prune`
+  and `git branch -d` of merged agent branches. Never `.data/`, backups (`*.bak-*`), ~/FantasyFootball-run or the
+  Yahoo Chrome profile.
 - Yahoo API access is pending Yahoo's approval (since July 2026 apps need it); until then
   the `import` provider is the real-league path. Yahoo code must stay defensive and
   log the raw response on parse failure.
