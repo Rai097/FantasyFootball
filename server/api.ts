@@ -11,6 +11,7 @@ import {
   buildImportLeague,
   deleteHistory,
   deleteImport,
+  deleteMatchLog,
   deleteProjLog,
   findExistingImport,
   importFreeAgents,
@@ -23,6 +24,7 @@ import {
   projCaptureEntries,
   readHistory,
   readProjLog,
+  recordMatchLog,
   recordProjLog,
   readImport,
   recordHistory,
@@ -41,6 +43,7 @@ import { buildLeagueView } from "./model/league.js";
 import { attachFloor } from "./model/signals.js";
 import { defaultMode, type ValueMode } from "./model/projectionV4.js";
 import { getProjectionTables, getSeasonTables } from "./data/signalTables.js";
+import { cleanMatchups, type MatchWeekCapture } from "./model/matchLog.js";
 import { accuracyReport, outcomeOf, playerAccuracy, resolveLog, teamWeeksWithRows, toAccuracyResponse, vsYahooItem, weekKickoffs, type AccuracyResponse, type ResolvedRow } from "./model/projLog.js";
 import type { ProjectionTables } from "./model/projectionV4.js";
 import { getPriorWeeks } from "./data/priorWeeks.js";
@@ -406,11 +409,13 @@ async function resolvedRows(db: PlayerDb, league: League, id: string): Promise<R
  * one at a time per league; a failure is logged and never fails the import.
  */
 let projCaptures: Promise<unknown> = Promise.resolve();
+/** Settles when every queued after-import capture (projection log, then matchups log) has finished. */
 export const projCaptureIdle = (): Promise<unknown> => projCaptures;
-function captureProjections(stored: StoredImport, capturedAt: string): void {
+/** `yahooWeek` = Yahoo's matchup week from the payload (one week source); absent → the NFL calendar's current week. */
+function captureProjections(stored: StoredImport, capturedAt: string, yahooWeek?: number): void {
   const run = (async () => {
     const l = await loadContext("import", stored.id, false);
-    const week = l.league.settings.currentWeek;
+    const week = yahooWeek ?? l.league.settings.currentWeek;
     const { games } = await getSeasonTables(l.db.season);
     const { kickoffs, teams } = weekKickoffs(games.values(), week);
     const appWeek = (p: Player): number | undefined => {
@@ -421,9 +426,26 @@ function captureProjections(stored: StoredImport, capturedAt: string): void {
     };
     const entries = projCaptureEntries(l.db, stored, week, appWeek, (t) => teams.has(t));
     const r = await recordProjLog(stored.id, { season: l.db.season, week, capturedAt, entries, kickoffs, maxWeek: l.league.settings.finalWeek });
-    if (r.kept) invalidate(`import:${stored.id}:accuracy`);
+    if (r.kept) (invalidate(`import:${stored.id}:accuracy`), invalidate(`import:${stored.id}:matchup:`));
     console.log(`[projlog] import=${stored.id} week=${week} kept=${r.kept} ignored=${r.ignored}`);
   })().catch((e) => console.warn(`[projlog] capture failed for ${stored.id}: ${(e as Error).message}`));
+  projCaptures = projCaptures.then(() => run);
+}
+
+/**
+ * After an import is saved: merge the payload's matchups (import v9) into .data/matchlog-<id>.json (Yahoo's pre-game
+ * totals locked against the week's first kickoff). Queued after the projection capture, one at a time per league;
+ * a failure is logged `[matchlog]` and never fails the import.
+ */
+function captureMatchups(id: string, capturedAt: string, matchupWeek: number | undefined, weeks: MatchWeekCapture[]): void {
+  const run = (async () => {
+    const db = await getPlayerDb();
+    const { games } = await getSeasonTables(db.season);
+    const firstKickoff = (w: number) => weekKickoffs(games.values(), w).kickoffs.first;
+    const r = await recordMatchLog(id, { season: db.season, capturedAt, matchupWeek, weeks, firstKickoff });
+    if (r.written) invalidate(`import:${id}:matchup:`);
+    console.log(`[matchlog] import=${id} week=${matchupWeek ?? "-"} weeks=${weeks.map((w) => `${w.week}:${w.status}:${w.pairings.length}p/${w.pages.length}pg`).join(",") || "none"} written=${r.written}`);
+  })().catch((e) => console.warn(`[matchlog] capture failed for ${id}: ${(e as Error).message}`));
   projCaptures = projCaptures.then(() => run);
 }
 
@@ -739,8 +761,19 @@ const importLock = <T>(fn: () => Promise<T>) => withLock(IMPORT_LOCK, fn);
 async function bookmarkletImport(body: Record<string, unknown>, opts: { importedBy: string; ownLeague?: string; refusePartial?: boolean; signal?: AbortSignal }) {
   const { ownLeague } = opts;
   const incoming = validateImport(body);
-  // Release (d) fix: the NFL week the Yahoo projections belong to (a later week drops the stale weekly number).
-  incoming.projWeek = (await getNflState()).currentWeek;
+  // Matchups (import v9): validated apart from the import; a bad shape is dropped with a note, never refused.
+  const mx = cleanMatchups(body);
+  const nflWeek = (await getNflState()).currentWeek;
+  // Release (d) fix: the week the Yahoo projections belong to (a later week drops the stale weekly number). One week
+  // source: Yahoo's own matchup week when the payload carries it (the roster "Proj" is for that week), else the NFL
+  // calendar's.
+  incoming.projWeek = mx.matchupWeek ?? nflWeek;
+  const notes: Record<string, unknown>[] = [];
+  if (mx.dropped.length) notes.push({ step: "matchups", level: "warning", note: `${mx.dropped.length} matchups item(s) dropped: bad shape`, dropped: mx.dropped.slice(0, 10) });
+  if (mx.matchupWeek !== undefined && mx.matchupWeek !== nflWeek)
+    notes.push({ step: "matchups", level: "warning", note: `Yahoo's matchup week ${mx.matchupWeek} differs from the NFL calendar's week ${nflWeek}: Yahoo's week used` });
+  if (notes.length) incoming.diagnostics = [...(incoming.diagnostics ?? []), ...notes];
+  const capture = { yahooWeek: mx.matchupWeek, matchups: mx.weeks };
   return importLock(async () => {
     // Same Yahoo league again: update rosters in place, keep the user's settings.
     const previous = await findExistingImport(incoming);
@@ -755,13 +788,19 @@ async function bookmarkletImport(body: Record<string, unknown>, opts: { imported
     if (previous) ({ stored, changes } = upsertImport(previous, { ...incoming, importedAt: new Date().toISOString() }));
     // The auto-import's run deadline passed while this waited: write nothing (the run is already "timeout").
     if (opts.signal?.aborted) throw new Error("import abandoned: the run deadline passed");
-    stored = await finishImport(stored, previous, ownLeague, opts.importedBy);
+    stored = await finishImport(stored, previous, ownLeague, opts.importedBy, capture);
     return { stored, previous, changes };
   });
 }
 
 /** Everything after parsing, shared by every import path: scope rules, save, history, cache, projection capture. Call under importLock. */
-async function finishImport(stored: StoredImport, previous: StoredImport | null, ownLeague: string | undefined, importedBy: string): Promise<StoredImport> {
+async function finishImport(
+  stored: StoredImport,
+  previous: StoredImport | null,
+  ownLeague: string | undefined,
+  importedBy: string,
+  capture: { yahooWeek?: number; matchups?: MatchWeekCapture[] } = {},
+): Promise<StoredImport> {
   if (ownLeague !== undefined) {
     if (previous?.myTeamId) stored.myTeamId = previous.myTeamId;
     else delete stored.myTeamId;
@@ -776,7 +815,9 @@ async function finishImport(stored: StoredImport, previous: StoredImport | null,
   invalidateLeague("import", stored.id);
   // Capture time = the server's clock at save (never the payload's importedAt, which a first import may carry over):
   // later than the bookmarklet's read, so the before-kickoff rule errs on the safe side.
-  captureProjections(stored, new Date().toISOString());
+  const capturedAt = new Date().toISOString();
+  captureProjections(stored, capturedAt, capture.yahooWeek);
+  if (capture.yahooWeek !== undefined || capture.matchups?.length) captureMatchups(stored.id, capturedAt, capture.yahooWeek, capture.matchups ?? []);
   return stored;
 }
 
@@ -917,6 +958,7 @@ apiRouter.delete(
       await deleteHistory(req.params.id);
     });
     await deleteProjLog(req.params.id);
+    await deleteMatchLog(req.params.id);
     invalidateLeague("import", req.params.id);
     res.json({ ok: true });
   }),

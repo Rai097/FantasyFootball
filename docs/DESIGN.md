@@ -1922,3 +1922,18 @@ matchups: { weeks: [{                     // W first, then W−1
 ```
 Diagnostics: one `{ step: "matchups", url, kind: "module" | "page", … }` per page read and a `note: "summary"` entry
 (`matchupWeek`, `weeks` "8:live:6p/1pg", `fetches`). Wire size on the fixtures ≈ 10 KB.
+
+**Implemented: server storage.** `cleanMatchups()` (server/model/matchLog.ts) validates `matchupWeek` (1–18) and
+`matchups` apart from the import: weeks other than W / W−1, a pairing or page whose side ids disagree with mid1 /
+mid2, a non-number or out-of-range value (team −50…400, player −30…100) → dropped, one `{ step: "matchups", level:
+"warning", note, dropped[≤10] }` in the stored diagnostics; the import itself is never refused (partial.ts unchanged).
+One week source: `projWeek` = `matchupWeek` when present (else the NFL calendar's week; a mismatch = a "matchups"
+warning) and the projlog capture uses that week. After the save, queued behind the projlog capture:
+`recordMatchLog()` under `withLock("matchlog:<id>")` merges into `.data/matchlog-<id>.json`
+`{ season, currentWeek, currentAt, weeks: { W: { status, statusText?, fetchedAt, pairings, yahooLock: { teamId:
+{ proj, at, pregame } }, pages: { "mid1-mid2": { …page, fetchedAt } } } } }`, logs
+`[matchlog] import=<id> week=W weeks=8:live:6p/1pg,7:final:6p/1pg written=2`, failures `[matchlog] capture failed`
+(never fail the import). `yahooLock`: latest capture before the week's first kickoff (`pregame: true`); else, only on
+a final week, that capture's Total "Proj" (`pregame: false`); unknown first kickoff = never pre-game. An older capture
+never replaces a newer week; a capture without pairings keeps the stored ones; pages not re-read are kept. Deleted
+with the league (DELETE /api/import/:id); a new season replaces the log.

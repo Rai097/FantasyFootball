@@ -11,6 +11,7 @@ import { draftBoard } from "./demo.js";
 import { withLock } from "./lock.js";
 import { DATA_DIR, readJson, removeJson, writeJson } from "./store.js";
 import { findPlayer, withYahooStatus, type YahooPlayerEntry } from "./yahoo-parse.js";
+import { mergeMatchCapture, type MatchLog } from "../model/matchLog.js";
 import { CAPTURE_POS, mergeCapture, type Kickoffs, type MergeResult, type ProjEntry, type ProjLog } from "../model/projLog.js";
 
 export const MAX_BYTES = 1_000_000;
@@ -880,5 +881,28 @@ export function recordProjLog(
     const r = mergeCapture(await readProjLog(id), cap);
     if (r.kept) await writeJson(projLogFile(id), r.log, { compact: true });
     return r;
+  });
+}
+
+// ------------------------------------------------------------------ matchups and results log (.data/matchlog-<id>.json)
+const matchLogFile = (id: string) => `matchlog-${id}`;
+
+export async function readMatchLog(id: string): Promise<MatchLog | null> {
+  if (!isValidId(id)) return null;
+  const l = await readJson<MatchLog>(matchLogFile(id));
+  return l && typeof l === "object" && typeof l.season === "number" && l.weeks && typeof l.weeks === "object" && !Array.isArray(l.weeks) ? l : null;
+}
+
+export async function deleteMatchLog(id: string): Promise<void> {
+  if (isValidId(id)) await removeJson(matchLogFile(id));
+}
+
+/** Merge a matchups capture into .data/matchlog-<id>.json (serialized per league, like the projection log). */
+export function recordMatchLog(id: string, cap: Parameters<typeof mergeMatchCapture>[1]): Promise<{ written: number }> {
+  if (!isValidId(id)) return Promise.reject(new ImportError(`Bad import id "${id}"`));
+  return withLock(`matchlog:${id}`, async () => {
+    const r = mergeMatchCapture(await readMatchLog(id), cap);
+    if (r.written) await writeJson(matchLogFile(id), r.log, { compact: true });
+    return { written: r.written };
   });
 }
