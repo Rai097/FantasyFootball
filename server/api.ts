@@ -735,6 +735,8 @@ async function bookmarkletImport(body: Record<string, unknown>, ownLeague: strin
   if (ownLeague !== undefined && (previous?.id ?? incoming.id) !== ownLeague) throw authErrors.league();
   if (refusePartial && previous && incoming.teams.length < previous.teams.length)
     throw new PartialImportError(`${incoming.teams.length} of ${previous.teams.length} teams read`);
+  // Yahoo's settings page said more teams than were read (also covers a first import with nothing stored yet).
+  if (refusePartial && incoming.numTeams > incoming.teams.length) throw new PartialImportError(`${incoming.teams.length} of ${incoming.numTeams} teams read`);
   if (ownLeague !== undefined) delete incoming.myTeamId;
   if (previous) {
     const r = upsertImport(previous, { ...incoming, importedAt: new Date().toISOString() });

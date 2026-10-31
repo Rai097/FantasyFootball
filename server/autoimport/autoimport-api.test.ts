@@ -173,6 +173,7 @@ test("failures never touch good data: signed out, empty and partial → paused, 
     [{ ok: true, payload: { ...payload(1), teams: [] }, teams: 0 }, "empty"],
     [{ ok: false, reason: "empty", detail: "the collector found 0 teams" }, "empty"],
     [ok(2), "partial"],
+    [{ ok: true, payload: { ...payload(3), numTeams: 4 }, teams: 3 }, "partial"],
   ];
   for (const [res, reason] of cases) {
     const { s } = await service([res]);
