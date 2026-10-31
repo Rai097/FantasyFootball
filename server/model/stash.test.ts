@@ -126,3 +126,25 @@ test("season-ending tear (Sleeper IR + ACL): value 0 rest of season, out of Stas
   assert.match(row.summary, /return unconfirmed/);
   assert.ok(row.details.some((d) => d.label === "Injury" && d.value === "IR: Knee - PCL"), JSON.stringify(row.details));
 });
+
+test("fix 2026-10-31: an inactive PUP + ACL listing (hurt before the season) stays a returner on Stash watch; IR + ACL never does", () => {
+  const role = { rec: 8, recYd: 110, recTd: 0.3 };
+  // Prior-season tear, on reserve/PUP (eligible after 4 games): a returning starter, return unconfirmed.
+  const pup = rawPlayer("pup", "WR", { ecrPos: 70, weeks: games([1, 2, 3], role) });
+  pup.sleeperInjury = { status: "PUP", bodyPart: "Knee - ACL", notes: "Surgery", rosterStatus: "Inactive" };
+  // Same role, IR + ACL: out for the season.
+  const ir = rawPlayer("ir", "WR", { ecrPos: 72, weeks: games([1, 2, 3], role) });
+  ir.sleeperInjury = { status: "IR", bodyPart: "Knee - ACL", notes: "Surgery", rosterStatus: "Inactive" };
+  const sig = (p: Player) =>
+    [p.id, computePlayerSignals({ ...signalInputFromPlayer(p)!, roster: { status: "RES", statusCode: "R04" }, status: [] }, { season: 2026, scoring: PPR, asOf: ASOF })] as const;
+  const tables: ProjectionTables = { ...emptyTables(), signals: new Map([sig(pup), sig(ir)]) };
+  const val = valuePlayers(L(), [...POOL, pup, ir], tables);
+  assert.notEqual(val.players.get("pup")!.ret?.seasonOver, true);
+  assert.equal(val.players.get("ir")!.ret?.seasonOver, true);
+  const rows = stashWatch({ players: val.players.values(), rostered: new Set(), availability: new Map([["pup", "fa"], ["ir", "fa"]]), flexLevel: val.flexLevel, regularSeasonEnd: 14, finalWeek: 17 });
+  const row = rows.find((r) => r.id === "pup");
+  assert.ok(row, rows.map((r) => r.id).join(","));
+  assert.match(row.summary, /return unconfirmed/);
+  assert.ok(row.details.some((d) => d.label === "Injury" && d.value === "PUP: Knee - ACL"), JSON.stringify(row.details));
+  assert.ok(!rows.some((r) => r.id === "ir"), "out for the season: never a stash");
+});

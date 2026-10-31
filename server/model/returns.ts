@@ -38,13 +38,15 @@ export const RETURNS = {
 } as const;
 
 /**
- * Season-ending injuries (DESIGN "Season-ending injuries (2026-10-28)"): a player on a reserve list (Sleeper
- * injury_status IR / PUP, roster status not "Active") whose listed body part matches one of these is out for the
- * season: an ACL or Achilles tear ends an NFL season (recovery ≈ 9–12 months). Other IR listings stay "return
- * unconfirmed". An "Active" PUP tag is the training-camp list (he can be activated), never season-ending.
+ * Season-ending injuries (DESIGN "Season-ending injuries (2026-10-28)", "Fix: returning starters and season-ending
+ * injuries (2026-10-31)"): a player on injured reserve (Sleeper injury_status IR, roster status not "Active") whose
+ * listed body part matches one of these is out for the season: an ACL or Achilles tear ends an NFL season (recovery
+ * ≈ 9–12 months). Other IR listings stay "return unconfirmed". PUP is never season-ending: reserve/PUP holds players
+ * hurt BEFORE the season (e.g. last January's ACL) who may be activated after 4 games
+ * (https://www.nfl.com/news/nfl-training-camp-roster-faqs-defining-injured-reserve-pup-list-nfi-and-more).
  */
 export const SEASON_ENDING = {
-  statuses: ["IR", "PUP"] as readonly string[],
+  statuses: ["IR"] as readonly string[],
   bodyParts: [
     { match: /\bacl\b/i, name: "ACL" },
     { match: /achilles/i, name: "Achilles" },

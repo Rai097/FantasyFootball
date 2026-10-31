@@ -145,12 +145,15 @@ test("ruled out of his next game wins over every path: DTR window, or an Out tag
   assert.equal(estimateReturn(base({ rosterStatus: "RES", status: [{ week: 8, practice: FULL }] })).returnWeek, 8, "fixture: untagged = next game");
 });
 
-test("season-ending rule: IR / PUP + ACL or Achilles (case-insensitive) on a reserve list; PCL, hamstring, Active PUP are not", () => {
+test("season-ending rule: IR + ACL or Achilles (case-insensitive); PUP (a pre-season injury), PCL, hamstring are not", () => {
   const ir = (bodyPart: string, status = "IR", rosterStatus = "Inactive") => ({ status, bodyPart, rosterStatus });
   assert.equal(seasonEndingWhy(ir("Knee - ACL")), "Out for the season (torn ACL, on IR)");
   assert.equal(seasonEndingWhy(ir("knee - acl + mcl")), "Out for the season (torn ACL, on IR)");
   assert.equal(seasonEndingWhy(ir("Achilles")), "Out for the season (torn Achilles, on IR)");
-  assert.equal(seasonEndingWhy(ir("Achilles", "PUP")), "Out for the season (torn Achilles, on PUP)");
+  // Fix 2026-10-31: reserve/PUP = hurt before the season (last January's ACL), eligible after 4 games: a returning
+  // starter, never season-ending.
+  assert.equal(seasonEndingWhy(ir("Achilles", "PUP")), null, "PUP is a pre-season injury list, not season-ending");
+  assert.equal(seasonEndingWhy(ir("Knee - ACL", "PUP")), null, "inactive PUP + ACL: return unconfirmed, not season over");
   assert.equal(seasonEndingWhy({ status: "IR", bodyPart: "Knee - ACL" }), "Out for the season (torn ACL, on IR)", "roster status unknown: IR is enough");
   assert.equal(seasonEndingWhy(ir("Knee - PCL")), null, "PCL is not season-ending");
   assert.equal(seasonEndingWhy(ir("Hamstring")), null);

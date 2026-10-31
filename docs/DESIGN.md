@@ -1514,6 +1514,47 @@ its real gain. With the default 5-per-position row cap the bye rows usually fall
 * Tests: `projectionV4.roleTrust.test.ts`; two 2-game assertions in `projectionV4.roleUpPrior.adversarial.test.ts`
   now expect the 50% prior.
 
+## Fix: returning starters and season-ending injuries (2026-10-31) — overrides "Fix: vacated role, spikes, depth and roster need" (+ fix round 1) on who can vacate a role, and "Season-ending injuries + bye-week K / DEF" on PUP
+
+Owner (2026-10-31): Waivers said CLAIM on a fill-in RB whose lead role exists only because the team's starter (ACL in
+January, activated from PUP, practising) was out; Stash watch kept a WR whose torn patellar tendon ended his season.
+
+* **Root cause (b)**: `vacatedGames` only knew teammates who had played for the team earlier THIS season. A starter out
+  since before week 1 has no game, so his absence was invisible and every lead-role game of the fill-in counted in full
+  (real data: the fill-in 13.2 ppg, value 8.0, playoff 39.9; his team-change prior also went neutral at the lead role).
+* **Rule** (`signals/vacated.ts`, the one definition): a teammate also vacates a role when he has NO game for this team
+  up to that week, a 2025 role on THIS team (`prior.lastTeam`, ≥ `priorMinGames` games, usage ≥ the fill-in's own 2025
+  usage + `minMargin` and ≥ `minUsage`), and is listed hurt this season (an injury-report row or roster RES: a healthy
+  scratch is not a vacated role). The fill-in's baseline is his own 2025 usage per game (≥ 4 games; unknown → never
+  flagged); a game at ≥ max(1.5 ×, + 2) of it is borrowed. The "explained stretch" rule does not apply (the absence
+  predates every game, there is no start to line the jump up with). Everything downstream is unchanged: borrowed
+  games count 40% while the starter is back or has a known return week (full rate until that week, settled after);
+  out for the season / no return week → the role is his.
+* **PUP is never season-ending** (`returns.ts` `SEASON_ENDING.statuses` = IR only): reserve/PUP holds players hurt
+  before the season, eligible after 4 games (https://www.nfl.com/news/nfl-training-camp-roster-faqs-defining-injured-reserve-pup-list-nfi-and-more),
+  so last January's ACL on PUP is a return ("return unconfirmed" until practice), not "out for the season" — which had
+  also handed the fill-in the role for good.
+* **Root cause (a), NOT fixed — needs an owner decision**: no source in use tells "season-ending" from "IR, may
+  return" outside the ACL / Achilles rule. Sleeper lists the WR as `IR` / `Knee` / `Surgery` — the same shape as the
+  stashable WR with hamstring surgery (`IR` / `Hamstring` / `Surgery`); nflverse has both RES / R01; the Yahoo import
+  does not carry unrostered players' notes. Adding "patellar" to the body-part list would be a player list in disguise.
+  Options: (1) ESPN's injuries feed `details.returnDate` (undocumented public API, ~8.7 MB, 1 fetch/day; real data
+  2026-10-31: the season-ending WR 2027-02-15, the hamstring WR 2026-11-25, the returning RB 2026-11-02; but only 51
+  IR players listed, most Sleeper season-ending players absent, so it would add evidence, never clear it);
+  (2) an owner-set "out for the season" mark per player that no import overwrites.
+* **Real data (2026-10-31 copy, week 8)**: borrowed-role players 53 → 59 (the fill-in RB plus 5 players with a week-1
+  or early fill behind a teammate who missed those games; 2 players gained weeks); only the fill-in moved > 0.15 ppg; the fill-in 13.2 → 10.3 ppg, value 8.0 → 0.2,
+  playoffs 39.9 → 31.2, Waivers CLAIM → stash ("Watch: usage not up in 2 of his last 3 games"); the returning starter
+  10.87 → 10.88 ppg (2025 role + ECR; no boost invented). Acceptance players unchanged in ppg / playoff points;
+  RB values +0.5–2 because the RB replacement level fell 11.1 → 10.9.
+* **Known residuals**: the Waivers role check (`breakouts.ts` / `roleCheck.ts`) uses the player DB without 2025
+  opportunities, so it does not show "borrowed role" for such a fill-in (the projection drop alone flips the call); a
+  rookie fill-in (no 2025 role) is unknown; a starter on PUP with no practice signal is "return unconfirmed", so his
+  fill-in keeps the role until a practice / activation shows (fix round 1 rule); the fill-in's lost volume is not
+  moved to the returning starter.
+* Tests: `signals/vacated.preseason.test.ts`, `projectionV4.returningStarter.test.ts`, `stash.test.ts` (PUP + ACL
+  stays a stash, IR + ACL never), `returns.test.ts` (PUP not season-ending).
+
 ## Projection accuracy log (2026-10-30)
 - Purpose: per player and overall, how the app's weekly projection and Yahoo's weekly projection compare with what
   actually happened (League tab card "Projection accuracy"; "Vs Yahoo" bullet in a player's value details).

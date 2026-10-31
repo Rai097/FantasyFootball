@@ -68,7 +68,11 @@ export interface VacPlayer {
   team: string;
   games: VacGame[];
   /** Last season (signals PriorSeason shape): games and opportunity totals; absent = unknown. */
-  prior?: { games: number; opps?: { targets: number; carries: number } };
+  prior?: { games: number; opps?: { targets: number; carries: number }; lastTeam?: string };
+  /** This season's injury-report rows (any week); with `roster` the evidence that a teammate with no game this season
+   *  is hurt, not a healthy scratch (fix 2026-10-31). Absent = no evidence. */
+  status?: readonly { week: number }[];
+  roster?: { status?: string };
 }
 
 export interface VacatedBy {
@@ -78,6 +82,14 @@ export interface VacatedBy {
 }
 
 const usageOf = (g: VacGame, group: "PC" | "RB") => (group === "RB" ? g.carries + g.targets : g.targets);
+/** Last season's usage per game (≥ VACATED.priorMinGames games with opportunity totals); null = unknown. */
+const priorUsage = (p: VacPlayer, group: "PC" | "RB"): number | null => {
+  const pr = p.prior;
+  if (!pr?.opps || pr.games < VACATED.priorMinGames) return null;
+  return (group === "RB" ? pr.opps.carries + pr.opps.targets : pr.opps.targets) / pr.games;
+};
+/** Listed hurt this season: an injury-report row or a reserve list (RES). */
+const injuredEvidence = (p: VacPlayer) => (p.status?.length ?? 0) > 0 || p.roster?.status === "RES";
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
 /**
@@ -89,6 +101,9 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
  *  - his own usage that week jumped over his earlier mean (games before that week that were not vacated), and
  *  - every earlier game of his in the same absence stretch was a jump too (the absence explains the jump), and
  *  - he did not miss his team's game right before that stretch (a player back from his OWN absence is not borrowing).
+ * Or (fix 2026-10-31) the teammate is out since before the season: no game for this team up to that week, a bigger
+ * 2025 role on THIS team (≥ priorMinGames, ≥ the fill-in's own 2025 usage + minMargin and ≥ minUsage), listed hurt this
+ * season (injury-report row or RES), and the fill-in's usage that week jumped over his own 2025 usage per game.
  * Unknown baselines (no earlier game of his, a one-game teammate sample) never flag: missing data is not a borrowed role.
  */
 export function vacatedGames(players: VacPlayer[]): Map<string, Map<number, VacatedBy[]>> {
@@ -98,7 +113,8 @@ export function vacatedGames(players: VacPlayer[]): Map<string, Map<number, Vaca
     for (const x of p.games) (teamWeeks.get(x.team) ?? teamWeeks.set(x.team, new Set()).get(x.team)!).add(x.week);
     const g = competingGroup(p.pos);
     if (!g) continue;
-    for (const team of new Set(p.games.map((x) => x.team))) {
+    // His current team too: a teammate with no game this season (out since before week 1) can still have vacated a role.
+    for (const team of new Set([...p.games.map((x) => x.team), ...(p.team && p.team !== "FA" ? [p.team] : [])])) {
       const k = `${team}|${g}`;
       (groups.get(k) ?? groups.set(k, []).get(k)!).push(p);
     }
@@ -130,19 +146,33 @@ export function vacatedGames(players: VacPlayer[]): Map<string, Map<number, Vaca
         if (pr?.opps && pr.games >= VACATED.priorMinGames) return (group === "RB" ? pr.opps.carries + pr.opps.targets : pr.opps.targets) / pr.games;
         return null;
       };
+      const jumped = (u: number, base: number) => u >= Math.max(VACATED.jumpRatio * base, base + VACATED.jumpMinGain) - 1e-9;
+      const myPrior = priorUsage(p, group);
       for (const g of mine) {
-        const earlier = mine.filter((x) => x.week < g.week && !flagged.has(x.week));
-        if (!earlier.length) continue;
-        const base = mean(earlier.map((x) => usageOf(x, group)));
         const u = usageOf(g, group);
-        if (u < Math.max(VACATED.jumpRatio * base, base + VACATED.jumpMinGain) - 1e-9) continue;
-        jumps.add(g.week);
         const by: VacatedBy[] = [];
-        for (const t of mates) {
+        // Out since before the season (fix 2026-10-31): a teammate with NO game for this team before that week, a
+        // bigger role on THIS team last season and listed hurt this season. His absence predates every game of the
+        // fill-in, so the fill-in's baseline is his own last-season usage (unknown → never flagged) and the
+        // "explained" stretch rule below does not apply (there is no absence start to line the jump up with).
+        if (myPrior !== null && jumped(u, myPrior)) {
+          for (const t of mates) {
+            // No game for this team up to AND including that week (a teammate playing week 1 is not out since before it).
+            if (t.id === p.id || t.team !== team || gamesOf(t).some((x) => x.week <= g.week)) continue;
+            if (t.prior?.lastTeam !== team || !injuredEvidence(t)) continue;
+            const tMean = priorUsage(t, group);
+            if (tMean === null || tMean < myPrior + VACATED.minMargin || tMean < VACATED.minUsage[group]) continue;
+            by.push({ id: t.id, name: t.name, pos: String(t.pos) });
+          }
+        }
+        const earlier = mine.filter((x) => x.week < g.week && !flagged.has(x.week));
+        const base = earlier.length ? mean(earlier.map((x) => usageOf(x, group))) : null;
+        if (base !== null && jumped(u, base)) jumps.add(g.week);
+        for (const t of base !== null && jumps.has(g.week) ? mates : []) {
           if (t.id === p.id || t.team !== team) continue;
           if (!gamesOf(t).some((x) => x.week < g.week)) continue;
           const tMean = mateUsage(t, g.week);
-          if (tMean === null || tMean < base + VACATED.minMargin || tMean < VACATED.minUsage[group]) continue;
+          if (tMean === null || tMean < base! + VACATED.minMargin || tMean < VACATED.minUsage[group]) continue;
           if (!absentAt(t, g.week)) continue;
           // The absence must explain the jump: no game of his without a jump earlier in the same absence stretch
           // (a teammate out since week 4 does not explain a week-6 jump after a quiet week 5).
