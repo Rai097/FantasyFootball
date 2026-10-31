@@ -14,17 +14,22 @@ export interface ScheduleConfig {
 
 /**
  * Parses AUTO_IMPORT_CRON ("pattern; pattern; …", 5-field cron) and AUTO_IMPORT_TZ; unset = the defaults. Throws on
- * an invalid pattern or time zone (fail closed: the server logs it and leaves auto-import off).
+ * an invalid pattern or time zone, an empty list, or a pattern with no next fire after `from` (fail closed: the server
+ * logs it loudly and leaves auto-import off).
  */
-export function scheduleFromEnv(env: NodeJS.ProcessEnv): ScheduleConfig {
+export function scheduleFromEnv(env: NodeJS.ProcessEnv, from: Date = new Date()): ScheduleConfig {
   const raw = (env.AUTO_IMPORT_CRON ?? "").trim();
   const patterns = raw ? raw.split(";").map((s) => s.trim()).filter(Boolean) : DEFAULT_PATTERNS;
   const timezone = (env.AUTO_IMPORT_TZ ?? "").trim() || DEFAULT_TIMEZONE;
   new Intl.DateTimeFormat("en-US", { timeZone: timezone }); // throws RangeError on an unknown time zone
+  if (!patterns.length) throw new Error("AUTO_IMPORT_CRON has no pattern");
   for (const p of patterns) {
     if (p.split(/\s+/).length !== 5) throw new Error(`AUTO_IMPORT_CRON: "${p}" must have 5 fields (minute hour day month weekday)`);
     const c = new Cron(p, { timezone, paused: true }); // throws on a bad pattern
+    // A pattern that never fires (e.g. Feb 31) is invalid too: it would leave auto-import "on" with no runs.
+    const next = c.nextRun(from);
     c.stop();
+    if (!next) throw new Error(`AUTO_IMPORT_CRON: "${p}" never fires`);
   }
   return { patterns, timezone };
 }

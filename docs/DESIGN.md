@@ -1719,22 +1719,44 @@ STOPGAP: retire it when the Yahoo API app is approved. Read-only toward Yahoo (t
   `<cwd>/.data/yahoo-chrome-profile` (live: ~/FantasyFootball-run/.data/yahoo-chrome-profile), signed in by the owner
   with `npm run yahoo:login` (headed, no automation). The code never reads or logs its cookies. Opens
   `https://football.fantasysports.yahoo.com/f1/<league>`; landing on login.yahoo.com = `signed_out`; guce/consent or a
-  captcha path = `captcha`; any other page = `error`; then `page.evaluate` of the bundle; 0 teams = `empty`. The
-  browser is always closed in `finally` and any process still carrying `--user-data-dir=<profile>` is killed by PID
-  (never the owner's own Chrome). Chrome writes only inside its profile; the server is the only writer of the rest of
-  .data.
-- **Runner** (`runner.ts`). One run at a time (mutex; a trigger during a run is rejected). 3-minute abort per attempt.
-  One retry after 30 s for `timeout` / `error` / `empty` / `partial`; none for `signed_out` / `captcha`. Then state
-  `paused` with the reason; scheduled runs keep trying and a success clears it. Only an ok result reaches the import:
+  captcha path = `captcha`; any other page = `error`; then `page.evaluate` of the bundle; 0 teams = `empty`. Before
+  launching, a process already carrying exactly `--user-data-dir=<profile>` (e.g. the owner's `yahoo:login` window)
+  = `profile_in_use`: nothing is launched or killed, no retry, the next tick tries again (a Chrome lock error at launch
+  maps to the same). The browser is always closed in `finally`; only the PIDs this run launched (new on the profile
+  right after launch) are SIGKILLed if they outlive the close, never another Chrome. The profile match is the exact
+  argument, never a prefix (`/x/p` ≠ `/x/p-backup`). Chrome writes only inside its profile; the server is the only
+  writer of the rest of .data.
+- **Runner** (`runner.ts`). One run at a time (mutex; a trigger during a run is rejected). 3-minute bound per attempt,
+  separately for the collection and the import, each raced in the runner (a collector or import that ignores its
+  abort signal cannot hold the mutex). Hard cap per run, retry included: 4 minutes (`RUN_DEADLINE_MS`) → `timeout`,
+  mutex released; the import's signal is then aborted so a late import writes nothing. One retry after 30 s for
+  `timeout` / `error` / `empty` / `partial`; none for `signed_out` / `captcha` / `profile_in_use`. Then state `paused`
+  with the reason; scheduled runs keep trying and a success clears it. Only an ok result reaches the import:
   `importPayload()` in api.ts = the POST /api/import bookmarklet path (size limit, validation, same-league merge,
-  history, projlog capture), run as the admin with `importedBy: "Auto-import"` and `refusePartial` (fewer teams than
-  the stored league → `PartialImportError` → `partial`, nothing written). State persists in
-  `.data/autoimport-state.json`. One log line per run: `[autoimport] event=run run=<id> trigger=schedule|manual
-  result=ok|failed reason=… ms=… teams=… attempts=…`; URLs lose their query and hash, never cookies.
+  history, projlog capture), run as the admin with `importedBy: "Auto-import"` and `refusePartial` →
+  `partialReason()` (`partial.ts`, thresholds in `PARTIAL_RULES`): fewer teams than stored or than Yahoo's settings
+  report, any team with 0 players (a null team entry is one; also on a first import), total rostered players under
+  70% of the stored import, or standings / waiver order / Yahoo projections that the stored import has and the run
+  lacks entirely → `PartialImportError` → `partial`, nothing written. State persists in `.data/autoimport-state.json`.
+  The status `detail` members see is `publicDetail()`: no local paths, no escape codes, credentials redacted, ≤120
+  chars. One log line per run: `[autoimport] event=run run=<id> trigger=schedule|manual result=ok|failed reason=…
+  ms=… teams=… attempts=… error="…"` (the full message: URLs lose their query and hash, cookie / token / bearer
+  values are redacted).
+- **Missing sections** (fix round 1: never replace good stored data with "missing"). A run whose free-agent list is
+  absent, or empty while the stored one is not, keeps the stored list (`upsertImport`, every import path) with a
+  diagnostics warning `{ step: "merge", section: "freeAgents", stale: true, since }`; its weekly projections are kept
+  only within the same NFL week. Standings, waiver order and Yahoo projections are never carried forward (a stale one
+  would look current): a manual import without them shows them unknown; an auto run without them is `partial`.
+- **Writers.** `writeJson` tmp names are unique (pid + counter + random), so same-millisecond writers never share one.
+  Every import read-merge-write (POST /api/import incl. the bookmark handoff and paste, the auto-import, settings PUT,
+  delete) and its history snapshot runs under one in-process lock (`server/providers/lock.ts`, key `import`); the
+  projection log uses the same helper per league.
 - **Schedule** (`schedule.ts`, croner, America/Los_Angeles): `0 6,12,18 * * 1-5`, `0 6-22/2 * * 6`, `0 9 * * 0`;
   override with `AUTO_IMPORT_CRON` ("p1; p2") and `AUTO_IMPORT_TZ`. DST is croner's (tested on Nov 1 2026 and Mar 14 2027).
+  An empty list or a pattern that never fires (e.g. Feb 31) is invalid like a bad pattern: auto-import stays off.
 - **Config.** On only when `AUTO_IMPORT=1`, `AUTO_IMPORT_LEAGUE_ID` is a number and the profile dir exists
-  (`AUTO_IMPORT_PROFILE` overrides the path); off in tests and dev. Startup logs one line: enabled, league, next fire.
+  (`AUTO_IMPORT_PROFILE` overrides the path); off in tests and dev. Startup logs one line: enabled, league, next fire;
+  with `AUTO_IMPORT=1` but an invalid config it is a `console.error` line `level=error … auto-import is OFF`.
 - **API.** `GET /api/autoimport` (signed in): `{ enabled, disabledReason?, leagueId, importId, state: ok|paused,
   reason?, detail?, lastSuccessAt?, lastAttemptAt?, lastTeams?, nextRunAt?, running }`. `POST
   /api/autoimport/refresh` (admin: guard rule `autoimport` writes = admin, plus session + Origin + CSRF): 202
@@ -1746,4 +1768,5 @@ STOPGAP: retire it when the Yahoo API app is approved. Read-only toward Yahoo (t
   copy the template + `launchctl load` (kickstart keeps the old environment). `npm ci` in the release worktree
   (new deps playwright-core, croner; no browser download). The owner runs `npm run yahoo:login` there once first.
 - **Unverified:** real Yahoo under headless Chrome (bot checks, a different page shell, the exact sign-in / consent
-  URLs) and Chrome's profile lock if `yahoo:login` is open during a run (that run fails `error`).
+  URLs). A `yahoo:login` window open during a run → `profile_in_use` (tested with a headless stand-in, not the headed
+  window). Residual: an import that hangs inside the import lock (local disk I/O only) would still hold that lock.

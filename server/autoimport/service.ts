@@ -8,19 +8,23 @@ import path from "node:path";
 import { Cron } from "croner";
 import { DATA_DIR, readJson, writeJson } from "../providers/store.js";
 import type { CollectResult } from "./collector.js";
-import { AutoImportRunner, type AutoImportState } from "./runner.js";
+import { AutoImportRunner, MAX_RUN_MS, type AutoImportState } from "./runner.js";
 import { nextFire, scheduleFromEnv, type ScheduleConfig } from "./schedule.js";
 
 export const STATE_FILE = "autoimport-state";
 /** Manual "Refresh from Yahoo now": at most one accepted request per 2 minutes. */
 export const MANUAL_MIN_GAP_MS = 2 * 60_000;
 export const RUN_TIMEOUT_MS = 3 * 60_000;
+/** Hard cap on a whole run, retry included (fix round 1). */
+export const RUN_DEADLINE_MS = MAX_RUN_MS;
 export const RETRY_DELAY_MS = 30_000;
 
 export interface AutoImportConfig {
   enabled: boolean;
   /** Why it is off (shown in the status and the startup line). */
   disabledReason?: string;
+  /** Off because the config is invalid (AUTO_IMPORT=1 was set): the startup line is an error, not info. */
+  invalid?: boolean;
   leagueId?: string;
   profileDir: string;
   schedule?: ScheduleConfig;
@@ -35,8 +39,8 @@ export const defaultProfileDir = () => path.join(DATA_DIR, "yahoo-chrome-profile
  */
 export function autoImportConfig(env: NodeJS.ProcessEnv, exists: (p: string) => boolean = fs.existsSync): AutoImportConfig {
   const profileDir = (env.AUTO_IMPORT_PROFILE ?? "").trim() || defaultProfileDir();
-  const off = (disabledReason: string, leagueId?: string): AutoImportConfig => ({ enabled: false, disabledReason, profileDir, leagueId });
-  if ((env.AUTO_IMPORT ?? "").trim() !== "1") return off("AUTO_IMPORT is not 1");
+  const off = (disabledReason: string, leagueId?: string, invalid = true): AutoImportConfig => ({ enabled: false, disabledReason, profileDir, leagueId, invalid });
+  if ((env.AUTO_IMPORT ?? "").trim() !== "1") return off("AUTO_IMPORT is not 1", undefined, false);
   const leagueId = (env.AUTO_IMPORT_LEAGUE_ID ?? "").trim();
   if (!/^\d{1,12}$/.test(leagueId)) return off("AUTO_IMPORT_LEAGUE_ID is missing or not a number");
   if (!exists(profileDir)) return off("Chrome profile not found: run npm run yahoo:login", leagueId);
@@ -72,12 +76,15 @@ export type RefreshResult =
 
 export interface ServiceDeps {
   collect: (signal: AbortSignal) => Promise<CollectResult>;
-  apply: (payload: Record<string, unknown>) => Promise<{ teams: number }>;
+  apply: (payload: Record<string, unknown>, signal: AbortSignal) => Promise<{ teams: number }>;
   isPartial: (e: unknown) => boolean;
   log?: (line: string) => void;
+  /** The startup line when AUTO_IMPORT=1 but the config is invalid (default console.error). */
+  logError?: (line: string) => void;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
   timeoutMs?: number;
+  maxRunMs?: number;
   retryDelayMs?: number;
   /** Tests: keep the croner jobs off (status still computes nextRunAt). */
   noTimers?: boolean;
@@ -109,6 +116,7 @@ export class AutoImportService {
             now: deps.now,
             sleep: deps.sleep,
             timeoutMs: deps.timeoutMs ?? RUN_TIMEOUT_MS,
+            maxRunMs: deps.maxRunMs ?? RUN_DEADLINE_MS,
             retryDelayMs: deps.retryDelayMs ?? RETRY_DELAY_MS,
           },
           initial,
@@ -117,10 +125,12 @@ export class AutoImportService {
     if (cfg.enabled && cfg.schedule && !deps.noTimers)
       this.jobs = cfg.schedule.patterns.map((p) => new Cron(p, { timezone: cfg.schedule!.timezone, catch: true }, () => void this.runner!.trigger("schedule")));
     const next = this.nextRunAt();
-    log(
+    const line =
       `[autoimport] event=startup enabled=${cfg.enabled} league=${cfg.leagueId ?? "-"} next=${next ?? "-"}` +
-        (cfg.enabled ? ` tz=${cfg.schedule?.timezone} state=${initial.state}` : ` why="${cfg.disabledReason}"`),
-    );
+      (cfg.enabled ? ` tz=${cfg.schedule?.timezone} state=${initial.state}` : ` why="${cfg.disabledReason}"`);
+    // AUTO_IMPORT=1 with an invalid config (bad / never-firing cron, no league id, no profile): loud, not info.
+    if (!cfg.enabled && cfg.invalid) (deps.logError ?? ((l: string) => console.error(l)))(`${line.replace("event=startup", "event=startup level=error")} — auto-import is OFF`);
+    else log(line);
   }
 
   static async create(cfg: AutoImportConfig, deps: ServiceDeps): Promise<AutoImportService> {

@@ -185,7 +185,6 @@ test("a different league in the payload never overwrites the owner's league file
 
 test(
   "a team that read 0 players is refused (it would wipe that manager's roster)",
-  { todo: "BUG: refusePartial only compares team COUNTS; validateImport accepts a team with players: [] and the auto-import overwrites a full roster with an empty one" },
   async () => {
     await seed();
     const before = fs.readFileSync(FILE, "utf8");
@@ -203,7 +202,6 @@ test(
 
 test(
   "rosters that collapsed (every team 1 of 15 players) are refused",
-  { todo: "BUG: no roster-size sanity check; a run that parsed 1 player per team replaces every full roster" },
   async () => {
     await seed();
     const before = fs.readFileSync(FILE, "utf8");
@@ -215,7 +213,6 @@ test(
 
 test(
   "a run whose free-agent pages failed keeps the stored free agents",
-  { todo: "BUG: collect() omits freeAgents when the players pages fail; upsertImport then drops the stored pool, so a scheduled run with a Yahoo hiccup empties the waiver tab" },
   async () => {
     await seed();
     const { freeAgents: _fa, ...noFa } = payload(12, 15);
@@ -235,7 +232,6 @@ test("a good run after garbage succeeds and clears the pause", async () => {
 // ------------------------------------------------------------------ concurrency: two writers
 test(
   "auto-import and a manual POST /api/import paste at the same moment: both succeed, valid JSON, one coherent league, history intact",
-  { todo: "BUG: reproduced: the paste got HTTP 500 'ENOENT ... rename import-y1405188.json.<pid>.<ms>.tmp' because both writers used the same tmp name (writeJson); on other runs both succeed but a history snapshot is lost (no lock around read-merge-write)" },
   async () => {
   await seed();
   const histBefore = JSON.parse(fs.readFileSync(HIST, "utf8")) as unknown[];
@@ -250,8 +246,13 @@ test(
   const sizes = new Set((stored.teams as { players: unknown[] }[]).map((t) => t.players.length));
   assert.equal(sizes.size, 1, "teams from two different payloads were mixed");
   assert.ok([13, 14].includes([...sizes][0]));
-  const hist = JSON.parse(fs.readFileSync(HIST, "utf8")) as unknown[];
-  assert.ok(hist.length >= histBefore.length + 1, "history lost entries");
+  const hist = JSON.parse(fs.readFileSync(HIST, "utf8")) as { teams: { playerIds: string[] }[] }[];
+  // Both writes are in the history (capped at HISTORY_CAP = 8, so "+2" holds only below the cap): the last two
+  // snapshots are the two payloads, and the newest one is what the league file holds.
+  assert.equal(hist.length, Math.min(histBefore.length + 2, 8), "history lost entries");
+  const lastTwo = hist.slice(-2).map((h) => h.teams[0].playerIds.length);
+  assert.deepEqual([...lastTwo].sort(), [13, 14], `the last two snapshots are both writes (${lastTwo})`);
+  assert.equal(lastTwo[1], [...sizes][0], "the newest snapshot is the stored league");
   // No leftover temp files from the atomic writes.
   assert.deepEqual(fs.readdirSync(DATA).filter((f) => f.endsWith(".tmp")), []);
   },
@@ -259,7 +260,6 @@ test(
 
 test(
   "two writes of the same file in the same millisecond: both succeed and the file is one of them (atomic)",
-  { todo: "BUG: writeJson's tmp name is <file>.<pid>.<Date.now()>.tmp, so two same-ms writers share one tmp file: one rename fails ENOENT and/or the content interleaves (auto run + manual paste can collide)" },
   async () => {
     const small = { v: "small" };
     const large = { v: "large", pad: "y".repeat(20_000) };
@@ -343,7 +343,6 @@ test("status (any member) exposes only the documented fields: no profile path, c
 
 test(
   "status detail never shows a local file path or terminal escape codes to a league member",
-  { todo: "BUG (low): runner detail = safeMessage(error.message) and GET /api/autoimport is open to every signed-in member; a Chrome/Playwright error carrying the profile path (or ANSI escapes from Playwright's call log) is shown as-is" },
   async () => {
     const msg =
       "browserType.launchPersistentContext: Failed to create a ProcessSingleton for your profile directory. Call log: \u001b[2m- <launching> /Users/owner/FantasyFootball-run/.data/yahoo-chrome-profile";

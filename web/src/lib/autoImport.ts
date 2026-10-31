@@ -8,6 +8,7 @@ const REASON: Record<string, string> = {
   empty: "Yahoo returned no teams",
   partial: "only part of the league was read",
   timeout: "Yahoo took too long",
+  profile_in_use: "the sign-in Chrome was open",
   error: "the import failed",
 };
 
@@ -60,7 +61,12 @@ export function autoImportLine(s: AutoImportStatus | null | undefined, now = new
         { label: "Your data", value: "Nothing was changed: the last good import stays." },
         {
           label: "Fix",
-          value: s.reason === "signed_out" || s.reason === "captcha" ? "Sign in again on the server Mac (npm run yahoo:login), or use the bookmark." : "It retries on schedule; the bookmark works meanwhile.",
+          value:
+            s.reason === "signed_out" || s.reason === "captcha"
+              ? "Sign in again on the server Mac (npm run yahoo:login), or use the bookmark."
+              : s.reason === "profile_in_use"
+                ? "Close the yahoo:login Chrome window; the next scheduled run retries."
+                : "It retries on schedule; the bookmark works meanwhile.",
         },
       ],
     };

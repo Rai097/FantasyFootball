@@ -46,7 +46,7 @@ function fakeChrome(dir: string): ChildProcess {
   return c;
 }
 
-test("chromePidsFor: profile /x/p must not match another Chrome on /x/p-backup (prefix match)", { todo: "BUG: chromePidsFor uses a substring match, so collectWithChrome's cleanup SIGKILLs a Chrome on any profile whose path starts with the auto-import profile's path" }, async () => {
+test("chromePidsFor: profile /x/p must not match another Chrome on /x/p-backup (prefix match)", async () => {
   const p = path.join(tmp, "prof");
   const other = fakeChrome(`${p}-backup`);
   await new Promise((r) => setTimeout(r, 200));
@@ -74,7 +74,7 @@ async function prepare(ctx: BrowserContext) {
 
 test(
   "profile lock: a tick while `npm run yahoo:login` holds the profile fails AND leaves the owner's Chrome running",
-  { skip: skip || undefined, todo: skip ? undefined : "BUG: collectWithChrome's finally SIGKILLs every Chrome on the profile, including the owner's headed yahoo:login window", timeout: 120_000 },
+  { skip: skip || undefined, timeout: 120_000 },
   async () => {
     const p = path.join(tmp, "locked");
     fs.mkdirSync(p);
@@ -86,6 +86,7 @@ test(
     const logs: string[] = [];
     const r = await collectWithChrome({ profileDir: p, leagueId: L, prepare, log: (l) => logs.push(l) });
     assert.equal(r.ok, false, "the run cannot use a locked profile");
+    assert.equal(!r.ok && r.reason, "profile_in_use");
     // A pid check alone is not enough (a killed child of this process stays a zombie): the browser must still answer.
     const answer = await Promise.race([
       owner.newPage().then((pg) => pg.evaluate("1 + 1")),

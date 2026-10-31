@@ -7,11 +7,12 @@
 // Yahoo: the collector only GETs league pages.
 // Docs: https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context
 import { execFile } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 import { chromium, type BrowserContext } from "playwright-core";
 import { collectorCode } from "../providers/import-bookmarklet.js";
 
-export type FailReason = "signed_out" | "captcha" | "empty" | "partial" | "timeout" | "error";
+export type FailReason = "signed_out" | "captcha" | "empty" | "partial" | "timeout" | "profile_in_use" | "error";
 export type CollectResult = { ok: true; payload: Record<string, unknown>; teams: number } | { ok: false; reason: FailReason; detail: string };
 
 export const YAHOO_HOST = "football.fantasysports.yahoo.com";
@@ -27,13 +28,41 @@ export function safeUrl(u: string): string {
   }
 }
 
-/** An error message fit for a log line: URLs lose their query/hash, one line, at most 200 chars. */
-export function safeMessage(m: string): string {
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b[@-_]/g;
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f]+/g;
+/** `name=value` / `name: value` pairs whose value is a credential; the value is replaced, the name kept. */
+const SECRET_PAIR = /\b(cookie|set-cookie|token|access_token|refresh_token|id_token|crumb|secret|password|authorization|session)(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;&]+)/gi;
+const BEARER = /\b(bearer)\s+[\w.~+/=-]+/gi;
+
+/**
+ * An error message fit for the SERVER LOG: URLs lose their query/hash, credential values are redacted, terminal escape
+ * codes and control characters go, one line, at most `max` chars. Local paths stay (the log is the owner's).
+ */
+export function safeMessage(m: string, max = 200): string {
   return m
+    .replace(ANSI, "")
     .replace(/(https?:\/\/[^\s?#"'<>]+)[?#][^\s"'<>]*/g, "$1")
+    .replace(BEARER, "$1 [redacted]")
+    .replace(SECRET_PAIR, "$1$2[redacted]")
+    .replace(CONTROL, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 200);
+    .slice(0, max);
+}
+
+/** Local file paths (absolute, ~ or a Windows drive) after a space, quote, bracket, "=" or ","; never a URL's path. */
+const LOCAL_PATH = /(^|[\s'"(<\[=,])(?:~|[A-Za-z]:\\|\/)[^\s'")>\],]+/g;
+export const PUBLIC_DETAIL_MAX = 120;
+
+/**
+ * The failure detail shown to league members (GET /api/autoimport): safeMessage, then no local paths ("<path>"),
+ * at most 120 chars. The full message goes only to the server log.
+ */
+export function publicDetail(m: string): string {
+  const s = safeMessage(m, 1000).replace(LOCAL_PATH, "$1<path>").replace(/\s+/g, " ").trim();
+  return s.length > PUBLIC_DETAIL_MAX ? `${s.slice(0, PUBLIC_DETAIL_MAX - 1)}…` : s;
 }
 
 /**
@@ -59,16 +88,32 @@ export function classifyLanding(finalUrl: string, leagueId: string): { reason: F
 
 const run = promisify(execFile);
 
-/** PIDs of processes started on `profileDir` (Chrome's --user-data-dir), never the owner's own Chrome. */
+/** True when `line` (a `ps` command line) carries exactly `--user-data-dir=<dir>` (not a longer path sharing the prefix). */
+export function hasProfileArg(line: string, dirs: string[]): boolean {
+  return dirs.some((d) => {
+    const flag = `--user-data-dir=${d}`;
+    for (let i = line.indexOf(flag); i >= 0; i = line.indexOf(flag, i + 1)) {
+      const before = i === 0 ? " " : line[i - 1];
+      const after = line[i + flag.length];
+      if (/\s/.test(before) && (after === undefined || /\s/.test(after))) return true;
+    }
+    return false;
+  });
+}
+
+/** PIDs of processes whose command line carries exactly `--user-data-dir=<profileDir>` (as given or resolved). */
 export async function chromePidsFor(profileDir: string): Promise<number[]> {
   const { stdout } = await run("ps", ["-axo", "pid=,command="], { maxBuffer: 8 * 1024 * 1024 });
-  const flag = `--user-data-dir=${profileDir}`;
+  const dirs = [...new Set([profileDir, path.resolve(profileDir)])];
   return stdout
     .split("\n")
-    .filter((l) => l.includes(flag))
+    .filter((l) => hasProfileArg(l, dirs))
     .map((l) => Number(l.trim().split(/\s+/)[0]))
     .filter((n) => Number.isInteger(n) && n > 0 && n !== process.pid);
 }
+
+/** Chrome refuses a profile another Chrome holds (its ProcessSingleton / SingletonLock). */
+export const isProfileLockError = (m: string) => /ProcessSingleton|SingletonLock|profile (directory )?is (already )?in use/i.test(m);
 
 export interface CollectorOptions {
   profileDir: string;
@@ -80,17 +125,34 @@ export interface CollectorOptions {
   log?: (line: string) => void;
 }
 
-/** One headless collection run. Always closes the browser and kills any Chrome left on this profile. */
+/**
+ * One headless collection run. A profile another Chrome already holds (e.g. the owner's `npm run yahoo:login` window)
+ * fails at once as "profile_in_use": nothing is launched and nothing is killed. Otherwise the browser is always closed
+ * in `finally`, and only the Chrome processes THIS run launched (the new pids on the profile right after launch) are
+ * killed if they outlive the close; never any other Chrome.
+ */
 export async function collectWithChrome(o: CollectorOptions): Promise<CollectResult> {
   const log = o.log ?? ((l: string) => console.warn(l));
   let ctx: BrowserContext | undefined;
+  let owned: number[] = [];
   const aborted = () => !!o.signal?.aborted;
   const onAbort = () => void ctx?.close().catch(() => undefined);
   o.signal?.addEventListener("abort", onAbort);
+  const inUse = (detail: string): CollectResult => ({ ok: false, reason: "profile_in_use", detail });
   try {
     const code = await collectorCode();
     if (aborted()) return { ok: false, reason: "timeout", detail: "timed out before launch" };
-    ctx = await chromium.launchPersistentContext(o.profileDir, { channel: "chrome", headless: true, timeout: 60_000 });
+    const before = await chromePidsFor(o.profileDir);
+    if (before.length) return inUse(`the Chrome profile is open in another Chrome (${before.length} process${before.length === 1 ? "" : "es"}): next run retries`);
+    try {
+      ctx = await chromium.launchPersistentContext(o.profileDir, { channel: "chrome", headless: true, timeout: 60_000 });
+    } catch (e) {
+      const m = (e as Error)?.message ?? String(e);
+      if (isProfileLockError(m)) return inUse("the Chrome profile is locked by another Chrome: next run retries");
+      throw e;
+    }
+    // Ours = the processes on the profile now that were not there before the launch (before was empty).
+    owned = (await chromePidsFor(o.profileDir).catch(() => [] as number[])).filter((p) => !before.includes(p));
     if (aborted()) return { ok: false, reason: "timeout", detail: "timed out during launch" };
     if (o.prepare) await o.prepare(ctx);
     const page = ctx.pages()[0] ?? (await ctx.newPage());
@@ -105,22 +167,24 @@ export async function collectWithChrome(o: CollectorOptions): Promise<CollectRes
     return { ok: true, payload, teams };
   } catch (e) {
     if (aborted()) return { ok: false, reason: "timeout", detail: "timed out (browser closed)" };
-    return { ok: false, reason: "error", detail: safeMessage((e as Error).message ?? String(e)) };
+    const m = (e as Error)?.message ?? String(e);
+    if (isProfileLockError(m)) return inUse("the Chrome profile is locked by another Chrome: next run retries");
+    return { ok: false, reason: "error", detail: safeMessage(m) };
   } finally {
     o.signal?.removeEventListener("abort", onAbort);
     await Promise.race([ctx?.close().catch(() => undefined), new Promise((r) => setTimeout(r, 15_000))]);
-    try {
-      const left = await chromePidsFor(o.profileDir);
-      for (const pid of left) {
+    if (owned.length) {
+      let killed = 0;
+      for (const pid of owned) {
         try {
+          process.kill(pid, 0); // still there?
           process.kill(pid, "SIGKILL");
+          killed++;
         } catch {
           /* already gone */
         }
       }
-      if (left.length) log(`[autoimport] event=leftover_chrome killed=${left.length}`);
-    } catch (e) {
-      log(`[autoimport] event=leftover_check_failed error=${safeMessage((e as Error).message)}`);
+      if (killed) log(`[autoimport] event=leftover_chrome killed=${killed}`);
     }
   }
 }

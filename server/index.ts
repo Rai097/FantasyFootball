@@ -67,9 +67,9 @@ async function start() {
   setAutoImport(
     await AutoImportService.create(ai, {
       collect: (signal) => collectWithChrome({ profileDir: ai.profileDir, leagueId: ai.leagueId!, signal }),
-      apply: async (payload) => {
+      apply: async (payload, signal) => {
         if (String(payload.leagueId) !== ai.leagueId) throw new Error(`payload is league ${String(payload.leagueId)}, expected ${ai.leagueId}`);
-        const r = await importPayload(payload, { importedBy: "Auto-import", refusePartial: true });
+        const r = await importPayload(payload, { importedBy: "Auto-import", refusePartial: true, signal });
         return { teams: r.stored.teams.length };
       },
       isPartial: (e) => e instanceof PartialImportError,

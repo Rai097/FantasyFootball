@@ -9,7 +9,7 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext } from "playwright-core";
-import { chromePidsFor, classifyLanding, collectWithChrome, safeMessage, safeUrl } from "./collector.js";
+import { chromePidsFor, classifyLanding, collectWithChrome, hasProfileArg, isProfileLockError, publicDetail, safeMessage, safeUrl } from "./collector.js";
 
 const L = "1405188";
 
@@ -119,4 +119,26 @@ test("real Chrome: an abort (runner timeout) closes the browser and reports 'tim
   assert.equal(r.ok, false);
   if (!r.ok) assert.equal(r.reason, "timeout");
   assert.deepEqual(await chromePidsFor(profile), []);
+});
+
+// ------------------------------------------------------------------ fix round 1
+test("safeMessage redacts credential values and strips terminal escapes; publicDetail also hides local paths, ≤120 chars", () => {
+  const m = safeMessage('fail cookie=ABC123; token: "XYZ" Authorization: Bearer abc.def, Bearer ghi.jkl \u001b[2mdim\u001b[22m');
+  for (const bad of ["ABC123", "XYZ", "abc.def", "ghi.jkl", "\u001b"]) assert.ok(!m.includes(bad), `${bad} in ${m}`);
+  const d = publicDetail(`EACCES: permission denied, open '/Users/owner/FantasyFootball-run/.data/yahoo-chrome-profile/SingletonLock' at https://football.fantasysports.yahoo.com/f1/1405188?crumb=S`);
+  assert.ok(!d.includes("/Users") && !d.includes("crumb") && d.includes("<path>"), d);
+  assert.match(d, /football\.fantasysports\.yahoo\.com\/f1\/1405188/, "a URL path is not a local path");
+  assert.ok(publicDetail("x ".repeat(400)).length <= 120);
+  assert.equal(publicDetail("landed on login.yahoo.com/account/challenge"), "landed on login.yahoo.com/account/challenge");
+});
+
+test("hasProfileArg: the exact --user-data-dir only (no prefix match), paths with spaces work", () => {
+  assert.equal(hasProfileArg("123 Chrome --user-data-dir=/x/p --headless", ["/x/p"]), true);
+  assert.equal(hasProfileArg("123 Chrome --user-data-dir=/x/p", ["/x/p"]), true);
+  assert.equal(hasProfileArg("123 Chrome --user-data-dir=/x/p-backup --headless", ["/x/p"]), false);
+  assert.equal(hasProfileArg("123 Chrome --user-data-dir=/x/p/sub", ["/x/p"]), false);
+  assert.equal(hasProfileArg("123 Chrome --other-user-data-dir=/x/p", ["/x/p"]), false);
+  assert.equal(hasProfileArg("123 Chrome --user-data-dir=/a b/p --x", ["/a b/p"]), true);
+  assert.equal(isProfileLockError("Failed to create a ProcessSingleton for your profile directory"), true);
+  assert.equal(isProfileLockError("net::ERR_ABORTED"), false);
 });

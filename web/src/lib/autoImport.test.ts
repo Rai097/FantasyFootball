@@ -34,4 +34,5 @@ test("running, other days and unknown reasons", () => {
   assert.equal(shortTime("2026-10-31T21:00:00Z", now, TZ), "Sat 2:00 PM");
   assert.equal(shortTime("2026-10-01T21:00:00Z", now, TZ), "Oct 1, 2:00 PM");
   assert.equal(reasonText("weird"), "weird");
+  assert.equal(reasonText("profile_in_use"), "the sign-in Chrome was open");
 });

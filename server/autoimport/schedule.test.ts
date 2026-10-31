@@ -52,3 +52,9 @@ test("scheduleFromEnv: defaults, override, and fail closed on bad input", () => 
   assert.throws(() => scheduleFromEnv({ AUTO_IMPORT_CRON: "99 7 * * *" }));
   assert.throws(() => scheduleFromEnv({ AUTO_IMPORT_TZ: "Mars/Olympus" }));
 });
+
+test("an empty or never-firing AUTO_IMPORT_CRON throws (auto-import stays off)", () => {
+  assert.throws(() => scheduleFromEnv({ AUTO_IMPORT_CRON: ";" }), /no pattern/);
+  assert.throws(() => scheduleFromEnv({ AUTO_IMPORT_CRON: "0 6 31 2 *" }), /never fires/);
+  assert.doesNotThrow(() => scheduleFromEnv({ AUTO_IMPORT_CRON: "0 6 29 2 *" }), "Feb 29 fires in a leap year");
+});

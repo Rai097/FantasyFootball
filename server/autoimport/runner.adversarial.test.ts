@@ -96,7 +96,6 @@ test("saveState failing does not wedge the mutex", async () => {
 
 test(
   "a collector that ignores the abort signal still ends the run (runner-side deadline)",
-  { todo: "BUG: runner.attempt() awaits collect() with no race against its own timer; a hung collector holds the mutex forever (every tick 'skipped busy', refresh 409, never paused)" },
   async () => {
     const { r } = runner(() => new Promise<CollectResult>(() => undefined));
     const t = r.trigger("schedule");
@@ -107,7 +106,6 @@ test(
 
 test(
   "an import (apply) that never returns still ends the run",
-  { todo: "BUG: apply() (importPayload → getPlayerDb/nflverse) has no timeout; a hang there holds the mutex forever" },
   async () => {
     const { r } = runner(async () => ok(12), { apply: () => new Promise(() => undefined) });
     const t = r.trigger("schedule");
@@ -225,7 +223,6 @@ test("bad AUTO_IMPORT_CRON / TZ: auto-import stays OFF with a reason (never on w
 
 test(
   "AUTO_IMPORT_CRON that can never fire (';', ' ; ', Feb 31) is refused, not 'enabled' with no runs",
-  { todo: "BUG: scheduleFromEnv accepts an empty pattern list and never-firing patterns; the service starts enabled=true next=- and silently never runs" },
   () => {
     for (const c of [";", " ; ", "0 6 31 2 *"]) {
       const cfg = autoImportConfig({ AUTO_IMPORT: "1", AUTO_IMPORT_LEAGUE_ID: "1405188", AUTO_IMPORT_CRON: c }, () => true);
@@ -273,4 +270,16 @@ test("a corrupt / unknown saved state starts as ok (the pause is not resurrected
     );
     assert.equal(s.status().state, "ok");
   }
+});
+
+test("AUTO_IMPORT=1 with an invalid config: the startup line is an error (loud), a plain 'off' is info", async () => {
+  const errors: string[] = [];
+  const infos: string[] = [];
+  const deps = { collect: async () => ok(1), apply: async () => ({ teams: 1 }), isPartial: () => false, log: (l: string) => infos.push(l), logError: (l: string) => errors.push(l) };
+  await AutoImportService.create(autoImportConfig({ AUTO_IMPORT: "1", AUTO_IMPORT_LEAGUE_ID: "1405188", AUTO_IMPORT_CRON: "0 6 31 2 *" }, () => true), deps);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /level=error .*never fires.*auto-import is OFF/);
+  await AutoImportService.create(autoImportConfig({}, () => true), deps);
+  assert.equal(errors.length, 1, "AUTO_IMPORT unset is not an error");
+  assert.match(infos.at(-1)!, /event=startup enabled=false/);
 });

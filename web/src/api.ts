@@ -165,7 +165,7 @@ export interface AutoImportStatus {
   /** The stored import it refreshes ("y<leagueId>"). */
   importId?: string;
   state: "ok" | "paused";
-  reason?: "signed_out" | "captcha" | "empty" | "partial" | "timeout" | "error" | string;
+  reason?: "signed_out" | "captcha" | "empty" | "partial" | "timeout" | "profile_in_use" | "error" | string;
   detail?: string;
   lastSuccessAt?: string;
   lastAttemptAt?: string;

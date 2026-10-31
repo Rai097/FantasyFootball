@@ -160,3 +160,44 @@ test("mutex: a second trigger during a run is rejected; free again afterwards", 
   assert.equal(s.runner.state().running, false);
   assert.ok(s.runner.trigger("manual").started);
 });
+
+// ------------------------------------------------------------------ fix round 1
+test("overall run deadline: retries included, the run ends as timeout and frees the mutex; the import sees an aborted signal", async () => {
+  let applySignal: AbortSignal | undefined;
+  // Each attempt is within its own 1 s budget, but the whole run is capped at 60 ms.
+  const s = setup([], {
+    collect: () => new Promise<CollectResult>(() => undefined),
+    timeoutMs: 1_000,
+    maxRunMs: 60,
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    retryDelayMs: 10,
+  });
+  const t0 = Date.now();
+  await runOnce(s.runner);
+  assert.ok(Date.now() - t0 < 500, `run took ${Date.now() - t0} ms`);
+  assert.equal(s.runner.state().reason, "timeout");
+  assert.equal(s.runner.isRunning(), false);
+  const s2 = setup([okResult()], { apply: (_p, signal) => ((applySignal = signal), new Promise(() => undefined)), timeoutMs: 1_000, maxRunMs: 60 });
+  await runOnce(s2.runner);
+  assert.equal(s2.runner.state().reason, "timeout");
+  assert.equal(applySignal?.aborted, true, "a late import is told to write nothing");
+});
+
+test("profile_in_use: no retry, no backoff (the next tick tries again)", async () => {
+  const sleeps: number[] = [];
+  const s = setup([{ ok: false, reason: "profile_in_use", detail: "open in another Chrome" }], { sleep: async (ms) => void sleeps.push(ms), retryDelayMs: 30_000 });
+  await runOnce(s.runner);
+  assert.equal(s.calls(), 1);
+  assert.deepEqual(sleeps, []);
+  assert.equal(s.runner.state().reason, "profile_in_use");
+});
+
+test("status detail is short and path-free; the log keeps the full (credential-free) message", async () => {
+  const s = setup(["throw"], { collect: () => Promise.reject(new Error(`EACCES open '/Users/owner/.data/yahoo-chrome-profile/SingletonLock' ${"x".repeat(300)} cookie=SECRETC`)) });
+  await runOnce(s.runner);
+  const d = String(s.runner.state().detail);
+  assert.ok(d.length <= 120 && !d.includes("/Users"), d);
+  const log = s.logs.join("\n");
+  assert.match(log, /\/Users\/owner\/\.data\/yahoo-chrome-profile/);
+  assert.ok(!log.includes("SECRETC"));
+});
