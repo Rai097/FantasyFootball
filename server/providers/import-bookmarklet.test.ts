@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page, runBookmarklet, type Route } from "./bookmarkletHarness.js";
-import { bookmarkletCode, bookmarkletUrl, normaliseAppUrl } from "./import-bookmarklet.js";
+import { bookmarkletCode, bookmarkletUrl, collectorCode, normaliseAppUrl } from "./import-bookmarklet.js";
 
 const APP = "https://ff.example.test";
 
@@ -68,4 +68,13 @@ test("no app URL injected (unbundled run) → no window opened, old flow unchang
   assert.equal(handoff.opened.length, 0);
   assert.doesNotMatch(overlay, /Trade Desk didn't answer|Sent to Trade Desk|Pop-up/);
   assert.match(overlay, /Trade Desk import v7/);
+});
+
+test("collector bundle (auto-import): exposes __ftdCollect only — no overlay, no handoff, no auto-run, self-contained", async () => {
+  const code = await collectorCode();
+  assert.ok(code.includes("__ftdCollect"));
+  assert.ok(!code.includes("ftd-import-overlay"), "no overlay UI");
+  assert.ok(!code.includes("postMessage") && !code.includes("window.open"), "no handoff");
+  assert.ok(!/\bimport\s*[{(*]|\brequire\(/.test(code), "must be self-contained");
+  assert.equal(await collectorCode(), code, "built once");
 });
