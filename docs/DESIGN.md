@@ -1985,3 +1985,30 @@ ours_b) / `MATCHUP.marginSd` 35), pre-game estimate, null unless both totals are
 a call = the projected winner won (tie projection = no call); `games` / calls count only games with complete
 projections from BOTH sources and a decided final; MAE / bias over the same team-weeks (ours, Yahoo's and points all
 present). Measured: 6.8 KB on the fixture-built league (weeks 8 + 7).
+
+**Fix round 1 (2026-10-31, overrides the text above where they differ):**
+- `projWeek` is again the NFL calendar's week (v8 meaning): Yahoo's matchup week never relabels the import, so a
+  rollover (Yahoo on W+1, calendar on W) keeps every Yahoo weekly number in analysis / lineup / waivers exactly as v8.
+- Yahoo's matchup week is trusted only within `MATCHUP_WEEK_SKEW` = 1 of the calendar's (`trustedMatchupWeek`); then it
+  is stored apart as `StoredImport.matchupWeek` and used ONLY for the matchups: the matchlog, the projlog capture week
+  (and which week the roster's Yahoo weekly numbers are captured under), the matchup view's import lineups. Farther =
+  a "matchups" warning "not trusted, matchups ignored": no matchlog write, projlog on the calendar's week.
+- Record symmetry: a final team-week's ours AND Yahoo's = Σ over its FINAL starters of each starter's LOCKED projlog
+  value (`app` / `yahoo`, latest capture before his kickoff). Final starters: Yahoo's final matchup page when read (the
+  owner's pairing); else the projlog's starter flags at each player's last pre-kickoff capture (limit: a starter never
+  captured before his kickoff, e.g. a Thursday player when the first import is Friday, or a bye starter, is unseen;
+  `|starting slots − captured starters|` count as missing). Bye = a real 0 for both. Any starter without a locked value
+  → that source incomplete; an incomplete team-week is out of winner calls, MAE and bias for BOTH sources.
+  `RecordGame` adds `yahooPage` (Yahoo's own module / page total, shown, never compared) and `oursMissing` /
+  `yahooMissing` ("n starters not projected"); a week the projlog never held (weeks 1–7) shows `yahoo` = Yahoo's page
+  total with ours "not recorded", out of the metrics. Week 8 is expected to be mostly incomplete (Thursday starters not
+  captured). Tab wiring of the missing counts in the record rows (`recordIncompleteLabel`) is open.
+- A later capture never downgrades a stored week: a week with no pairings and no pages is not touched; status only
+  moves forward (unknown < pre < live < final); a null score or a page without points never erases a stored number; a
+  newer real reading still corrects points (stat corrections).
+- Collector time limits: each matchups page read aborts after 20 s (AbortController), the whole matchups step stops
+  reading after 60 s (`MATCHUP_TIMEOUTS`); a timeout is a diagnostics note, collect()'s roster payload is unaffected.
+- Minor: a tied final is no call; a capture with Yahoo's week but no readable weeks still stores the current week;
+  `?week=` must match `/^\d{1,2}$/` (else 400).
+- Verified on a real-data copy (calendar week 8): analysis `yahooProjWeekly` 489 and waivers K/DEF streams 10 after a
+  same-week v9 import, a rollover (W+1) and a far week (4); pre-fix code went to 0 / 0 on the last two.
