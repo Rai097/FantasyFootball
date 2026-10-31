@@ -1554,6 +1554,23 @@ January, activated from PUP, practising) was out; Stash watch kept a WR whose to
   moved to the returning starter.
 * Tests: `signals/vacated.preseason.test.ts`, `projectionV4.returningStarter.test.ts`, `stash.test.ts` (PUP + ACL
   stays a stash, IR + ACL never), `returns.test.ts` (PUP not season-ending).
+* **Fix round 1 (2026-10-31)** — "listed hurt" is now real, week-scoped evidence (`vacated.ts` `injuryRow` / `hurtAt`):
+  - A row counts only with a game status (nflverse injuries: `report_status` = status for the game, `practice_status` =
+    practice participation; https://nflreadr.nflverse.com/articles/dictionary_injuries.html): Out, Doubtful, or
+    Questionable with a Limited / DNP practice. Practice-only rows (even DNP) and Questionable + Full are cleared.
+  - For week w the nearest report week of the absence decides: the latest in [w − 2, w] (`VACATED.staleWeeks`, room
+    for a bye), else the first after w and before his first game (PUP / IR players are off the weekly report until
+    they practise: real 2026 data, weeks 1–3 no rows, Out from week 4), else roster RES. A clean week clears him.
+  - On the team (`ON_TEAM_STATUS`): roster status ACT / INA / RES / DEV or none; CUT, RET, TRD, TRC, TRT, EXE and
+    unknown codes keep the old team on the row but are NOT on it (both rules; the rosters dictionary does not
+    enumerate the values, https://nflreadr.nflverse.com/articles/dictionary_rosters.html, so the list is the real
+    2026 codes).
+  - A game for any team before week w means he was not out since before the season; NaN / missing 2025 totals are
+    unknown, never a role.
+  - Real data (same copy): players with a borrowed week 59 → 59, every week identical; the fill-in RB still 10.31 ppg;
+    acceptance players unchanged. Residual: no weekly roster history, so a teammate with no rows who later lands on the
+    report Out reads as hurt for the earlier weeks (a long healthy scratch before an injury); a starter missing weeks
+    with no row and no RES (e.g. activated from PUP with the report rows missing) is unknown → not borrowed.
 
 ## Projection accuracy log (2026-10-30)
 - Purpose: per player and overall, how the app's weekly projection and Yahoo's weekly projection compare with what

@@ -3,7 +3,7 @@
 // players only (generic ids).
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { vacatedGames, type VacPlayer } from "./vacated.js";
+import { hurtAt, injuryRow, onRoster, vacatedGames, type VacPlayer } from "./vacated.js";
 
 /** RB with `touches` per week (null = no game), all carries. */
 const rb = (id: string, touches: (number | null)[], extra: Partial<VacPlayer> = {}): VacPlayer => ({
@@ -16,7 +16,8 @@ const rb = (id: string, touches: (number | null)[], extra: Partial<VacPlayer> = 
 });
 /** Last season: `perGame` touches over 16 games for `team`. */
 const prior = (perGame: number, team: string) => ({ games: 16, opps: { carries: perGame * 16, targets: 0 }, lastTeam: team });
-const hurt = { status: [{ week: 5 }] };
+/** Out on the injury report every week (fix round 1: a game status, week-scoped). */
+const hurt = { status: [1, 2, 3, 4, 5, 6, 7].map((week) => ({ week, report: "Out" })) };
 // The fill-in: a 6-touch backup last season (another team), 3 touches in week 1, then the lead role.
 const fillIn = () => rb("rb2", [3, 20, 8, 22, 21, 18, 22], { prior: prior(6, "BBB") });
 // The starter: no game this season, a 13-touch role on THIS team last season, on the injury report this season.
@@ -52,5 +53,61 @@ describe("vacatedGames: teammate out since before the season", () => {
     // Week 1 of a teammate who played week 1 is never "out since before the season".
     const both = vacatedGames([rb("rb2", [20], { prior: prior(6, "BBB") }), starter({ games: [{ week: 1, team: "AAA", targets: 0, carries: 15 }] })]);
     assert.equal(both.size, 0);
+  });
+});
+
+describe("injury evidence and team membership (fix round 1, 2026-10-31)", () => {
+  const FULL = "Full Participation in Practice";
+  const LTD = "Limited Participation in Practice";
+  const DNP = "Did Not Participate In Practice";
+  test("a row is evidence only with a game status: Out / Doubtful, or Questionable while not practising fully", () => {
+    assert.equal(injuryRow({ report: "Out", practice: FULL }), true);
+    assert.equal(injuryRow({ report: "Doubtful" }), true);
+    assert.equal(injuryRow({ report: "Questionable", practice: LTD }), true);
+    assert.equal(injuryRow({ report: "Questionable", practice: DNP }), true);
+    assert.equal(injuryRow({ report: "Questionable", practice: FULL }), false, "practising fully: cleared");
+    assert.equal(injuryRow({ report: "Questionable" }), false, "no practice info");
+    assert.equal(injuryRow({ practice: DNP }), false, "practice-only row (rest day / mid-week)");
+    assert.equal(injuryRow({ practice: FULL }), false);
+    assert.equal(injuryRow({}), false);
+  });
+  test("week-scoped: the latest report week in [w − 2, w] decides; a clean week clears him", () => {
+    const p = rb("rb1", [], { status: [{ week: 1, report: "Out" }, { week: 4, practice: FULL }] });
+    assert.equal(hurtAt(p, 1), true);
+    assert.equal(hurtAt(p, 3), true, "week-1 Out within 2 weeks");
+    assert.equal(hurtAt(p, 4), false, "week-4 clean row decides");
+    assert.equal(hurtAt(p, 6), false, "week 4 still the latest in [4, 6]");
+    assert.equal(hurtAt(p, 8), false, "no row in [6, 8], none after, not on reserve: unknown → not hurt");
+  });
+  test("no recent row: his first report week after w within the same absence decides (PUP / IR → Out on return)", () => {
+    const pup = rb("rb1", [], { status: [4, 5, 6, 7].map((week) => ({ week, report: "Out", practice: LTD })), roster: { status: "ACT" } });
+    assert.deepEqual([1, 2, 3, 4, 7].map((w) => hurtAt(pup, w)), [true, true, true, true, true]);
+    const scratch = rb("rb1", [], { status: [{ week: 4, practice: FULL }], roster: { status: "ACT" } });
+    assert.equal(hurtAt(scratch, 1), false, "first row after is clean: a healthy scratch");
+    // A row after his first game is another absence: never evidence for weeks before that game.
+    const later = rb("rb1", [null, null, null, 16], { status: [{ week: 5, report: "Out" }] });
+    assert.equal(hurtAt(later, 2), false);
+    assert.equal(hurtAt(later, 5), true);
+  });
+  test("no row near or after: the roster reserve list (RES) decides; NaN weeks are ignored", () => {
+    assert.equal(hurtAt(rb("rb1", [], { roster: { status: "RES" } }), 5), true);
+    assert.equal(hurtAt(rb("rb1", [], { roster: { status: "ACT" } }), 5), false);
+    assert.equal(hurtAt(rb("rb1", [], { status: [{ week: Number.NaN, report: "Out" }] }), 5), false);
+  });
+  test("on the team: ACT / INA / RES / DEV or no roster status; CUT, RET, TRD, TRC, TRT, EXE, unknown codes are not", () => {
+    for (const st of ["ACT", "INA", "RES", "DEV", undefined]) assert.equal(onRoster(rb("x", [], { roster: { status: st } })), true, String(st));
+    assert.equal(onRoster(rb("x", [])), true, "no roster row: his team decides");
+    for (const st of ["CUT", "RET", "TRD", "TRC", "TRT", "EXE", "XYZ"]) assert.equal(onRoster(rb("x", [], { roster: { status: st } })), false, st);
+  });
+  test("a teammate cut / traded mid-season (old team kept on his roster row) never vacates a role by the usual rule", () => {
+    // He played weeks 1-3 for the team, then left: the fill-in's role from week 4 is his own, not borrowed.
+    const fill = rb("rb2", [5, 4, 5, 18, 19, 20]);
+    const gone = rb("rb1", [15, 16, 15]);
+    assert.deepEqual([...(vacatedGames([fill, gone]).get("rb2")?.keys() ?? [])], [4, 5, 6], "still on the team (control)");
+    for (const st of ["CUT", "TRD", "RET"]) assert.equal(vacatedGames([fill, { ...gone, roster: { status: st } }]).size, 0, st);
+  });
+  test("a NaN / missing 2025 total is unknown: never a role", () => {
+    assert.equal(vacatedGames([fillIn(), starter({ prior: { games: Number.NaN, opps: { carries: 200, targets: 0 }, lastTeam: "AAA" } })]).size, 0);
+    assert.equal(vacatedGames([fillIn(), starter({ prior: { games: 16, opps: { carries: Number.NaN, targets: 0 }, lastTeam: "AAA" } })]).size, 0);
   });
 });

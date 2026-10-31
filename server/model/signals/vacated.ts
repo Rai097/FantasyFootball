@@ -24,7 +24,16 @@ export const VACATED = {
    *  game is unknown), or last season's role with ≥ `priorMinGames` games. */
   mateMinGames: 2,
   priorMinGames: 4,
+  /** Injury evidence for week w (fix round 1, 2026-10-31): his latest injury-report week in [w − staleWeeks, w]
+   *  decides (2 = room for a bye week); none → his first report week after w while he still has no game (the same
+   *  absence: PUP / IR players are not on the weekly report); none → the roster reserve list (RES). */
+  staleWeeks: 2,
 } as const;
+
+/** nflverse roster `status` values that mean ON the team (real 2026 roster codes; the dictionary does not enumerate
+ *  them): active, inactive, reserve lists, practice squad. Anything else (CUT, RET, TRD, TRC, TRT, EXE, …) keeps the
+ *  team that let him go: he is not on the team (fail closed). No roster row = unknown → judged by `team` alone. */
+export const ON_TEAM_STATUS: ReadonlySet<string> = new Set(["ACT", "INA", "RES", "DEV"]);
 
 /** "Higher usage in at least 2 of the last 3 games" (expected points per game, league scoring). */
 export const SPIKE = {
@@ -69,9 +78,10 @@ export interface VacPlayer {
   games: VacGame[];
   /** Last season (signals PriorSeason shape): games and opportunity totals; absent = unknown. */
   prior?: { games: number; opps?: { targets: number; carries: number }; lastTeam?: string };
-  /** This season's injury-report rows (any week); with `roster` the evidence that a teammate with no game this season
-   *  is hurt, not a healthy scratch (fix 2026-10-31). Absent = no evidence. */
-  status?: readonly { week: number }[];
+  /** This season's injury-report rows (nflverse injuries: `report_status` = game status, `practice_status`); with
+   *  `roster` the evidence that a teammate with no game this season is hurt, not a healthy scratch (fix 2026-10-31,
+   *  fix round 1: week-scoped, real designations only). Absent = no evidence. */
+  status?: readonly { week: number; report?: string; practice?: string }[];
   roster?: { status?: string };
 }
 
@@ -85,11 +95,42 @@ const usageOf = (g: VacGame, group: "PC" | "RB") => (group === "RB" ? g.carries 
 /** Last season's usage per game (≥ VACATED.priorMinGames games with opportunity totals); null = unknown. */
 const priorUsage = (p: VacPlayer, group: "PC" | "RB"): number | null => {
   const pr = p.prior;
-  if (!pr?.opps || pr.games < VACATED.priorMinGames) return null;
-  return (group === "RB" ? pr.opps.carries + pr.opps.targets : pr.opps.targets) / pr.games;
+  if (!pr?.opps || !(pr.games >= VACATED.priorMinGames)) return null;
+  const u = (group === "RB" ? pr.opps.carries + pr.opps.targets : pr.opps.targets) / pr.games;
+  return Number.isFinite(u) ? u : null; // NaN / missing totals are unknown, never a role
 };
-/** Listed hurt this season: an injury-report row or a reserve list (RES). */
-const injuredEvidence = (p: VacPlayer) => (p.status?.length ?? 0) > 0 || p.roster?.status === "RES";
+/** On the team by the roster (ON_TEAM_STATUS; no roster status = unknown → his `team` decides). */
+export const onRoster = (p: VacPlayer): boolean => !p.roster?.status || ON_TEAM_STATUS.has(p.roster.status.trim().toUpperCase());
+/**
+ * One injury-report row is injury evidence (nflverse injuries dictionary: `report_status` = "Player's status for game
+ * on official injury report", `practice_status` = "Player's participation in practice"): game status Out or Doubtful,
+ * or Questionable with a Limited / Did-Not-Participate practice. A practice-only row (no game status, even DNP: a
+ * rest day or a mid-week row) and Questionable + Full practice are not: he was cleared for the game.
+ */
+export function injuryRow(r: { report?: string; practice?: string }): boolean {
+  const rep = r.report?.trim().toLowerCase() ?? "";
+  if (rep === "out" || rep === "doubtful") return true;
+  return rep === "questionable" && /limited|did not/i.test(r.practice ?? "");
+}
+/**
+ * Listed hurt for week `week` of an absence with no game yet this season (fix round 1). The nearest report week of
+ * that absence decides (an evidence row that week → hurt; only clean rows → cleared, a healthy scratch):
+ *  1. his latest report week in [week − staleWeeks, week], else
+ *  2. his first report week after `week` and before his first game (any team): the same absence, e.g. a PUP / IR
+ *     player who shows up on the report only once he practises again (real 2026: weeks 1–3 on PUP, no rows, Out from
+ *     week 4), else
+ *  3. the roster reserve list (RES: IR, PUP, NFI; one current row per player, so season-level).
+ */
+export function hurtAt(p: VacPlayer, week: number): boolean {
+  const rows = (p.status ?? []).filter((r) => Number.isFinite(r.week));
+  const decide = (wk: number) => rows.some((r) => r.week === wk && injuryRow(r));
+  const back = rows.filter((r) => r.week <= week && r.week >= week - VACATED.staleWeeks);
+  if (back.length) return decide(Math.max(...back.map((r) => r.week)));
+  const firstGame = Math.min(Infinity, ...p.games.map((g) => g.week).filter((w) => Number.isFinite(w)));
+  const fwd = rows.filter((r) => r.week > week && r.week < firstGame);
+  if (fwd.length) return decide(Math.min(...fwd.map((r) => r.week)));
+  return p.roster?.status?.trim().toUpperCase() === "RES";
+}
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
 /**
@@ -101,9 +142,11 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
  *  - his own usage that week jumped over his earlier mean (games before that week that were not vacated), and
  *  - every earlier game of his in the same absence stretch was a jump too (the absence explains the jump), and
  *  - he did not miss his team's game right before that stretch (a player back from his OWN absence is not borrowing).
- * Or (fix 2026-10-31) the teammate is out since before the season: no game for this team up to that week, a bigger
- * 2025 role on THIS team (≥ priorMinGames, ≥ the fill-in's own 2025 usage + minMargin and ≥ minUsage), listed hurt this
- * season (injury-report row or RES), and the fill-in's usage that week jumped over his own 2025 usage per game.
+ * Or (fix 2026-10-31) the teammate is out since before the season: no game (any team) up to that week, a bigger
+ * 2025 role on THIS team (≥ priorMinGames, ≥ the fill-in's own 2025 usage + minMargin and ≥ minUsage), hurt that week
+ * (`hurtAt`: a recent Out / Doubtful / Questionable-not-practising row, else RES), and the fill-in's usage that week
+ * jumped over his own 2025 usage per game. A teammate whose roster status is not on the team (CUT, RET, TRD, …)
+ * never vacates a role (fix round 1).
  * Unknown baselines (no earlier game of his, a one-game teammate sample) never flag: missing data is not a borrowed role.
  */
 export function vacatedGames(players: VacPlayer[]): Map<string, Map<number, VacatedBy[]>> {
@@ -142,9 +185,7 @@ export function vacatedGames(players: VacPlayer[]): Map<string, Map<number, Vaca
       const mateUsage = (t: VacPlayer, week: number): number | null => {
         const before = gamesOf(t).filter((x) => x.week < week);
         if (before.length >= VACATED.mateMinGames) return mean(before.map((x) => usageOf(x, group)));
-        const pr = t.prior;
-        if (pr?.opps && pr.games >= VACATED.priorMinGames) return (group === "RB" ? pr.opps.carries + pr.opps.targets : pr.opps.targets) / pr.games;
-        return null;
+        return priorUsage(t, group);
       };
       const jumped = (u: number, base: number) => u >= Math.max(VACATED.jumpRatio * base, base + VACATED.jumpMinGain) - 1e-9;
       const myPrior = priorUsage(p, group);
@@ -157,9 +198,10 @@ export function vacatedGames(players: VacPlayer[]): Map<string, Map<number, Vaca
         // "explained" stretch rule below does not apply (there is no absence start to line the jump up with).
         if (myPrior !== null && jumped(u, myPrior)) {
           for (const t of mates) {
-            // No game for this team up to AND including that week (a teammate playing week 1 is not out since before it).
-            if (t.id === p.id || t.team !== team || gamesOf(t).some((x) => x.week <= g.week)) continue;
-            if (t.prior?.lastTeam !== team || !injuredEvidence(t)) continue;
+            // No game up to AND including that week, for ANY team (a teammate playing week 1 is not out since before
+            // it; one playing elsewhere was not out hurt either), still on the team by the roster, hurt that week.
+            if (t.id === p.id || t.team !== team || !onRoster(t) || t.games.some((x) => x.week <= g.week)) continue;
+            if (t.prior?.lastTeam !== team || !hurtAt(t, g.week)) continue;
             const tMean = priorUsage(t, group);
             if (tMean === null || tMean < myPrior + VACATED.minMargin || tMean < VACATED.minUsage[group]) continue;
             by.push({ id: t.id, name: t.name, pos: String(t.pos) });
@@ -169,7 +211,7 @@ export function vacatedGames(players: VacPlayer[]): Map<string, Map<number, Vaca
         const base = earlier.length ? mean(earlier.map((x) => usageOf(x, group))) : null;
         if (base !== null && jumped(u, base)) jumps.add(g.week);
         for (const t of base !== null && jumps.has(g.week) ? mates : []) {
-          if (t.id === p.id || t.team !== team) continue;
+          if (t.id === p.id || t.team !== team || !onRoster(t)) continue;
           if (!gamesOf(t).some((x) => x.week < g.week)) continue;
           const tMean = mateUsage(t, g.week);
           if (tMean === null || tMean < base! + VACATED.minMargin || tMean < VACATED.minUsage[group]) continue;

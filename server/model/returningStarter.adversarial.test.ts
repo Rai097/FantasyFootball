@@ -1,8 +1,7 @@
 // Adversarial tests for "Fix: returning starters and season-ending injuries (2026-10-31)" (DESIGN): a teammate with
 // no game for the team this season, a bigger 2025 role on the same team and an injury listing vacates the fill-in's
 // role; PUP is never season-ending. Synthetic players only (generic ids; the repo is public).
-// Defects found are `todo` tests: they FAIL today (TAP "not ok … # TODO DEFECT") without turning the suite red;
-// drop the `todo` option when the fix lands so they guard it.
+// Defects found were `todo` tests; fix round 1 (2026-10-31) fixed them and dropped the `todo` so they guard the fix.
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { vacatedGames, type VacPlayer } from "./signals/vacated.js";
@@ -26,7 +25,8 @@ const rb = (id: string, touches: (number | null)[], extra: Partial<VacPlayer> = 
   ...extra,
 });
 const prior = (perGame: number, lastTeam: string | undefined, games = 16) => ({ games, opps: { carries: perGame * games, targets: 0 }, lastTeam });
-const OUT: Row[] = [{ week: 1, report: "Out", practice: "Did Not Participate In Practice" }];
+// Out every week (an injured player not on IR is on the report each week; fix round 1: evidence is week-scoped).
+const OUT: Row[] = [1, 2, 3, 4, 5, 6, 7].map((week) => ({ week, report: "Out", practice: "Did Not Participate In Practice" }));
 const outAt = (week: number): Row[] => [{ week, report: "Out" }];
 // The fill-in: a 6-touch backup last season elsewhere, 3 touches in week 1, then the lead role.
 const fillIn = (extra: Partial<VacPlayer> = {}) => rb("rb2", [3, 20, 8, 22, 21, 18, 22], { prior: prior(6, "BBB"), ...extra });
@@ -42,16 +42,16 @@ describe("adversarial: who counts as a teammate out since before the season", ()
   // nflverse roster rows for released / retired / traded players keep the team that let him go (real 2026 roster:
   // 442 CUT, 23 RET rows, every one with a team), and signalTables adds such a player when he has an injury row.
   for (const st of ["CUT", "RET", "TRD"]) {
-    test(`roster status ${st} with the old team (no longer on it) never vacates a role`, { todo: "DEFECT: injuredEvidence ignores roster.status CUT/RET/TRD; t.team keeps the old team" }, () => {
+    test(`roster status ${st} with the old team (no longer on it) never vacates a role`, () => {
       const m = vacatedGames([fillIn(), starter({ roster: { status: st } })]);
       assert.deepEqual(weeksOf(m, "rb2"), [], `${st}: flagged weeks ${weeksOf(m, "rb2")}`);
     });
   }
-  test("a healthy scratch with only a Full-participation practice row is not hurt (no vacated role)", { todo: "DEFECT: any injury-report row counts as hurt, even Full participation with no game status" }, () => {
+  test("a healthy scratch with only a Full-participation practice row is not hurt (no vacated role)", () => {
     const healthy = starter({ status: [{ week: 6, practice: "Full Participation in Practice" }] as Row[], roster: { status: "ACT" } });
     assert.deepEqual(weeksOf(vacatedGames([fillIn(), healthy]), "rb2"), []);
   });
-  test("a teammate who played for ANOTHER team before that week was not out since before the season", { todo: "DEFECT (rare): only games for THIS team are checked" }, () => {
+  test("a teammate who played for ANOTHER team before that week was not out since before the season", () => {
     // 2025 here, signed elsewhere and played weeks 1-4 there, back on this team from week 5 (listed hurt week 5).
     const t = rb("rb1", [15, 15, 15, 15], { prior: prior(13, "AAA"), status: outAt(5) }, "CCC");
     const m = vacatedGames([fillIn(), t]);
@@ -94,10 +94,15 @@ describe("adversarial: fill-in shapes", () => {
 });
 
 describe("adversarial: the starter comes back", () => {
-  test("starter plays week 4, then is out again from week 5: weeks 2-3 (pre-season rule) and 5-7 (usual rule) borrow, week 4 not", () => {
+  test("starter plays week 4, then is out again from week 5: listed hurt weeks 1-3 → weeks 2-3 and 5-7 borrow, week 4 not", () => {
     const fill = rb("rb2", [3, 20, 21, 7, 20, 22, 21], { prior: prior(6, "BBB") });
     const s = rb("rb1", [null, null, null, 16], { prior: prior(13, "AAA"), status: outAt(5) });
-    assert.deepEqual(weeksOf(vacatedGames([fill, s]), "rb2"), [2, 3, 5, 6, 7]);
+    // Fix round 1: nothing says he was hurt weeks 1-3 (the week-5 Out is after his week-4 game, another absence):
+    // unknown → weeks 2-3 are his own role, so they lift his baseline (≈ 12.8) and weeks 5-7 are no jump either.
+    assert.deepEqual(weeksOf(vacatedGames([fill, s]), "rb2"), []);
+    // Listed Out in weeks 1-3 → those weeks borrow too.
+    const s2 = { ...s, status: [...outAt(1), ...outAt(2), ...outAt(3), ...outAt(5)] };
+    assert.deepEqual(weeksOf(vacatedGames([fill, s2]), "rb2"), [2, 3, 5, 6, 7]);
   });
   test("starter back for good from week 5: nothing after his return is borrowed", () => {
     const fill = rb("rb2", [3, 20, 21, 22, 12, 11, 12], { prior: prior(6, "BBB") });
@@ -107,7 +112,7 @@ describe("adversarial: the starter comes back", () => {
 });
 
 describe("adversarial: odd inputs never throw and never flag", () => {
-  test("NaN / missing fields", { todo: "DEFECT (low): a NaN 2025 usage passes every < check and flags (CSV num() never yields NaN today)" }, () => {
+  test("NaN / missing fields", () => {
     const odd: VacPlayer[] = [
       fillIn(),
       starter({ prior: { games: Number.NaN, opps: { carries: 200, targets: 0 }, lastTeam: "AAA" } }),
@@ -204,7 +209,7 @@ describe("adversarial projection: the fill-in keeps the role unless the starter 
     const alone = value(null).get("rb2")!;
     assert.ok(Math.abs(pt.get("rb2")!.ppg - alone.ppg) < 0.3, `${pt.get("rb2")!.ppg} vs ${alone.ppg}`);
   });
-  test("healthy scratch (ACT, no injury, one Full-participation row): the fill-in's role is NOT discounted", { todo: "DEFECT: same evidence bug, downstream: a real starter counts 40%" }, () => {
+  test("healthy scratch (ACT, no injury, one Full-participation row): the fill-in's role is NOT discounted", () => {
     const hs = value({ roster: { status: "ACT" }, status: [{ week: 6, practice: "Full Participation in Practice" }] });
     const alone = value(null).get("rb2")!;
     const v = hs.get("rb2")!;
