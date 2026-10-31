@@ -1,5 +1,6 @@
 // Tiny JSON persistence under .data/ (git-ignored). Used for Yahoo OAuth tokens
 // and short-lived Yahoo league / free-agent caches.
+import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -24,13 +25,24 @@ export async function readJson<T>(name: string): Promise<T | null> {
   }
 }
 
-/** Atomic write (tmp file + rename). `secret` restricts the file to the current user; `compact` drops the indentation. */
+let tmpSeq = 0;
+
+/**
+ * Atomic write (tmp file + rename). `secret` restricts the file to the current user; `compact` drops the indentation.
+ * The tmp name is unique per call (pid + counter + random), so two writers of the same file never share a tmp file:
+ * the last rename wins and the file is always one complete version. A failed write removes its own tmp file.
+ */
 export async function writeJson(name: string, data: unknown, opts: { secret?: boolean; compact?: boolean } = {}): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true });
   const file = fileFor(name);
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tmp, opts.compact ? JSON.stringify(data) : JSON.stringify(data, null, 2), { mode: opts.secret ? 0o600 : 0o644 });
-  await fs.rename(tmp, file);
+  const tmp = `${file}.${process.pid}.${++tmpSeq}.${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    await fs.writeFile(tmp, opts.compact ? JSON.stringify(data) : JSON.stringify(data, null, 2), { mode: opts.secret ? 0o600 : 0o644 });
+    await fs.rename(tmp, file);
+  } catch (e) {
+    await fs.rm(tmp, { force: true }).catch(() => undefined);
+    throw e;
+  }
 }
 
 export async function removeJson(name: string): Promise<void> {

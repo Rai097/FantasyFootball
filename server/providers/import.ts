@@ -8,6 +8,7 @@ import { normPos, normTeam } from "../data/names.js";
 import { HALF_PPR } from "../model/scoring.js";
 import type { Availability, League, Player, Scoring, SlotKind, Team, TeamRecord } from "../model/types.js";
 import { draftBoard } from "./demo.js";
+import { withLock } from "./lock.js";
 import { DATA_DIR, readJson, removeJson, writeJson } from "./store.js";
 import { findPlayer, withYahooStatus, type YahooPlayerEntry } from "./yahoo-parse.js";
 import { mergeCapture, SKILL_POS, type Kickoffs, type MergeResult, type ProjEntry, type ProjLog } from "../model/projLog.js";
@@ -801,7 +802,26 @@ export function upsertImport(existing: StoredImport, incoming: StoredImport): { 
   if (incoming.diagnostics) next.diagnostics = incoming.diagnostics;
   // The rosters (and their projections) are the incoming ones: so is the capture week (never the old import's).
   if (incoming.projWeek !== undefined) next.projWeek = incoming.projWeek;
+  const stale = carryOverMissing(existing, next);
+  if (stale.length) next.diagnostics = [...(next.diagnostics ?? []), ...stale];
   return { stored: next, changes: diffSnapshots(snapshotOf(existing), snapshotOf(next)) };
+}
+
+/**
+ * Never replace good stored data with "missing" (auto-import fix round 1): a free-agent list the collector failed to read
+ * this time (absent, or empty while the stored one is not) is carried over from the stored import and marked stale by a
+ * "merge" warning in the diagnostics naming when it was read. Rostered players are filtered out of it on use, so a
+ * carried list never offers a player who has since been picked up. Its weekly projections are carried only within the
+ * same NFL week (else last week's number would show as this week's). Standings, waiver order and Yahoo projections are
+ * NOT carried (a stale record or waiver order must never look current): the auto-import refuses such a run as partial
+ * instead (server/autoimport/partial.ts). Mutates `next`; returns the warnings.
+ */
+function carryOverMissing(existing: StoredImport, next: StoredImport): Record<string, unknown>[] {
+  if ((next.freeAgents && next.freeAgents.length) || !existing.freeAgents?.length) return [];
+  const sameWeek = existing.projWeek !== undefined && existing.projWeek === next.projWeek;
+  next.freeAgents = existing.freeAgents.map(({ yahooProjWeekly, ...p }) => (sameWeek && yahooProjWeekly !== undefined ? { ...p, yahooProjWeekly } : p));
+  const since = existing.importedAt;
+  return [{ step: "merge", level: "warning", section: "freeAgents", stale: true, since, note: `free agents not read this run: kept the list from ${since}` }];
 }
 
 // ------------------------------------------------------------------ projection accuracy log (.data/projlog-<id>.json)
@@ -848,25 +868,16 @@ export function projCaptureEntries(
   return [...out.values()];
 }
 
-// One write at a time per league: two quick imports must not lose each other's read-merge-write.
-const projLogChains = new Map<string, Promise<unknown>>();
-
 /** Merge a capture into .data/projlog-<id>.json (serialized per league). */
 export function recordProjLog(
   id: string,
   cap: { season: number; week: number; capturedAt: string; entries: Omit<ProjEntry, "capturedAt">[]; kickoffs: Kickoffs; maxWeek?: number },
 ): Promise<MergeResult> {
   if (!isValidId(id)) return Promise.reject(new ImportError(`Bad import id "${id}"`));
-  const run = (projLogChains.get(id) ?? Promise.resolve())
-    .catch(() => undefined)
-    .then(async () => {
-      const r = mergeCapture(await readProjLog(id), cap);
-      if (r.kept) await writeJson(projLogFile(id), r.log, { compact: true });
-      return r;
-    });
-  projLogChains.set(id, run);
-  void run.finally(() => {
-    if (projLogChains.get(id) === run) projLogChains.delete(id);
-  }).catch(() => undefined);
-  return run;
+  // One write at a time per league: two quick imports must not lose each other's read-merge-write.
+  return withLock(`projlog:${id}`, async () => {
+    const r = mergeCapture(await readProjLog(id), cap);
+    if (r.kept) await writeJson(projLogFile(id), r.log, { compact: true });
+    return r;
+  });
 }

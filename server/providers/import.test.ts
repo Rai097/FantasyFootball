@@ -473,3 +473,38 @@ test("fix round 1: projections carry their capture week — a later week drops t
   assert.equal(upsertImport(prev, inc).stored.projWeek, 8);
   assert.equal(upsertImport(prev, validateImport(b)).stored.projWeek, undefined, "never the old import's week for new rosters");
 });
+
+// ------------------------------------------------------------------ fix round 1: never replace good data with "missing"
+test("upsertImport: free agents missing or empty this run are carried over and marked stale; a fresh list replaces them", () => {
+  const fa = [{ yahooId: "9001", name: "Free Agent", pos: "RB", team: "KC", yahooProj: 50, yahooProjWeekly: 9, onWaivers: true }];
+  const prev = { ...validateImport({ ...body(), freeAgents: fa }, new Date("2026-10-20T00:00:00Z")), projWeek: 7 };
+  for (const missing of [undefined, []]) {
+    const next = { ...validateImport({ ...body(), freeAgents: missing }, new Date("2026-10-28T00:00:00Z")), projWeek: 8 };
+    const { stored } = upsertImport(prev, next);
+    assert.equal(stored.freeAgents?.length, 1, `carried over (${JSON.stringify(missing)})`);
+    assert.equal(stored.freeAgents![0].yahooProj, 50, "rest-of-season projection kept");
+    assert.equal(stored.freeAgents![0].yahooProjWeekly, undefined, "last week's weekly number is not shown as this week's");
+    assert.equal(stored.freeAgents![0].onWaivers, true);
+    const warn = (stored.diagnostics as Record<string, unknown>[]).find((d) => d.section === "freeAgents");
+    assert.ok(warn && warn.stale === true && warn.since === prev.importedAt && warn.step === "merge", JSON.stringify(stored.diagnostics));
+  }
+  const sameWeek = upsertImport(prev, { ...validateImport(body()), projWeek: 7 }).stored;
+  assert.equal(sameWeek.freeAgents![0].yahooProjWeekly, 9, "same NFL week: the weekly number is still this week's");
+  const fresh = upsertImport(prev, { ...validateImport({ ...body(), freeAgents: [{ name: "New Guy", pos: "WR" }] }), projWeek: 8 }).stored;
+  assert.deepEqual(fresh.freeAgents?.map((p) => p.name), ["New Guy"]);
+  assert.equal((fresh.diagnostics ?? []).some((d) => (d as Record<string, unknown>).stale), false, "nothing stale on a full run");
+});
+
+test("upsertImport: standings, waiver order and Yahoo projections are never carried forward (the auto-import refuses such a run instead)", () => {
+  const b = body();
+  const withAll = {
+    ...b,
+    teams: b.teams.map((t, i) => ({ ...t, record: { wins: 5 + i, losses: 3, ties: 0 }, waiverRank: i + 1, players: t.players.map((p) => ({ ...p, yahooProj: 100 + i })) })),
+  };
+  const prev = validateImport(withAll);
+  const { stored } = upsertImport(prev, validateImport(body()));
+  assert.deepEqual(stored.teams.map((t) => t.record), [undefined, undefined]);
+  assert.deepEqual(stored.teams.map((t) => t.waiverRank), [undefined, undefined]);
+  assert.equal(stored.teams[0].players[0].yahooProj, undefined);
+  assert.deepEqual((stored.diagnostics ?? []).filter((d) => (d as Record<string, unknown>).stale), []);
+});
