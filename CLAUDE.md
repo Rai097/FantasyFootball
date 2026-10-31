@@ -22,6 +22,8 @@ Open work and "Resume here" live in TASKS.md.
 - `npm test` — node:test via tsx over `server/**/*.test.ts` (unit + integration on the demo league); the wall-clock timing test is skipped there (SKIP_TIMING=1) and run alone as a second step.
 - `npm run build && npm start` — production build served on :3000.
 - `npm run yahoo:probe` — probe the Yahoo API from another network.
+- `npm run yahoo:login` — headed system Chrome on the auto-import profile; the OWNER signs in to Yahoo (stopgap until the
+  Yahoo API; DESIGN "Auto-import"). Server auto-import runs only with AUTO_IMPORT=1 + AUTO_IMPORT_LEAGUE_ID.
 
 ## Layout
 - `server/data` public data loaders (nflverse, ffopportunity, DynastyProcess, FantasyCalc), cached in `.cache/`.
