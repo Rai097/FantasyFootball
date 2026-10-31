@@ -63,17 +63,25 @@ const walk = (e: FakeEl, out: FakeEl[] = []): FakeEl[] => (out.push(e), e.childr
 
 export type Route = (url: URL) => { status: number; html: string } | "throw";
 let runN = 0;
-/** One-click handoff (v7) under test: the injected app URL and how the opened Trade Desk window behaves. */
+/** One-click handoff (v7/v8) under test: the injected app URL and how the opened Trade Desk window behaves. */
 export interface HandoffOpts {
   appUrl: string;
   /** "ack" = the app answers on the first message; "silent" = never answers; "blocked" = window.open returns null. */
   popup: "ack" | "silent" | "blocked";
+  /**
+   * v8, after the ack: the messages the app tab posts back, in order (default: one valid success result for the
+   * imported team count), each with an optional `origin`/`fromOther` (sent by another window) override; or "close" =
+   * the tab closes without a result.
+   */
+  result?: { data: unknown; origin?: string; fromOther?: boolean }[] | "close";
 }
 export interface HandoffLog {
   opened: { url: string; name: string }[];
   sent: { data: any; target: string }[];
+  /** The bookmarklet called popup.close(). */
+  closedByBookmarklet: boolean;
 }
-const HANDOFF_DONE = /Sent to Trade Desk|Pop-up blocked|didn't answer|window was closed|Nothing sent/;
+const HANDOFF_DONE = /Import completed|Import failed|Trade Desk tab closed|didn't report back|Pop-up blocked|didn't answer|window was closed|Nothing sent/;
 
 /** Runs the real bookmarklet against `route`; returns the payload it would copy (and the handoff log when `handoff`). */
 export async function runBookmarklet(route: Route, handoff?: HandoffOpts): Promise<{ payload: any; diagnostics: any[]; overlay: string; handoff: HandoffLog }> {
@@ -81,16 +89,30 @@ export async function runBookmarklet(route: Route, handoff?: HandoffOpts): Promi
   const g = globalThis as any;
   const saved = { location: g.location, document: g.document, fetch: g.fetch, window: g.window, app: g.__FTD_APP_URL__ };
   let copied = "";
-  const log: HandoffLog = { opened: [], sent: [] };
+  const log: HandoffLog = { opened: [], sent: [], closedByBookmarklet: false };
   if (handoff) {
     const listeners = new Set<(e: unknown) => void>();
     const appOrigin = new URL(handoff.appUrl).origin;
+    const emit = (e: unknown) => listeners.forEach((l) => l(e));
+    let acked = false;
     const popup = {
       closed: false,
-      postMessage(data: unknown, target: string) {
+      close() {
+        log.closedByBookmarklet = true;
+        popup.closed = true;
+      },
+      postMessage(data: any, target: string) {
         log.sent.push({ data, target });
-        if (handoff.popup === "ack" && target === appOrigin)
-          setTimeout(() => listeners.forEach((l) => l({ source: popup, origin: appOrigin, data: { type: "ftd-import-ack" } })), 0);
+        if (handoff.popup !== "ack" || target !== appOrigin) return;
+        setTimeout(() => emit({ source: popup, origin: appOrigin, data: { type: "ftd-import-ack" } }), 0);
+        if (acked) return;
+        acked = true;
+        // v8: the app imports, then reports back (or its tab closes).
+        const result = handoff.result ?? [{ data: { type: "ftd-import-result", v: 1, ok: true, teams: data.payload.teams.length } }];
+        setTimeout(() => {
+          if (result === "close") popup.closed = true;
+          else for (const m of result) emit({ source: m.fromOther ? {} : popup, origin: m.origin ?? appOrigin, data: m.data });
+        }, 20);
       },
     };
     g.__FTD_APP_URL__ = handoff.appUrl;

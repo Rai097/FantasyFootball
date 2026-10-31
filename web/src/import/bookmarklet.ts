@@ -6,8 +6,10 @@
 // One-click (v7): it also opens Trade Desk (APP_URL, injected by the server's esbuild `define`) in a named window and
 // hands the result over with postMessage to exactly that origin (never "*"); the app then imports it through its own
 // signed-in POST /api/import. It never sends data anywhere else. See docs/DESIGN.md "One-click import (v7)".
+// v8: after the ack it waits for the app's result (from that window and origin only) and shows "Import completed";
+// the app tab closes itself on success. See docs/DESIGN.md "Trade Desk import v8".
 import { collect, leagueIdOf } from "./collect";
-import { HANDOFF_ACK, HANDOFF_HASH, HANDOFF_TYPE, HANDOFF_VERSION, HANDOFF_WINDOW } from "./handoff";
+import { createResultReceiver, HANDOFF_ACK, HANDOFF_HASH, HANDOFF_TYPE, HANDOFF_VERSION, HANDOFF_WINDOW, type ImportResultReport } from "./handoff";
 
 declare const __FTD_APP_URL__: string | undefined;
 /** Trade Desk's URL (origin + optional path), injected at bundle time; "" = no one-click handoff (unbundled runs). */
@@ -15,6 +17,9 @@ const APP_URL: string = typeof __FTD_APP_URL__ === "string" ? __FTD_APP_URL__ : 
 /** How long the result is re-sent while waiting for Trade Desk's ack. */
 const SEND_MS = 10_000;
 const SEND_EVERY_MS = 400;
+/** How long to wait for the app's import result after its ack, and how often to check that its tab is still open. */
+const RESULT_MS = 60_000;
+const RESULT_POLL_MS = 500;
 const OVERLAY_ID = "ftd-import-overlay";
 
 function overlay(): HTMLDivElement {
@@ -82,6 +87,36 @@ function sendToApp(popup: Window, payload: unknown): Promise<"acked" | "closed" 
   });
 }
 
+/** After the ack: the app's import result, or "closed" (its tab went away without one), or "timeout". */
+function waitForResult(popup: Window): Promise<ImportResultReport | "closed" | "timeout"> {
+  const receiver = createResultReceiver(new URL(APP_URL).origin, popup);
+  return new Promise((resolve) => {
+    const started = Date.now();
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const finish = (r: ImportResultReport | "closed" | "timeout") => {
+      clearInterval(timer);
+      window.removeEventListener("message", onMessage);
+      resolve(r);
+    };
+    function onMessage(e: MessageEvent) {
+      const r = receiver.accept(e.origin, e.source, e.data);
+      if (r) finish(r);
+    }
+    window.addEventListener("message", onMessage);
+    timer = setInterval(() => {
+      if (popup.closed) finish("closed");
+      else if (Date.now() - started > RESULT_MS) finish("timeout");
+    }, RESULT_POLL_MS);
+  });
+}
+
+function resultLine(r: ImportResultReport | "closed" | "timeout"): string {
+  if (r === "closed") return "Trade Desk tab closed — check Trade Desk.";
+  if (r === "timeout") return "Trade Desk didn't report back within 60 s — check the Trade Desk tab.";
+  if (r.ok) return `Import completed${r.teams !== undefined ? `: ${r.teams} team${r.teams === 1 ? "" : "s"}` : ""} ✓ — refresh your Trade Desk tab.`;
+  return `Import failed: ${r.error ?? "Trade Desk gave no reason"}. Copy the result and paste it in Trade Desk → Connect.`;
+}
+
 const BTN = "font:inherit;font-weight:600;margin:8px 8px 0 0;padding:6px 12px;border-radius:6px;border:1px solid #3b82f6;cursor:pointer;";
 
 async function run(): Promise<void> {
@@ -111,7 +146,7 @@ async function run(): Promise<void> {
 
   // ---- summary
   box.textContent = "";
-  box.appendChild(el("div", "Trade Desk import v7", "font-weight:700;font-size:15px;margin-bottom:6px"));
+  box.appendChild(el("div", "Trade Desk import v8", "font-weight:700;font-size:15px;margin-bottom:6px"));
   const summary = el("div");
   const noPos = diagnostics.reduce((a, d) => a + (Array.isArray(d.noPos) ? d.noPos.length : 0), 0);
   summary.textContent =
@@ -170,13 +205,23 @@ async function run(): Promise<void> {
   else if (popup && teams.length) {
     handoff.textContent = "Sending to Trade Desk…";
     const r = await sendToApp(popup, payload);
-    handoff.textContent =
-      r === "acked"
-        ? "Sent to Trade Desk ✓ It imports there; you can close this box."
-        : r === "closed"
+    if (r === "acked") {
+      handoff.textContent = "Trade Desk received it; importing…";
+      handoff.textContent = resultLine(await waitForResult(popup));
+    } else
+      handoff.textContent =
+        r === "closed"
           ? "The Trade Desk window was closed (or Yahoo cut it off). Copy the result and paste it in Trade Desk → Connect."
           : "Trade Desk didn't answer. Sign in there and click the bookmark again, or copy the result and paste it.";
-  } else if (popup) handoff.textContent = "Nothing sent to Trade Desk: no teams found.";
+  } else if (popup) {
+    // Nothing to import: close the tab we opened rather than leave it waiting.
+    try {
+      popup.close();
+    } catch {
+      /* already gone */
+    }
+    handoff.textContent = "Nothing sent to Trade Desk: no teams found.";
+  }
 }
 
 run().catch((e: Error) => {

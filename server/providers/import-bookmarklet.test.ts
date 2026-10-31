@@ -1,5 +1,6 @@
-// One-click import (v7): the bundled bookmarklet carries the injected Trade Desk URL and posts only to its origin;
-// under the fake browser it opens the app window, sends until the ack and keeps Copy as the fallback.
+// One-click import (v7/v8): the bundled bookmarklet carries the injected Trade Desk URL and posts only to its origin;
+// under the fake browser it opens the app window, sends until the ack, waits for the app's import result (v8) and
+// keeps Copy as the fallback.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { page, runBookmarklet, type Route } from "./bookmarkletHarness.js";
@@ -13,7 +14,7 @@ test("bundle: injected app URL present, postMessage never targets '*', self-cont
   assert.ok(!/__FTD_APP_URL__/.test(code), "define replaced the global");
   assert.ok(code.includes("postMessage"), "handoff code bundled");
   assert.ok(!/["'`]\*["'`]/.test(code), "no \"*\" string anywhere (so never a postMessage target)");
-  assert.ok(code.includes("Trade Desk import v7"));
+  assert.ok(code.includes("Trade Desk import v8"));
   assert.ok(!/\bimport\s*[{(*]|\brequire\(/.test(code), "must be self-contained");
   const other = await bookmarkletCode("http://localhost:5173");
   assert.ok(other.includes('"http://localhost:5173"') && !other.includes(APP), "cached per app URL");
@@ -45,8 +46,45 @@ test("handoff: opens Trade Desk, sends to its origin until the ack, then stops; 
   }
   assert.deepEqual(handoff.sent[0].data.payload, payload, "the handed-over payload equals the copied JSON");
   assert.equal(payload.teams.length, 1);
-  assert.match(overlay, /Sent to Trade Desk ✓/);
+  assert.match(overlay, /Import completed: 1 team ✓ — refresh your Trade Desk tab/);
   assert.match(overlay, /Copy to clipboard/);
+});
+
+const result = (x: Record<string, unknown>) => ({ data: { type: "ftd-import-result", v: 1, ...x } });
+
+test("v8 result: failure → the error text, nothing completed", async () => {
+  const { overlay } = await runBookmarklet(oneTeam, { appUrl: APP, popup: "ack", result: [result({ ok: false, error: "Session expired" })] });
+  assert.match(overlay, /Import failed: Session expired/);
+  assert.doesNotMatch(overlay, /Import completed/);
+});
+
+test("v8 result: the Trade Desk tab closed without a result → says so", async () => {
+  const { overlay } = await runBookmarklet(oneTeam, { appUrl: APP, popup: "ack", result: "close" });
+  assert.match(overlay, /Trade Desk tab closed — check Trade Desk/);
+});
+
+test("v8 result: messages from another origin, another window or with a wrong shape are ignored; only the first valid one counts", async () => {
+  const { overlay } = await runBookmarklet(oneTeam, {
+    appUrl: APP,
+    popup: "ack",
+    result: [
+      { ...result({ ok: true, teams: 99 }), origin: "https://evil.example" },
+      { ...result({ ok: true, teams: 98 }), fromOther: true },
+      result({ ok: true, teams: 97, v: 2 }),
+      { data: { type: "ftd-import-ack" } },
+      result({ ok: true, teams: 12 }),
+      result({ ok: false, error: "late second message" }),
+    ],
+  });
+  assert.match(overlay, /Import completed: 12 teams ✓/);
+  assert.doesNotMatch(overlay, /Import completed: 9[789]|late second/);
+});
+
+test("v8: no teams found → the opened Trade Desk tab is closed, nothing sent", async () => {
+  const { overlay, handoff } = await runBookmarklet(() => ({ status: 404, html: "" }), { appUrl: APP, popup: "ack" });
+  assert.equal(handoff.sent.length, 0);
+  assert.ok(handoff.closedByBookmarklet, "popup.close() called");
+  assert.match(overlay, /Nothing sent to Trade Desk: no teams found/);
 });
 
 test("handoff: pop-up blocked → one line says so, the copy flow still works", async () => {
@@ -67,7 +105,7 @@ test("no app URL injected (unbundled run) → no window opened, old flow unchang
   const { overlay, handoff } = await runBookmarklet(oneTeam);
   assert.equal(handoff.opened.length, 0);
   assert.doesNotMatch(overlay, /Trade Desk didn't answer|Sent to Trade Desk|Pop-up/);
-  assert.match(overlay, /Trade Desk import v7/);
+  assert.match(overlay, /Trade Desk import v8/);
 });
 
 test("collector bundle (auto-import): exposes __ftdCollect only — no overlay, no handoff, no auto-run, self-contained", async () => {

@@ -1686,6 +1686,26 @@ Display only (web/src); the one API change: `POST /trade/evaluate` now sends `mo
 - **Unverified:** a real Yahoo page (pop-up permission for a javascript: bookmark; a Cross-Origin-Opener-Policy on
   Yahoo would cut the opener link: the overlay then says the window was closed and Copy still works).
 
+## Trade Desk import v8 (2026-10-31) — extends "One-click import (v7)": the opened tab reports back and closes itself
+
+- **App → Yahoo tab.** After the import POST finishes, the opened tab posts `{ type: "ftd-import-result", v: 1, ok,
+  teams?, error? }` (error ≤ 300 chars) to the `event.source` that sent the payload, with that message's exact Yahoo
+  origin as target (never `"*"`), once per page load (`reportImportResult`, web/src/import/useImportHandoff.ts). On
+  success it calls `window.close()` after 800 ms (allowed: the bookmarklet opened the tab); when the post throws (Yahoo
+  tab gone) the tab stays open. On failure the tab stays with the normal error UI. The owner refreshes their own
+  Trade Desk tab.
+- **Signed out:** the tab keeps the v7 sign-in screen; the Yahoo tab additionally gets `ok:false` with "signed out:
+  sign in, then click the bookmark again".
+- **No payload within 60 s** of the page load: the "Waiting…" banner becomes one line, "Nothing received — click the
+  bookmark again or use Copy"; nothing is sent to the opener. A late payload still imports.
+- **Bookmarklet.** After the ack it waits up to 60 s for the result, accepted only from the opened window
+  (`source === popup`) on the app's exact origin with the right type/version/shape, first valid one only
+  (`parseImportResult` / `createResultReceiver`, web/src/import/handoff.ts, pure and tested). The box shows "Import
+  completed: N teams ✓ — refresh your Trade Desk tab", "Import failed: <error>", "Trade Desk tab closed — check Trade
+  Desk" (window closed without a result; checked every 500 ms) or "didn't report back within 60 s". With 0 teams found
+  it closes the tab it opened instead of leaving it waiting. Label "Trade Desk import v8".
+- **Unverified:** a real Yahoo page (window.close() acceptance in each browser, COOP as in v7).
+
 ## Auto-import (stopgap until Yahoo API) (2026-10-31) — extends "One-click import (v7)"
 
 STOPGAP: retire it when the Yahoo API app is approved. Read-only toward Yahoo (the collector only GETs league pages).

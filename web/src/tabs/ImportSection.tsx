@@ -78,7 +78,7 @@ function BookmarkletCard() {
       <div className="row gap wrap">
         {bm.data ? (
           <a ref={ref} draggable className="btn primary bookmarklet" onClick={(e) => (e.preventDefault(), alert("Drag this button to your bookmarks bar, then click it while on your Yahoo league page."))}>
-            Trade Desk import v7
+            Trade Desk import v8
           </a>
         ) : bm.loading ? (
           <span className="muted">loading…</span>
@@ -94,9 +94,9 @@ function BookmarkletCard() {
           <li>
             Open your league on <b>football.fantasysports.yahoo.com</b> (address contains <code>/f1/</code>).
           </li>
-          <li>Click the bookmark: Trade Desk opens and imports on its own in 10–30 s.</li>
+          <li>Click the bookmark: a Trade Desk tab opens, imports in 10–30 s and closes itself. Then refresh your Trade Desk tab.</li>
         </ol>
-        <div className="muted small">Pop-up blocked or no answer: click Copy to clipboard in the Yahoo box and paste in step 2.</div>
+        <div className="muted small">Pop-up blocked or import failed: click Copy to clipboard in the Yahoo box and paste in step 2.</div>
         <div className="muted small">On a phone: paste roster text instead.</div>
       </Disclosure>
     </div>

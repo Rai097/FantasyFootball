@@ -21,7 +21,7 @@ You do this once:
 2. Find **Import from Yahoo (browser)**. Make sure your browser's bookmarks
    bar is visible (Chrome/Edge: Ctrl+Shift+B, Mac: Cmd+Shift+B; Firefox: View
    → Toolbars → Bookmarks Toolbar; Safari: View → Show Favorites Bar).
-3. Drag the blue **Trade Desk import v7** button onto the bookmarks bar (delete any older "Trade Desk import" bookmark first: old bookmarks keep their old code; v6 and older need copy and paste, and v2 lacks Yahoo projections). (Clicking it
+3. Drag the blue **Trade Desk import v8** button onto the bookmarks bar (delete any older "Trade Desk import" bookmark first: old bookmarks keep their old code; v7 leaves its Trade Desk tab open, v6 and older need copy and paste, and v2 lacks Yahoo projections). (Clicking it
    on the Trade Desk page does nothing; it only works on Yahoo.)
 
 Each time you want fresh data:
@@ -30,18 +30,22 @@ Each time you want fresh data:
    **football.fantasysports.yahoo.com**. Any page of the league works: the
    address must contain `/f1/` followed by your league number, for example
    `https://football.fantasysports.yahoo.com/f1/1405188`.
-2. Click **Trade Desk import v7** on your bookmarks bar. Trade Desk opens in
+2. Click **Trade Desk import v8** on your bookmarks bar. Trade Desk opens in
    a new tab and says "Waiting for your Yahoo league…". Be signed in to
    Trade Desk in this browser.
 3. Wait 10–30 seconds. The bookmark sends the result to that tab, which
-   imports it on its own and lands on **My Team**. The dark box on the Yahoo
-   tab says **Sent to Trade Desk ✓**.
+   imports it on its own and then closes itself. The dark box on the Yahoo
+   tab says **Import completed: 12 teams ✓ — refresh your Trade Desk tab**.
+   Refresh the Trade Desk tab you already had open to see the new rosters.
 4. The first time: go to the Connect tab and check **League settings** under
    the import box: scoring, roster slots, your waiver priority and which team
    is yours. Click **Save settings** after any change.
 
-If the box on Yahoo says the pop-up was blocked or Trade Desk didn't answer
-(for example you were signed out), the old way still works: click **Copy to
+If the import fails, the opened tab stays open with the error and the Yahoo box
+says **Import failed: …**. If that tab shows "Nothing received — click the
+bookmark again or use Copy", nothing arrived from Yahoo within a minute. If
+the box on Yahoo says the pop-up was blocked, Trade Desk didn't answer, or the
+import failed (for example you were signed out), the old way still works: click **Copy to
 clipboard** (or **Download JSON** and copy the file's text), then in Trade
 Desk → Connect → **Paste import JSON or roster text**, paste and click
 **Import**. Allowing pop-ups from football.fantasysports.yahoo.com makes the

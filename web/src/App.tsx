@@ -10,7 +10,7 @@ import { ago, stamp } from "./lib/format";
 import { loadActive, loadImportBackup, saveActive } from "./lib/storage";
 import { toApiError, useAsync, type AsyncState } from "./lib/useAsync";
 import { activeAfterImport, postImport } from "./import/importFlow";
-import { useImportHandoff } from "./import/useImportHandoff";
+import { reportImportResult, useImportHandoff } from "./import/useImportHandoff";
 import { ConnectTab } from "./tabs/ConnectTab";
 import { LeagueTab } from "./tabs/LeagueTab";
 import { MyTeamTab } from "./tabs/MyTeamTab";
@@ -93,6 +93,11 @@ export function App() {
 
   // A one-click Yahoo import that arrives while signed out stays in memory only; signing in reloads the page.
   const handoff = useImportHandoff();
+  const signedOutWithImport = Boolean(problem && handoff.payload);
+  useEffect(() => {
+    // v8: the tab stays on the sign-in screen as before; the Yahoo box is told why nothing was imported.
+    if (signedOutWithImport) reportImportResult({ ok: false, error: "You are signed out of Trade Desk: sign in there, then click the bookmark again." });
+  }, [signedOutWithImport]);
   if (problem)
     return <SignIn problem={problem} note={handoff.payload ? "Your Yahoo import arrived but you are signed out: sign in, then click the bookmark on Yahoo again." : undefined} />;
   if (meErr)
@@ -216,6 +221,7 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
   );
 
   // One-click import (v7): the payload the Yahoo bookmarklet handed over goes through the same POST as a paste.
+  // v8: the result goes back to the Yahoo tab; on success this tab closes itself (reportImportResult).
   const [handoffStatus, setHandoffStatus] = useState<{ phase: "waiting" | "importing" } | { phase: "failed"; error: ApiError } | null>(() =>
     handoff.opened ? { phase: "waiting" } : null,
   );
@@ -230,8 +236,13 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
         setHandoffStatus(null);
         setActive(activeAfterImport(r, active));
         onImported(r);
+        reportImportResult({ ok: true, teams: r.teams.length });
       },
-      (e) => setHandoffStatus({ phase: "failed", error: toApiError(e) }),
+      (e) => {
+        const error = toApiError(e);
+        setHandoffStatus({ phase: "failed", error });
+        reportImportResult({ ok: false, error: error.message });
+      },
     );
   }, [handoffPayload, takeHandoff, active, setActive, onImported]);
 
@@ -304,10 +315,16 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
       </nav>
 
       <main className="main">
-        {tab === "connect" && handoffStatus?.phase === "waiting" && (
+        {tab === "connect" && handoffStatus?.phase === "waiting" && !handoff.expired && (
           <div className="notice banner" role="status">
             Waiting for your Yahoo league…{" "}
-            <HelpTip text="The Trade Desk bookmark on Yahoo is reading your league (10–30 s) and sends it here when done. Keep the Yahoo tab open. If its box says the send failed, click Copy to clipboard there and paste below." label="About the one-click import" />
+            <HelpTip text="The Trade Desk bookmark on Yahoo is reading your league (10–30 s) and sends it here. Keep the Yahoo tab open. When the import is done this tab closes itself and the Yahoo box says so: then refresh your usual Trade Desk tab." label="About the one-click import" />
+          </div>
+        )}
+        {tab === "connect" && handoffStatus?.phase === "waiting" && handoff.expired && (
+          <div className="notice warn banner" role="status">
+            Nothing received — click the bookmark again or use Copy{" "}
+            <HelpTip text="No league arrived from the Yahoo tab within 60 seconds. Click the Trade Desk bookmark on your Yahoo league page again, or click Copy to clipboard in its box and paste it below." label="Why nothing arrived" />
           </div>
         )}
         {handoffStatus?.phase === "importing" && (

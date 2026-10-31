@@ -170,7 +170,7 @@ test("bookmarklet v6: available K / DEF / offense get this week's and rest-of-se
   assert.equal(perPage.length, 3, "one projected page per list: no more pages than the list itself showed players on");
   assert.ok(perPage.every((d) => d.how === "form" && d.field === "stat1" && d.value === "S_PW_8" && d.viewIndicator === "Week 8 (proj)"));
   assert.match(overlay, /5 available players with this week's projection, 5 rest of season/);
-  assert.match(overlay, /Trade Desk import v7/);
+  assert.match(overlay, /Trade Desk import v8/);
   // My rostered DEF (no player id) gets this week's "Proj" via its team, like the kicker.
   const mine = payload.teams[0].players;
   assert.equal(mine.find((p: any) => p.pos === "DEF").yahooProjWeekly, 4);
