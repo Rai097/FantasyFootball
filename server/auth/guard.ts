@@ -151,6 +151,9 @@ export function classify(method: string, path: string, query: Record<string, unk
       const q = (k: string, d: string) => (typeof query[k] === "string" && query[k] ? String(query[k]) : query[k] === undefined || query[k] === "" ? d : "\u0000invalid");
       return { kind: "league", provider: q("provider", "demo"), id: q("id", "42") };
     }
+    case "autoimport":
+      // Status: any signed-in account. "Refresh from Yahoo now" (any write): the league owner only.
+      return method === "GET" || method === "HEAD" ? { kind: "signed" } : { kind: "admin" };
     case "import":
       if (segs.length <= 2) return { kind: "signed" }; // list (filtered) / POST (checked in the handler)
       if (method === "DELETE" && segs.length === 3) return { kind: "admin" };

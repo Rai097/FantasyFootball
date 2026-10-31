@@ -4,7 +4,9 @@ import path from "node:path";
 import { AUTH_VARS, config } from "./config.js";
 import { createAuth } from "./auth/routes.js";
 import { SessionStore } from "./auth/sessions.js";
-import { apiRouter, errorMiddleware } from "./api.js";
+import { apiRouter, errorMiddleware, importPayload, PartialImportError } from "./api.js";
+import { collectWithChrome } from "./autoimport/collector.js";
+import { AutoImportService, autoImportConfig, setAutoImport } from "./autoimport/service.js";
 import { getPlayerDb } from "./data/players.js";
 
 // Fail closed: production without the four Discord sign-in vars would publish every league to anyone.
@@ -58,6 +60,21 @@ async function start() {
   }
 
   app.use(errorMiddleware);
+
+  // Auto-import (stopgap until the Yahoo API is approved; off unless AUTO_IMPORT=1 and the Chrome profile exists).
+  // The scheduled run imports through the same server-side path as POST /api/import, as the admin.
+  const ai = autoImportConfig(process.env);
+  setAutoImport(
+    await AutoImportService.create(ai, {
+      collect: (signal) => collectWithChrome({ profileDir: ai.profileDir, leagueId: ai.leagueId!, signal }),
+      apply: async (payload) => {
+        if (String(payload.leagueId) !== ai.leagueId) throw new Error(`payload is league ${String(payload.leagueId)}, expected ${ai.leagueId}`);
+        const r = await importPayload(payload, { importedBy: "Auto-import", refusePartial: true });
+        return { teams: r.stored.teams.length };
+      },
+      isPartial: (e) => e instanceof PartialImportError,
+    }),
+  );
 
   // Warm the player database in the background so the first request is fast.
   getPlayerDb().catch((e: Error) => console.error(`[players] initial build failed: ${e.message}`));

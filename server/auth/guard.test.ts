@@ -28,6 +28,11 @@ describe("classify", () => {
     assert.equal(c("POST", "/api/docs/import").kind, "signed");
     assert.equal(c("GET", "/api/state").kind, "signed");
     assert.equal(c("GET", "/api/nope").kind, "signed");
+    // Auto-import: status for any signed-in account; refresh (and any other write, any case / trailing slash) admin.
+    assert.equal(c("GET", "/api/autoimport").kind, "signed");
+    assert.equal(c("POST", "/api/autoimport/refresh").kind, "admin");
+    assert.equal(c("POST", "/api/AutoImport/refresh/").kind, "admin");
+    assert.equal(c("DELETE", "/api/autoimport").kind, "admin");
     assert.equal(c("GET", "/api").kind, "signed");
   });
   test("case and trailing slashes cannot dodge a rule (Express routing is case-insensitive)", () => {
