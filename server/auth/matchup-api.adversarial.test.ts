@@ -201,24 +201,33 @@ describe("matchups adversarial (import v9)", { timeout: 300_000 }, () => {
     assert.ok(weeklyServed(an.json) > 0);
   });
 
-  test(
-    "rollover (Yahoo already on W+1, the NFL calendar still on W): Yahoo's weekly numbers v8 served are still served",
-    { todo: "DEFECT rollover data loss: projWeek = Yahoo's W+1 but buildImportLeague / importFreeAgents compare it with the NFL calendar's W (projectionsFor projWeek === currentWeek) → every yahooProjWeekly dropped from analysis, lineup and waivers (K/DEF streaming) until the calendar catches up; v8 served them. Real-data dry run: analysis yahooProjWeekly 489 → 0, waivers K/DEF 10 → 0" },
-    async () => {
-      if (W >= 18) return;
-      const v8 = await call(admin, "POST", "/api/import", mLeague());
-      assert.equal(v8.status, 200);
-      await projCaptureIdle();
-      const before = weeklyServed((await call(admin, "GET", "/api/league/import/yM/analysis?refresh=1")).json);
-      assert.ok(before > 0, "v8: served");
-      const r = await call(admin, "POST", "/api/import", { ...mLeague(), matchupWeek: W + 1, matchups: await fixtureMatchups(W + 1) });
-      assert.equal(r.status, 200);
-      await projCaptureIdle();
-      assert.equal(storedImport().projWeek, W + 1);
-      const after = weeklyServed((await call(admin, "GET", "/api/league/import/yM/analysis?refresh=1")).json);
-      assert.ok(after > 0, `v9 rollover: ${after} yahooProjWeekly served (v8: ${before})`);
-    },
-  );
+  // Fixed (fix round 1, decision 1): projWeek keeps its v8 meaning (the calendar's week); Yahoo's week is stored apart
+  // as matchupWeek for the matchups only. The test now expects projWeek W (was W+1) and EXACTLY v8's served numbers.
+  test("rollover (Yahoo already on W+1, the NFL calendar still on W): analysis and waivers serve exactly what v8 served", async () => {
+    if (W >= 18) return;
+    const rostered = new Set(demo.league.teams.flatMap((t: any) => t.playerIds));
+    const freeAgents = Object.values<any>(demo.players)
+      .filter((p) => (p.pos === "K" || p.pos === "DEF") && !rostered.has(p.id))
+      .slice(0, 8)
+      .map((p) => ({ ...(p.ids?.yahoo ? { yahooId: p.ids.yahoo } : {}), name: p.name, pos: p.pos, team: p.team, yahooProjWeekly: 12 }));
+    const served = async () => {
+      const an = (await call(admin, "GET", "/api/league/import/yM/analysis?refresh=1")).json;
+      const wv = (await call(admin, "GET", "/api/league/import/yM/waivers?refresh=1")).json;
+      return { analysis: weeklyServed(an), waivers: JSON.stringify(wv).match(/"weekStream":\{/g)?.length ?? 0, waiversWeekly: weeklyServed(wv) };
+    };
+    const v8 = await call(admin, "POST", "/api/import", mLeague({ freeAgents }));
+    assert.equal(v8.status, 200);
+    await projCaptureIdle();
+    const before = await served();
+    assert.ok(before.analysis > 0 && before.waiversWeekly > 0 && before.waivers > 0, `v8: served ${JSON.stringify(before)}`);
+    const r = await call(admin, "POST", "/api/import", { ...mLeague({ freeAgents }), matchupWeek: W + 1, matchups: await fixtureMatchups(W + 1) });
+    assert.equal(r.status, 200);
+    await projCaptureIdle();
+    assert.equal(storedImport().projWeek, W, "projWeek = the calendar's week (v8)");
+    assert.equal(storedImport().matchupWeek, W + 1, "Yahoo's week kept apart, for the matchups");
+    assert.deepEqual(await served(), before, "v9 rollover serves exactly v8's numbers");
+    assert.equal(readLog().currentWeek, W + 1, "the matchups follow Yahoo's week");
+  });
 
   test("rollover: the projlog still captures Yahoo's weekly numbers under Yahoo's week (held)", async () => {
     if (W >= 18) return;
@@ -230,17 +239,20 @@ describe("matchups adversarial (import v9)", { timeout: 300_000 }, () => {
     assert.ok(entries.length > 0 && entries.every((e) => e.yahoo === 10), `${entries.length} entries`);
   });
 
-  test(
-    "a matchupWeek far from the calendar (a misread picker) is not trusted to relabel the import's week",
-    { todo: "DEFECT no sanity bound: a misparsed #matchupweek (e.g. 4 while the calendar says 8) becomes projWeek → every yahooProjWeekly dropped and the projlog capture goes to a past week (nothing kept); only a diagnostics warning. Suggest: use Yahoo's week only when |Yahoo − calendar| ≤ 1" },
-    async () => {
-      const far = W > 4 ? W - 4 : W + 4;
-      const r = await call(admin, "POST", "/api/import", { ...mLeague(), matchupWeek: far });
-      assert.equal(r.status, 200);
-      await projCaptureIdle();
-      assert.equal(storedImport().projWeek, W, `matchupWeek ${far} vs calendar ${W}`);
-    },
-  );
+  test("a matchupWeek far from the calendar (a misread picker) is not trusted: projWeek, the projlog and the matchlog ignore it", async () => {
+    const far = W > 4 ? W - 4 : W + 4;
+    const before = readLog();
+    const n = logs.length;
+    const r = await call(admin, "POST", "/api/import", { ...mLeague(), matchupWeek: far, matchups: await fixtureMatchups(far) });
+    assert.equal(r.status, 200);
+    await projCaptureIdle();
+    const s = storedImport();
+    assert.equal(s.projWeek, W, `matchupWeek ${far} vs calendar ${W}`);
+    assert.equal(s.matchupWeek, undefined);
+    assert.ok(s.diagnostics.some((d: any) => d.step === "matchups" && /not trusted, matchups ignored/.test(d.note)), JSON.stringify(s.diagnostics));
+    assert.deepEqual(readLog(), before, "matchlog untouched (no week far / far−1, current week unchanged)");
+    assert.ok(logs.slice(n).some((l) => new RegExp(`\\[projlog\\] import=yM week=${W} `).test(l)), "projlog captures the calendar's week");
+  });
 
   test("concurrent v9 imports (W/W−1 and W+1/W) never lose a week: both captures land in the log", async () => {
     if (W >= 18) return;
@@ -258,21 +270,20 @@ describe("matchups adversarial (import v9)", { timeout: 300_000 }, () => {
     for (const w of [W - 1, W, W + 1]) assert.equal(log.weeks[String(w)].pairings.length, 6, `week ${w}`);
   });
 
-  test(
-    "a later capture with nothing usable for a FINAL week never demotes it (the record keeps it)",
-    { todo: "DEFECT mergeMatchCapture overwrites status/fetchedAt even when the capture has 0 pairings / 0 pages: a final week becomes 'unknown' and drops out of the track record (real-data dry run: week 8 final → unknown, record 6 games → 0)" },
-    async () => {
-      const id = "yF";
-      const r = await call(admin, "POST", "/api/import", { ...mLeague(), id, leagueId: "996", matchupWeek: W, matchups: await fixtureMatchups(W) });
-      assert.equal(r.status, 200);
-      await projCaptureIdle();
-      assert.equal(readLog(id).weeks[String(W - 1)].status, "final");
-      const junk = await call(admin, "POST", "/api/import", { ...mLeague(), id, leagueId: "996", matchupWeek: W, matchups: { weeks: [{ week: W - 1, status: "unknown", pairings: [], pages: [] }] } });
-      assert.equal(junk.status, 200);
-      await projCaptureIdle();
-      assert.equal(readLog(id).weeks[String(W - 1)].status, "final");
-    },
-  );
+  test("a later capture with nothing usable for a FINAL week never demotes it (the record keeps it)", async () => {
+    const id = "yF";
+    const r = await call(admin, "POST", "/api/import", { ...mLeague(), id, leagueId: "996", matchupWeek: W, matchups: await fixtureMatchups(W) });
+    assert.equal(r.status, 200);
+    await projCaptureIdle();
+    const stored = readLog(id).weeks[String(W - 1)];
+    assert.equal(stored.status, "final");
+    const junk = await call(admin, "POST", "/api/import", { ...mLeague(), id, leagueId: "996", matchupWeek: W, matchups: { weeks: [{ week: W - 1, status: "unknown", pairings: [], pages: [] }] } });
+    assert.equal(junk.status, 200);
+    await projCaptureIdle();
+    assert.deepEqual(readLog(id).weeks[String(W - 1)], stored, "the final week is kept as it was (status, points, fetchedAt)");
+    const g = await call(admin, "GET", `/api/league/import/${id}/matchup?week=${W - 1}`);
+    assert.equal(g.json.record.weeks.find((x: any) => x.week === W - 1)?.games.length, 6, "still in the track record");
+  });
 
   test("GET matchup: no manager-identifying data (owner names never sent); payload ≤ 30 KB; week / team fuzz", async () => {
     const lg = mLeague();

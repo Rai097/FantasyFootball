@@ -75,6 +75,10 @@ export interface StoredImport {
   /** NFL week the players' Yahoo projections were captured in (the calendar's current week at POST /api/import). Set
    *  by the server, never taken from the payload. Absent = unknown age: the weekly number is dropped as stale. */
   projWeek?: number;
+  /** Yahoo's matchup week at this import (import v9), only when within one week of the calendar's: the week the
+   *  rosters' lineups and Yahoo weekly numbers are for, used ONLY by the matchups (never by projWeek's rules). Set by
+   *  the server, never taken from the payload. Absent = not read (older bookmark) or distrusted. */
+  matchupWeek?: number;
 }
 
 export interface ImportSummary {
@@ -803,6 +807,8 @@ export function upsertImport(existing: StoredImport, incoming: StoredImport): { 
   if (incoming.diagnostics) next.diagnostics = incoming.diagnostics;
   // The rosters (and their projections) are the incoming ones: so is the capture week (never the old import's).
   if (incoming.projWeek !== undefined) next.projWeek = incoming.projWeek;
+  if (incoming.matchupWeek !== undefined) next.matchupWeek = incoming.matchupWeek;
+  else delete next.matchupWeek;
   const stale = carryOverMissing(existing, next);
   if (stale.length) next.diagnostics = [...(next.diagnostics ?? []), ...stale];
   return { stored: next, changes: diffSnapshots(snapshotOf(existing), snapshotOf(next)) };
@@ -850,6 +856,8 @@ export function projCaptureEntries(
   week: number,
   appWeek: (p: Player) => number | undefined,
   hasGame: (team: string) => boolean,
+  /** The week the roster's Yahoo weekly numbers belong to (Yahoo's trusted matchup week, else the import's projWeek). */
+  yahooWeek: number | undefined = s.projWeek,
 ): Omit<ProjEntry, "capturedAt">[] {
   const out = new Map<string, Omit<ProjEntry, "capturedAt">>();
   const add = (raw: ImportPlayerRaw, teamId: string | null, starter: boolean) => {
@@ -858,7 +866,7 @@ export function projCaptureEntries(
     const app = appWeek(p);
     if (app === undefined || !Number.isFinite(app)) return;
     const e: Omit<ProjEntry, "capturedAt"> = { id: p.id, name: p.name, pos: p.pos, team: p.team, teamId, starter, app };
-    if (s.projWeek === week && typeof raw.yahooProjWeekly === "number" && Number.isFinite(raw.yahooProjWeekly)) e.yahoo = raw.yahooProjWeekly;
+    if (yahooWeek === week && typeof raw.yahooProjWeekly === "number" && Number.isFinite(raw.yahooProjWeekly)) e.yahoo = raw.yahooProjWeekly;
     out.set(p.id, e);
   };
   for (const t of s.teams)

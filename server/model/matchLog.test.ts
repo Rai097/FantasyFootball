@@ -1,6 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanMatchups, mergeMatchCapture, type MatchLog, type MatchWeekCapture } from "./matchLog.js";
+import { cleanMatchups, MATCHUP_WEEK_SKEW, mergeMatchCapture, trustedMatchupWeek, type MatchLog, type MatchPage, type MatchPairing, type MatchWeekCapture } from "./matchLog.js";
+
+test("trustedMatchupWeek: Yahoo's week only within one week of the calendar's", () => {
+  assert.deepEqual([7, 8, 9, 6, 10, 4, undefined].map((w) => trustedMatchupWeek(w, 8)), [7, 8, 9, undefined, undefined, undefined, undefined]);
+  assert.equal(MATCHUP_WEEK_SKEW, 1);
+});
+
+test("merge (fix round 1): status only moves forward; null points and point-less pages never erase stored numbers; nothing usable = untouched", () => {
+  const ko = () => "2026-10-30T00:15:00.000Z";
+  const pr = (a: number | null, b: number | null): MatchPairing => ({ mid1: "4", mid2: "3", sides: [{ teamId: "4", points: a, yahooProj: null }, { teamId: "3", points: b, yahooProj: null }] });
+  const pg = (pa: number | null, pb: number | null): MatchPage => ({ mid1: "4", mid2: "3", sides: [{ teamId: "4", totalProj: 123.86, totalPts: pa, rows: [] }, { teamId: "3", totalProj: 134.97, totalPts: pb, rows: [] }] });
+  let log = mergeMatchCapture(null, { season: 2026, capturedAt: "2026-11-03T14:00:00.000Z", matchupWeek: 9, weeks: [{ week: 8, status: "final", pairings: [pr(165.78, 129.62)], pages: [pg(165.78, 129.62)] }], firstKickoff: ko }).log;
+  // A later "live" reading with one score missing and a page without points.
+  const r = mergeMatchCapture(log, { season: 2026, capturedAt: "2026-11-03T20:00:00.000Z", matchupWeek: 9, weeks: [{ week: 8, status: "live", pairings: [pr(null, 130.1)], pages: [pg(null, null)] }], firstKickoff: ko });
+  assert.equal(r.written, 1);
+  log = r.log;
+  const w = log.weeks["8"];
+  assert.equal(w.status, "final", "never back from final");
+  assert.deepEqual(w.pairings[0].sides.map((sd) => sd.points), [165.78, 130.1], "null keeps 165.78; a real reading corrects 129.62 → 130.1");
+  assert.deepEqual(w.pages["4-3"].sides.map((sd) => sd.totalPts), [165.78, 129.62], "the point-less page is not stored over the final one");
+  const none = mergeMatchCapture(log, { season: 2026, capturedAt: "2026-11-04T20:00:00.000Z", matchupWeek: 9, weeks: [{ week: 8, status: "unknown", pairings: [], pages: [] }], firstKickoff: ko });
+  assert.equal(none.written, 0, "same current week, nothing usable: nothing to write");
+  assert.deepEqual(none.log.weeks["8"], w);
+});
 
 const side = (teamId: string, points: number | null, yahooProj: number | null) => ({ teamId, points, yahooProj });
 const row = (over: Record<string, unknown> = {}) => ({ slot: "QB", yahooId: "32671", name: "Joe Burrow", pos: "QB", team: "CIN", yahooProj: 18.86, points: 28.88, ...over });

@@ -91,6 +91,15 @@ export interface MatchLog {
 }
 
 export const MATCHLOG_MAX_WEEK = 18;
+/** How far Yahoo's matchup week may sit from the NFL calendar's week and still be trusted (rollover: Yahoo moves to
+ *  W+1 on Tuesday / Wednesday while the calendar is still on W). Farther = a misread picker: the capture's matchups are
+ *  ignored. */
+export const MATCHUP_WEEK_SKEW = 1;
+
+/** Yahoo's matchup week when it can be trusted against the calendar's week (|Yahoo − calendar| ≤ MATCHUP_WEEK_SKEW). */
+export function trustedMatchupWeek(matchupWeek: number | undefined, calendarWeek: number): number | undefined {
+  return matchupWeek !== undefined && Math.abs(matchupWeek - calendarWeek) <= MATCHUP_WEEK_SKEW ? matchupWeek : undefined;
+}
 const MAX_WEEKS_PER_CAPTURE = 3;
 const MAX_PAIRINGS = 10;
 const MAX_PAGES = 4;
@@ -238,11 +247,18 @@ export function cleanMatchups(body: unknown): CleanMatchups {
 }
 
 const ms = (iso: string | undefined) => (iso ? Date.parse(iso) : NaN);
+const STATUS_RANK: Record<MatchStatus, number> = { unknown: 0, pre: 1, live: 2, final: 3 };
+/** New pairings, except that a side's missing points (null) never erase the stored number for that team. */
+function keepPoints(pairings: MatchPairing[], prev: MatchPairing[]): MatchPairing[] {
+  const old = new Map(prev.flatMap((p) => p.sides).map((sd) => [sd.teamId, sd.points] as const));
+  const side = (sd: MatchSide): MatchSide => (sd.points === null && old.get(sd.teamId) != null ? { ...sd, points: old.get(sd.teamId)! } : sd);
+  return pairings.map((p) => ({ ...p, sides: [side(p.sides[0]), side(p.sides[1])] }));
+}
 export const pageKey = (p: { mid1: string; mid2: string }) => `${p.mid1}-${p.mid2}`;
 
 /**
  * Merge one capture. `firstKickoff(week)` = the week's first NFL kickoff (ISO), undefined when unknown: then no value
- * counts as pre-game (fail safe). Returns the new log and how many weeks were written.
+ * counts as pre-game (fail safe). Returns the new log and how many changes it holds (weeks written + a new current week).
  */
 export function mergeMatchCapture(
   log: MatchLog | null,
@@ -252,20 +268,29 @@ export function mergeMatchCapture(
   const at = ms(cap.capturedAt);
   const next: MatchLog = { ...base, weeks: { ...base.weeks } };
   if (!Number.isFinite(at)) return { log: base, written: 0 };
+  let written = 0;
   if (cap.matchupWeek !== undefined && !(ms(base.currentAt) > at)) {
+    // Yahoo's current week is stored even when no week was readable (fix round 1): the tab opens on the right week.
+    if (base.currentWeek !== cap.matchupWeek) written++;
     next.currentWeek = cap.matchupWeek;
     next.currentAt = cap.capturedAt;
   }
-  let written = 0;
   for (const c of cap.weeks) {
     const key = String(c.week);
     const prev = base.weeks[key];
     if (prev && ms(prev.fetchedAt) > at) continue; // an older capture never replaces a newer one
+    // Nothing usable (no pairings, no pages): never touches a stored week (a final week is never demoted).
+    if (!c.pairings.length && !c.pages.length) continue;
     const first = ms(cap.firstKickoff(c.week));
     const pregame = Number.isFinite(first) && at < first;
     const yahooLock: Record<string, YahooLock> = { ...(prev?.yahooLock ?? {}) };
     const pages: Record<string, StoredPage> = { ...(prev?.pages ?? {}) };
-    for (const p of c.pages) pages[pageKey(p)] = { ...p, fetchedAt: cap.capturedAt };
+    for (const p of c.pages) {
+      const old = pages[pageKey(p)];
+      // A page without points never replaces a stored page that has them.
+      if (old && p.sides.every((sd) => sd.totalPts === null) && old.sides.some((sd) => sd.totalPts !== null)) continue;
+      pages[pageKey(p)] = { ...p, fetchedAt: cap.capturedAt };
+    }
     // Yahoo's total per team in this capture: the matchup page's Total "Proj" when read, else the module's.
     const proj = new Map<string, number>();
     for (const p of c.pairings) for (const sd of p.sides) if (sd.yahooProj !== null) proj.set(sd.teamId, sd.yahooProj);
@@ -276,12 +301,15 @@ export function mergeMatchCapture(
         if (!old || !old.pregame || ms(old.at) <= at) yahooLock[team] = { proj: v, at: cap.capturedAt, pregame: true };
       } else if (c.status === "final" && (!old || !old.pregame)) yahooLock[team] = { proj: v, at: cap.capturedAt, pregame: false };
     }
+    // Status only moves forward (unknown < pre < live < final); a newer real reading corrects points.
+    const keepStatus = prev !== undefined && STATUS_RANK[c.status] < STATUS_RANK[prev.status];
+    const statusText = keepStatus ? prev.statusText : c.statusText;
     next.weeks[key] = {
-      status: c.status,
-      ...(c.statusText ? { statusText: c.statusText } : {}),
+      status: keepStatus ? prev.status : c.status,
+      ...(statusText ? { statusText } : {}),
       fetchedAt: cap.capturedAt,
       // A capture without pairings (module unread) keeps the stored ones: a fetch never removes what it did not re-read.
-      pairings: c.pairings.length ? c.pairings : prev?.pairings ?? [],
+      pairings: c.pairings.length ? keepPoints(c.pairings, prev?.pairings ?? []) : prev?.pairings ?? [],
       yahooLock,
       pages,
     };

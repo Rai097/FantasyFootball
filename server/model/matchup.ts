@@ -272,9 +272,10 @@ function withWin(a: MatchupSideView, b: MatchupSideView): [MatchupSideView, Matc
 }
 
 // ------------------------------------------------------------------ record
-const call = (proj: [number | null, number | null], pts: [number | null, number | null]): boolean | null => {
-  if (proj[0] === null || proj[1] === null || pts[0] === null || pts[1] === null || proj[0] === proj[1]) return null;
-  return proj[0] > proj[1] === pts[0] > pts[1] && pts[0] !== pts[1];
+/** The projected winner won; null = no call (a total missing, a tie projection, or a tied final). */
+export const call = (proj: [number | null, number | null], pts: [number | null, number | null]): boolean | null => {
+  if (proj[0] === null || proj[1] === null || pts[0] === null || pts[1] === null || proj[0] === proj[1] || pts[0] === pts[1]) return null;
+  return proj[0] > proj[1] === pts[0] > pts[1];
 };
 
 /** Track record over the final weeks of the log. */

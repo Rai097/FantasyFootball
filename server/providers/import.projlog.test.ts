@@ -58,6 +58,12 @@ test("capture entries: Yahoo weekly kept only when it was captured in the same w
   for (const pw of [7, undefined]) assert.ok(projCaptureEntries(db, s(pw), 8, app, all).every((x) => x.yahoo === undefined), `projWeek ${pw}`);
 });
 
+test("capture entries: on a rollover the Yahoo weekly numbers belong to Yahoo's matchup week (projWeek stays the calendar's)", () => {
+  // Calendar week 8 (projWeek 8), Yahoo already on 9: the capture for week 9 keeps the roster's Yahoo numbers.
+  assert.equal(projCaptureEntries(db, s(8), 9, app, all, 9).find((x) => x.id === "qb1")?.yahoo, 20);
+  assert.equal(projCaptureEntries(db, s(8), 9, app, all).find((x) => x.id === "qb1")?.yahoo, undefined, "default = projWeek: week 9 ≠ 8");
+});
+
 test("weekKickoffs: per-team kickoff, the week's earliest, and teams with a game even without a time", () => {
   const { kickoffs, teams } = weekKickoffs(
     [

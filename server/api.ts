@@ -46,7 +46,7 @@ import { buildLeagueView } from "./model/league.js";
 import { attachFloor } from "./model/signals.js";
 import { defaultMode, type ValueMode } from "./model/projectionV4.js";
 import { getProjectionTables, getSeasonTables } from "./data/signalTables.js";
-import { cleanMatchups, type MatchRow, type MatchWeekCapture } from "./model/matchLog.js";
+import { cleanMatchups, MATCHUP_WEEK_SKEW, trustedMatchupWeek, type MatchRow, type MatchWeekCapture } from "./model/matchLog.js";
 import { buildMatchup, type LineupSlot, type MatchupContext, type MatchupResponse, type PlayerRef } from "./model/matchup.js";
 import { accuracyReport, outcomeOf, playerAccuracy, resolveLog, teamWeeksWithRows, toAccuracyResponse, vsYahooItem, weekKickoffs, type AccuracyResponse, type ResolvedRow } from "./model/projLog.js";
 import type { ProjectionTables } from "./model/projectionV4.js";
@@ -415,7 +415,8 @@ async function resolvedRows(db: PlayerDb, league: League, id: string): Promise<R
 let projCaptures: Promise<unknown> = Promise.resolve();
 /** Settles when every queued after-import capture (projection log, then matchups log) has finished. */
 export const projCaptureIdle = (): Promise<unknown> => projCaptures;
-/** `yahooWeek` = Yahoo's matchup week from the payload (one week source); absent → the NFL calendar's current week. */
+/** `yahooWeek` = Yahoo's (trusted) matchup week from the payload: the capture week, and the week the roster's Yahoo
+ *  weekly numbers belong to; absent → the NFL calendar's current week and the import's projWeek (v8). */
 function captureProjections(stored: StoredImport, capturedAt: string, yahooWeek?: number): void {
   const run = (async () => {
     const l = await loadContext("import", stored.id, false);
@@ -428,7 +429,7 @@ function captureProjections(stored: StoredImport, capturedAt: string, yahooWeek?
       const x = v.weekly[week - v.weeklyFrom];
       return typeof x === "number" && Number.isFinite(x) ? x : undefined;
     };
-    const entries = projCaptureEntries(l.db, stored, week, appWeek, (t) => teams.has(t));
+    const entries = projCaptureEntries(l.db, stored, week, appWeek, (t) => teams.has(t), yahooWeek ?? stored.projWeek);
     const r = await recordProjLog(stored.id, { season: l.db.season, week, capturedAt, entries, kickoffs, maxWeek: l.league.settings.finalWeek });
     if (r.kept) (invalidate(`import:${stored.id}:accuracy`), invalidate(`import:${stored.id}:matchup:`));
     console.log(`[projlog] import=${stored.id} week=${week} kept=${r.kept} ignored=${r.ignored}`);
@@ -463,6 +464,8 @@ function matchupContext(
   const ref = (p: Player, status?: string): PlayerRef => ({ id: p.id, name: p.name, pos: p.pos, nflTeam: p.team, ...(status ? { status } : {}) });
   // Latest import's lineups in league slot order (starting slots filled in order, the rest bench / IR).
   const starting = l.league.settings.slots.filter((k) => k !== "BN" && k !== "IR");
+  // The week the latest import's lineups (and Yahoo's weekly numbers) are for: Yahoo's matchup week when it was read.
+  const lineupWeek = stored.matchupWeek ?? stored.projWeek;
   const lineups = new Map<string, LineupSlot[]>();
   for (const t of stored.teams) {
     const slots: LineupSlot[] = starting.map((kind) => ({ kind, player: null }));
@@ -471,7 +474,7 @@ function matchupContext(
       const p = resolvePlayer(l.db, rp);
       const kind = rp.slot ? toSlotKind(rp.slot) : undefined;
       const slot: LineupSlot = { kind: kind === "IR" ? "IR" : "BN", player: p ? ref(p, rp.status) : null, ...(p ? {} : { rawName: rp.name }) };
-      if (stored.projWeek === o.week && typeof rp.yahooProjWeekly === "number") slot.yahoo = rp.yahooProjWeekly;
+      if (lineupWeek === o.week && typeof rp.yahooProjWeekly === "number") slot.yahoo = rp.yahooProjWeekly;
       const open = kind && kind !== "BN" && kind !== "IR" ? slots.find((s) => s.kind === kind && !s.player && !s.rawName) : undefined;
       if (open) Object.assign(open, { ...slot, kind });
       else rest.push(slot);
@@ -487,7 +490,7 @@ function matchupContext(
     teams: l.league.teams.map((t) => ({ id: t.id, name: t.name, ...(t.record ? { record: `${t.record.wins}-${t.record.losses}-${t.record.ties}` } : {}) })),
     myTeamId: o.team,
     lineups,
-    lineupWeek: stored.projWeek,
+    lineupWeek,
     resolveRow: (r: MatchRow) => {
       const p = resolvePlayer(l.db, { name: r.name ?? "", pos: r.pos ?? "", ...(r.pos === "DEF" ? {} : r.yahooId ? { yahooId: r.yahooId } : {}), ...(r.team ? { team: r.team } : {}) });
       return p ? ref(p, r.status) : undefined;
@@ -738,6 +741,8 @@ apiRouter.get(
     const log = mlog && mlog.season === season ? mlog : null;
     const currentWeek = log?.currentWeek ?? l.league.settings.currentWeek;
     const raw = req.query.week;
+    // Strict: one or two digits only (a repeated param arrives as an array and fails too).
+    if (raw !== undefined && raw !== "" && !(typeof raw === "string" && /^\d{1,2}$/.test(raw))) throw new HttpError(400, `Bad week "${String(raw)}"`, "A week number from 1 to 18.");
     const week = raw === undefined || raw === "" ? currentWeek : Number(raw);
     if (!Number.isInteger(week) || week < 1 || week > 18) throw new HttpError(400, `Bad week "${String(raw)}"`, "A week number from 1 to 18.");
     const body = await cached<MatchupResponse>(`import:${id}:matchup:${week}:${team}`, isRefresh(req), async () => {
@@ -848,16 +853,22 @@ async function bookmarkletImport(body: Record<string, unknown>, opts: { imported
   // Matchups (import v9): validated apart from the import; a bad shape is dropped with a note, never refused.
   const mx = cleanMatchups(body);
   const nflWeek = (await getNflState()).currentWeek;
-  // Release (d) fix: the week the Yahoo projections belong to (a later week drops the stale weekly number). One week
-  // source: Yahoo's own matchup week when the payload carries it (the roster "Proj" is for that week), else the NFL
-  // calendar's.
-  incoming.projWeek = mx.matchupWeek ?? nflWeek;
+  // Release (d) fix: the NFL week the Yahoo projections belong to (a later week drops the stale weekly number). Always
+  // the calendar's (v8 meaning, matchups fix round 1): Yahoo's matchup week never relabels the import.
+  incoming.projWeek = nflWeek;
+  // Yahoo's matchup week is used ONLY for the matchups (matchlog, the projlog capture week, the matchup view's lineups),
+  // and only when it is within one week of the calendar (a misread picker is distrusted: matchups ignored).
+  const trusted = trustedMatchupWeek(mx.matchupWeek, nflWeek);
+  if (trusted !== undefined) incoming.matchupWeek = trusted;
+  else delete incoming.matchupWeek;
   const notes: Record<string, unknown>[] = [];
   if (mx.dropped.length) notes.push({ step: "matchups", level: "warning", note: `${mx.dropped.length} matchups item(s) dropped: bad shape`, dropped: mx.dropped.slice(0, 10) });
-  if (mx.matchupWeek !== undefined && mx.matchupWeek !== nflWeek)
-    notes.push({ step: "matchups", level: "warning", note: `Yahoo's matchup week ${mx.matchupWeek} differs from the NFL calendar's week ${nflWeek}: Yahoo's week used` });
+  if (mx.matchupWeek !== undefined && trusted === undefined)
+    notes.push({ step: "matchups", level: "warning", note: `Yahoo's matchup week ${mx.matchupWeek} is more than ${MATCHUP_WEEK_SKEW} week from the NFL calendar's week ${nflWeek}: not trusted, matchups ignored` });
+  else if (trusted !== undefined && trusted !== nflWeek)
+    notes.push({ step: "matchups", level: "warning", note: `Yahoo's matchup week ${trusted} differs from the NFL calendar's week ${nflWeek}: Yahoo's week used for the matchups only` });
   if (notes.length) incoming.diagnostics = [...(incoming.diagnostics ?? []), ...notes];
-  const capture = { yahooWeek: mx.matchupWeek, matchups: mx.weeks };
+  const capture = trusted === undefined ? {} : { yahooWeek: trusted, matchups: mx.weeks };
   return importLock(async () => {
     // Same Yahoo league again: update rosters in place, keep the user's settings.
     const previous = await findExistingImport(incoming);

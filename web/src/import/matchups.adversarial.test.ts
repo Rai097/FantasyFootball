@@ -7,7 +7,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { Payload } from "./collect";
-import { withMatchups, type GetPage } from "./matchups";
+import { MATCHUP_TIMEOUTS, withMatchups, type GetPage } from "./matchups";
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../server/providers/fixtures/matchups");
 const fx = (n: string) => readFileSync(path.join(dir, n), "utf8");
@@ -74,13 +74,28 @@ test("a fetch rejecting with a non-Error (null) never throws out of withMatchups
   assertCollectPartIntact(out);
 });
 
-test(
-  "a Yahoo page that never answers cannot hold the finished roster read: withMatchups returns within a bounded time",
-  { todo: "DEFECT no timeout: defaultGetPage is a bare fetch() with no AbortSignal and withMatchups has no overall budget; one hung Yahoo response (4 extra page reads after collect() finished) holds the whole payload until the auto-import's 3-min attempt timeout / 4-min run deadline discards the roster read too. Suggest a per-fetch AbortSignal.timeout(~15 s) and an overall matchups budget (~30 s)" },
-  async () => {
-    const hang: GetPage = () => new Promise(() => undefined);
-    const t = Symbol("timeout");
-    const r = await Promise.race([withMatchups(basePayload(), undefined, { origin: ORIGIN, getPage: hang }), new Promise((res) => setTimeout(() => res(t), 300))]);
-    assert.notEqual(r, t, "withMatchups still pending after 300 ms with a hung page");
-  },
-);
+// Fixed (fix round 1): per-page abort after MATCHUP_TIMEOUTS.fetchMs (20 s) and a 60 s budget for the whole step. The
+// test passes short limits through `deps` (the decision's 20 s / 60 s cannot fit a 300 ms test) and checks the defaults.
+test("a Yahoo page that never answers cannot hold the finished roster read: withMatchups returns within a bounded time", async () => {
+  assert.deepEqual(MATCHUP_TIMEOUTS, { fetchMs: 20_000, budgetMs: 60_000 });
+  let aborted = false;
+  const hang: GetPage = (_u, signal) => new Promise(() => signal?.addEventListener("abort", () => (aborted = true)));
+  const t = Symbol("timeout");
+  const r = await Promise.race([withMatchups(basePayload(), undefined, { origin: ORIGIN, getPage: hang, fetchTimeoutMs: 50, budgetMs: 150 }), new Promise((res) => setTimeout(() => res(t), 300))]);
+  assert.notEqual(r, t, "withMatchups still pending after 300 ms with a hung page");
+  const out = r as Awaited<ReturnType<typeof withMatchups>>;
+  assertCollectPartIntact(out);
+  assert.equal(out.matchupWeek, undefined);
+  assert.ok(aborted, "the hung read was aborted");
+  assert.ok(out.diagnostics.some((d) => /home page fetch failed: timed out after 0\.1 s/.test(String(d.note))), JSON.stringify(out.diagnostics));
+});
+
+test("the overall budget stops further page reads: slow (but answering) pages never run past it", async () => {
+  const slow: GetPage = (url) =>
+    new Promise((res) => setTimeout(() => res({ ok: true, status: 200, html: url === BASE ? fx("league-home-module-w8-live.html") : fx("matchup-w8-live.html") }), 60));
+  const t0 = Date.now();
+  const out = await withMatchups(basePayload(), undefined, { origin: ORIGIN, getPage: slow, fetchTimeoutMs: 1_000, budgetMs: 100 });
+  assert.ok(Date.now() - t0 < 400, `${Date.now() - t0} ms`);
+  assertCollectPartIntact(out);
+  assert.ok(out.diagnostics.some((d) => /time budget spent|timed out/.test(String(d.note))), JSON.stringify(out.diagnostics));
+});

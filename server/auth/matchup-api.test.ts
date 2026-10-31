@@ -163,7 +163,7 @@ describe("matchups log (import v9)", { timeout: 300_000 }, () => {
     const r = await call(admin, "POST", "/api/import", { ...mLeague(), matchupWeek: W, matchups: await fixtureMatchups(W) });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     await projCaptureIdle();
-    assert.ok(logs.some((l) => new RegExp(`\\[matchlog\\] import=yM week=${W} weeks=${W}:live:6p/1pg,${W - 1}:final:6p/1pg written=2`).test(l)), logs.filter((l) => l.includes("matchlog")).join("\n"));
+    assert.ok(logs.some((l) => new RegExp(`\\[matchlog\\] import=yM week=${W} weeks=${W}:live:6p/1pg,${W - 1}:final:6p/1pg written=3`).test(l)), logs.filter((l) => l.includes("matchlog")).join("\n"));
     const log = readLog();
     assert.equal(log.currentWeek, W);
     assert.deepEqual(Object.keys(log.weeks).sort(), [String(W - 1), String(W)].sort());
@@ -173,7 +173,8 @@ describe("matchups log (import v9)", { timeout: 300_000 }, () => {
     assert.equal(prev.pages["4-3"].sides[0].rows[0].name, "Joe Burrow");
     // Week W−1 is final and was first recorded now (after its kickoffs): Yahoo's final-page "Proj" = its pre-game number.
     assert.deepEqual([prev.yahooLock["4"].proj, prev.yahooLock["4"].pregame, prev.yahooLock["3"].proj], [123.86, false, 134.97]);
-    assert.equal(storedImport().projWeek, W, "one week source: projWeek = Yahoo's matchup week");
+    assert.equal(storedImport().projWeek, W, "projWeek = the calendar's week (v8)");
+    assert.equal(storedImport().matchupWeek, W, "Yahoo's matchup week kept apart for the matchups");
     assert.ok(!(storedImport().diagnostics ?? []).some((d: any) => d.step === "matchups" && d.level === "warning"));
   });
 
@@ -202,13 +203,14 @@ describe("matchups log (import v9)", { timeout: 300_000 }, () => {
     assert.equal(storedImport().projWeek, W, "no Yahoo week: the calendar's");
   });
 
-  test("rollover: Yahoo's week differs from the NFL calendar's → diagnostics note, Yahoo's week used for projWeek and the projlog capture", async () => {
+  test("rollover: Yahoo's week differs from the NFL calendar's → diagnostics note; projWeek stays the calendar's, Yahoo's week used for the matchups and the projlog capture", async () => {
     const yw = W + 1 <= 18 ? W + 1 : W - 1;
     const r = await call(admin, "POST", "/api/import", { ...mLeague(), id: "yR", leagueId: "999", matchupWeek: yw, matchups: await fixtureMatchups(yw) });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     await projCaptureIdle();
     const s = storedImport("yR");
-    assert.equal(s.projWeek, yw);
+    assert.equal(s.projWeek, W, "fix round 1: projWeek keeps its v8 meaning");
+    assert.equal(s.matchupWeek, yw);
     assert.ok(s.diagnostics.some((d: any) => d.step === "matchups" && new RegExp(`week ${yw} differs from the NFL calendar's week ${W}`).test(d.note)));
     assert.ok(logs.some((l) => new RegExp(`\\[projlog\\] import=yR week=${yw} `).test(l)), "projlog capture week = Yahoo's");
     assert.equal(readLog("yR").currentWeek, yw);
@@ -226,7 +228,7 @@ describe("matchups log (import v9)", { timeout: 300_000 }, () => {
     assert.equal((await call(admin, "GET", "/api/league/demo/42/matchup")).status, 404);
     assert.equal((await call(admin, "GET", "/api/league/yahoo/yM/matchup")).status, 404);
     assert.equal((await call(admin, "GET", "/api/league/import/nope/matchup")).status, 404);
-    for (const w of ["0", "19", "x", "1.5"]) assert.equal((await call(admin, "GET", `/api/league/import/yM/matchup?week=${w}`)).status, 400, w);
+    for (const w of ["0", "19", "x", "1.5", "1e1", "0x8", "+8", " 8", "008"]) assert.equal((await call(admin, "GET", `/api/league/import/yM/matchup?week=${w}`)).status, 400, w);
     assert.equal((await call(a, "GET", "/api/league/import/yM/matchup?team=1")).status, 403, "a user cannot pick another team");
     assert.equal((await call(a, "GET", "/api/league/import/yM/matchup")).status, 200);
   });

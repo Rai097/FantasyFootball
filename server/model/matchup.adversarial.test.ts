@@ -91,7 +91,6 @@ test("record: MAE / bias use the SAME team-weeks for ours and Yahoo's (a team wi
 
 test(
   "record: a tied final is no call (null), not a miss",
-  { todo: "DEFECT (minor) call() returns false for a tied final score, so the week row shows ✗ for both sources although the game is excluded from the counts; a tie should be no call (null)" },
   () => {
     const log = finalLog([pair("1", "2", 110, 110)], { "1": 115, "2": 100 });
     const p = projlog({ "1": { n: 9, app: 13 }, "2": { n: 9, app: 12 } });
@@ -143,7 +142,6 @@ test("lock: pre-game Yahoo total locked; later live and final captures never mov
 
 test(
   "merge: a capture with no usable data for a stored FINAL week keeps it final",
-  { todo: "DEFECT mergeMatchCapture replaces status (and fetchedAt) unconditionally: a later 'unknown'/'live' capture with 0 pairings and 0 pages turns a final week into 'unknown' and trackRecord drops it; W−1 is never re-fetched after the next rollover, so the loss is permanent" },
   () => {
     let log = mergeMatchCapture(null, { season: 2026, capturedAt: "2026-11-04T14:00:00.000Z", matchupWeek: 9, weeks: [cap(8, "final", [pair("1", "2", 131.5, 99.2, 120, 110)])], firstKickoff: first }).log;
     log = mergeMatchCapture(log, { season: 2026, capturedAt: "2026-11-04T20:00:00.000Z", matchupWeek: 9, weeks: [cap(8, "unknown", [])], firstKickoff: first }).log;
@@ -153,7 +151,6 @@ test(
 
 test(
   "merge: Yahoo's current matchup week is recorded even when no week's module was read",
-  { todo: "DEFECT (minor) recordMatchLog writes only when written > 0: a capture with matchupWeek but no usable weeks (both modules failed) never stores currentWeek, so after a rollover the Matchup tab keeps opening on the old week" },
   () => {
     const log = mergeMatchCapture(null, { season: 2026, capturedAt: "2026-11-04T14:00:00.000Z", matchupWeek: 9, weeks: [cap(8, "final", [pair("1", "2", 1, 2)])], firstKickoff: first }).log;
     const r = mergeMatchCapture(log, { season: 2026, capturedAt: "2026-11-11T14:00:00.000Z", matchupWeek: 10, weeks: [], firstKickoff: first });

@@ -9,6 +9,9 @@ import { parseMatchupModule, parseMatchupPage, type MatchupStatus, type ModulePa
 
 /** Yahoo page reads one import may add for matchups (owner's league ≈ 1 MB each). */
 export const MAX_MATCHUP_FETCHES = 4;
+/** Time limits (fix round 1): one page read aborts after `fetchMs`; the whole matchups step stops reading after
+ *  `budgetMs`. A timeout is a diagnostics note; collect()'s payload is never held or changed by it. */
+export const MATCHUP_TIMEOUTS = { fetchMs: 20_000, budgetMs: 60_000 } as const;
 
 export interface MatchupPageWire {
   mid1: string;
@@ -29,10 +32,11 @@ export interface MatchupsWire {
 }
 export type PayloadWithMatchups = Payload & { matchupWeek?: number; matchups?: MatchupsWire };
 
-export type GetPage = (url: string) => Promise<{ ok: boolean; status: number; html: string }>;
+/** `signal` aborts the read when its time is up (the collector also stops waiting on its own). */
+export type GetPage = (url: string, signal?: AbortSignal) => Promise<{ ok: boolean; status: number; html: string }>;
 
-const defaultGetPage: GetPage = async (url) => {
-  const res = await fetch(url, { credentials: "include", redirect: "follow" });
+const defaultGetPage: GetPage = async (url, signal) => {
+  const res = await fetch(url, { credentials: "include", redirect: "follow", ...(signal ? { signal } : {}) });
   return { ok: res.ok, status: res.status, html: res.ok ? await res.text() : "" };
 };
 
@@ -61,25 +65,56 @@ export interface MatchupsResult {
 }
 
 /** Reads the matchups of Yahoo's current week W and of W−1. Throws only on a programming error (caught by the caller). */
-export async function collectMatchups(o: { base: string; leagueId: string; myTeamId?: string; getPage?: GetPage; log?: (s: string) => void }): Promise<MatchupsResult> {
+export async function collectMatchups(o: {
+  base: string;
+  leagueId: string;
+  myTeamId?: string;
+  getPage?: GetPage;
+  log?: (s: string) => void;
+  fetchTimeoutMs?: number;
+  budgetMs?: number;
+}): Promise<MatchupsResult> {
   const get = o.getPage ?? defaultGetPage;
   const diagnostics: Diag[] = [];
   let fetches = 0;
+  const fetchMs = o.fetchTimeoutMs ?? MATCHUP_TIMEOUTS.fetchMs;
+  const deadline = Date.now() + (o.budgetMs ?? MATCHUP_TIMEOUTS.budgetMs);
+  /** One page read: aborted, and no longer awaited, after min(fetchMs, what is left of the budget). */
+  const timed = async (url: string) => {
+    const left = Math.max(0, Math.min(fetchMs, deadline - Date.now()));
+    const ac = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        ac.abort();
+        reject(new Error(`timed out after ${Math.round(left / 100) / 10} s`));
+      }, left);
+    });
+    try {
+      return await Promise.race([get(url, ac.signal), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const read = async (url: string, what: string): Promise<string | undefined> => {
     if (fetches >= MAX_MATCHUP_FETCHES) {
       diagnostics.push({ step: "matchups", url, note: `skipped ${what}: ${MAX_MATCHUP_FETCHES}-page limit reached` });
       return undefined;
     }
+    if (Date.now() >= deadline) {
+      diagnostics.push({ step: "matchups", url, note: `skipped ${what}: matchups time budget spent` });
+      return undefined;
+    }
     fetches++;
     try {
-      const p = await get(url);
+      const p = await timed(url);
       if (!p.ok) {
         diagnostics.push({ step: "matchups", url, status: p.status, note: `${what} not ok` });
         return undefined;
       }
       return p.html;
     } catch (e) {
-      diagnostics.push({ step: "matchups", url, note: `${what} fetch failed: ${(e as Error).message}` });
+      diagnostics.push({ step: "matchups", url, note: `${what} fetch failed: ${(e as Error | null)?.message ?? String(e)}` });
       return undefined;
     }
   };
@@ -145,11 +180,11 @@ export async function collectMatchups(o: { base: string; leagueId: string; myTea
  * The payload of collect() plus the matchups: called right after collect() by the bookmarklet and the auto-import
  * entry. Never throws; an error becomes a "matchups" diagnostics entry and the payload is returned as collect() made it.
  */
-export async function withMatchups(payload: Payload, log: (s: string) => void = () => undefined, deps: { origin?: string; getPage?: GetPage } = {}): Promise<PayloadWithMatchups> {
+export async function withMatchups(payload: Payload, log: (s: string) => void = () => undefined, deps: { origin?: string; getPage?: GetPage; fetchTimeoutMs?: number; budgetMs?: number } = {}): Promise<PayloadWithMatchups> {
   const out: PayloadWithMatchups = payload;
   try {
     const origin = deps.origin ?? location.origin;
-    const r = await collectMatchups({ base: `${origin}/f1/${payload.leagueId}`, leagueId: payload.leagueId, myTeamId: payload.myTeamId, getPage: deps.getPage, log });
+    const r = await collectMatchups({ base: `${origin}/f1/${payload.leagueId}`, leagueId: payload.leagueId, myTeamId: payload.myTeamId, getPage: deps.getPage, log, fetchTimeoutMs: deps.fetchTimeoutMs, budgetMs: deps.budgetMs });
     payload.diagnostics.push(...r.diagnostics);
     if (r.matchupWeek !== undefined) out.matchupWeek = r.matchupWeek;
     if (r.matchups) out.matchups = r.matchups;
