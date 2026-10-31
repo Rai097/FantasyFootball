@@ -18,6 +18,18 @@ export function pair(a: number | null | undefined, b: number | null | undefined)
   return `${f1(a)} – ${f1(b)}`;
 }
 
+/** Both sides or a single "–" (an unknown side is never shown next to a number as if it were a result). */
+export function pairOrDash(a: number | null | undefined, b: number | null | undefined): string {
+  return a == null || b == null ? "–" : pair(a, b);
+}
+
+/** Track-record total for one source: the pair when complete, else "n not projected" (n = most missing on either side), else "–". */
+export function recordPair(v: [number | null, number | null], missing: [number, number]): string {
+  if (v[0] != null && v[1] != null) return pair(v[0], v[1]);
+  const n = Math.max(missing[0], missing[1]);
+  return n > 0 ? `${n} not projected` : "–";
+}
+
 /** Win chances for both sides ("62%" / "38%"); null when unknown. */
 export function winPcts(winPct: number | null | undefined): [string, string] | null {
   if (winPct == null || !Number.isFinite(winPct)) return null;

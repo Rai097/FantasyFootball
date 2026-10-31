@@ -692,7 +692,7 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .mu-weekbar select { min-height: 44px; }
 .mu-weekbar label { gap: 8px; }
 .mu-head { display: flex; flex-direction: column; gap: 6px; }
-.mu-teams, .mu-total { display: grid; grid-template-columns: 96px minmax(0, 240px) minmax(0, 240px); gap: 8px; align-items: baseline; }
+.mu-teams, .mu-total { display: grid; grid-template-columns: 124px minmax(0, 240px) minmax(0, 240px); gap: 8px; align-items: baseline; }
 .mu-team { display: flex; flex-direction: column; min-width: 0; }
 .mu-team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mu-lbl { display: flex; flex-direction: column; font-weight: 600; }
@@ -720,6 +720,7 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .mu-orow .xrow-head, .mu-wrow .xrow-head { grid-template-columns: minmax(0, 1fr) 16px; }
 .mu-orow-head { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 8px; align-items: center; font-size: 13px; }
 .mu-wrow-head { display: grid; grid-template-columns: 44px minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)) 44px; gap: 8px; align-items: center; font-size: 13px; }
+.mu-colhead { display: grid; grid-template-columns: 44px minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)) 44px; gap: 8px; padding: 4px 12px; font-size: 11px; color: var(--muted); text-align: right; text-transform: uppercase; letter-spacing: .03em; }
 .mu-oteams, .mu-opp { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mu-orow-head .num, .mu-wrow-head .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mu-calls { display: flex; gap: 6px; justify-content: flex-end; font-weight: 700; }
@@ -728,7 +729,7 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
 .call.c-null { color: var(--muted); }
 @media (max-width: 700px) {
   .mu-ycol { display: none; }
-  .mu-teams, .mu-total { grid-template-columns: 70px minmax(0, 1fr) minmax(0, 1fr); }
+  .mu-teams, .mu-total { grid-template-columns: 108pxminmax(0, 1fr) minmax(0, 1fr); }
   .mu-headrow .th-why .why { display: none; }
   .mu-row { grid-template-columns: minmax(0, 1fr) 32px 32px 38px 32px 32px minmax(0, 1fr); gap: 3px; font-size: 12.5px; }
   .mu-row .pos-badge { display: none; }
@@ -739,4 +740,6 @@ textarea.paste { font: 12.5px/1.4 var(--mono); color: var(--text); background: v
   .mu-wrow-head { grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr) 40px; }
   .mu-wrow-head .mu-opp { grid-column: 2 / -1; }
   .mu-wrow-head > :first-child { grid-row: 1 / 3; }
+  .mu-colhead { grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr) 40px; }
+  .mu-colhead .mu-opp { display: none; }
 }

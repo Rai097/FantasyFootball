@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RecordGame } from "../../../server/model/matchup";
-import { callMark, incompleteLabel, notRecorded, orientGame, pair, recordIncompleteLabel, winPcts } from "./matchupView";
+import { callMark, incompleteLabel, notRecorded, orientGame, pair, pairOrDash, recordPair, recordIncompleteLabel, winPcts } from "./matchupView";
 
 test("record (fix round 1): orientGame swaps every pair; an incomplete week is not 'not recorded'; n starters not projected", () => {
   const g: RecordGame = { teams: ["2", "1"], mine: true, ours: [null, 120], yahoo: [null, 110], yahooPage: [91, 111], oursMissing: [3, 0], yahooMissing: [4, 0], points: [95, 130], oursCall: null, yahooCall: null };
@@ -44,4 +44,17 @@ test("orientGame puts the request team first", () => {
 test("notRecorded: ours unknown on both sides", () => {
   assert.equal(notRecorded({ ours: [null, null] }), true);
   assert.equal(notRecorded({ ours: [100, null] }), false);
+});
+
+test("recordPair: complete pair, 'n not projected' when starters are missing, a single dash otherwise", () => {
+  assert.equal(recordPair([128.44, 121], [0, 0]), "128.4 – 121.0");
+  assert.equal(recordPair([null, 121], [2, 0]), "2 not projected");
+  assert.equal(recordPair([null, null], [0, 3]), "3 not projected");
+  assert.equal(recordPair([null, 121], [0, 0]), "–");
+});
+
+test("pairOrDash collapses any unknown side to one dash", () => {
+  assert.equal(pairOrDash(null, 121), "–");
+  assert.equal(pairOrDash(110, undefined), "–");
+  assert.equal(pairOrDash(110.04, 121), "110.0 – 121.0");
 });

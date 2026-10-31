@@ -7,13 +7,14 @@ import { ColumnHelp, HelpTip } from "../components/HelpTip";
 import { DetailList, Disclosure, ExpandableList, ExpandableRow } from "../components/ExpandableRow";
 import { Empty, ErrorBox, Loading, PosBadge } from "../components/common";
 import { f1, stamp } from "../lib/format";
-import { callMark, chipTitle, incompleteLabel, notRecorded, orientGame, pair, winPcts } from "../lib/matchupView";
+import { callMark, chipTitle, incompleteLabel, notRecorded, orientGame, pairOrDash, recordPair, winPcts } from "../lib/matchupView";
 import { useAsync } from "../lib/useAsync";
 
 const TIP = {
   ours: "Our projection: the sum of the starters' projections this week. Once a player's game has started his number is the one captured before kickoff.",
   yahoo: "Yahoo's own projection, taken before the week's first kickoff so it stays comparable with the final score.",
   score: "Yahoo's points so far (final once the week is over); stat corrections can still move it until Thursday.",
+  yahooPage: "Yahoo's own projected total from its matchup page; the track record uses each starter's pre-kickoff Yahoo projection instead.",
   pts: "Yahoo's fantasy points for this player; a dash means he has not played yet.",
   win: "Chance our projections give each team to win: the projected margin against a typical weekly spread of about 35 points. A pre-game estimate, not updated live.",
   incomplete: "These starters have no projection of ours, so the total is left blank instead of counting them as 0.",
@@ -90,7 +91,11 @@ function HeaderCard({ m, sides, source }: { m: MatchupResponse; sides: [MatchupS
         ))}
       </div>
       <TotalRow label="Ours" tip={TIP.ours} a={f1(a.ours)} b={f1(b.ours)} notes={[inc(a), inc(b)]} />
-      <TotalRow label="Yahoo" tip={TIP.yahoo} a={f1(a.yahoo)} b={f1(b.yahoo)} />
+      {m.status === "final" ? (
+        <TotalRow label="Yahoo (page)" tip={TIP.yahooPage} a={f1(a.yahoo)} b={f1(b.yahoo)} />
+      ) : (
+        <TotalRow label="Yahoo" tip={TIP.yahoo} a={f1(a.yahoo)} b={f1(b.yahoo)} />
+      )}
       <TotalRow label="Score" sub={asOf} tip={TIP.score} a={f1(a.points)} b={f1(b.points)} />
       <div className="mu-chips row gap wrap">
         {wins ? (
@@ -279,22 +284,22 @@ function OthersCard({ m }: { m: MatchupResponse }) {
                       {a.name} <span className="muted">vs</span> {b.name}
                     </span>
                     <span className="num" title={TIP.ours}>
-                      {pair(a.ours, b.ours)}
+                      {pairOrDash(a.ours, b.ours)}
                     </span>
                     <span className="num mu-ycol" title={TIP.yahoo}>
-                      {pair(a.yahoo, b.yahoo)}
+                      {pairOrDash(a.yahoo, b.yahoo)}
                     </span>
                     <span className="num" title={TIP.score}>
-                      {pair(a.points, b.points)}
+                      {pairOrDash(a.points, b.points)}
                     </span>
                   </div>
                 }
               >
                 <DetailList
                   items={[
-                    { label: "Ours", value: pair(a.ours, b.ours), title: TIP.ours },
-                    { label: "Yahoo", value: pair(a.yahoo, b.yahoo), title: TIP.yahoo },
-                    { label: "Score", value: pair(a.points, b.points), title: TIP.score },
+                    { label: "Ours", value: pairOrDash(a.ours, b.ours), title: TIP.ours },
+                    { label: "Yahoo", value: pairOrDash(a.yahoo, b.yahoo), title: TIP.yahoo },
+                    { label: "Score", value: pairOrDash(a.points, b.points), title: TIP.score },
                     ...[a, b].flatMap((s) => {
                       const t = incompleteLabel(s.oursIncomplete);
                       return t ? [{ label: s.name, value: t, tone: "warn" as const, title: TIP.incomplete }] : [];
@@ -337,6 +342,14 @@ function RecordCard({ m, myTeamId }: { m: MatchupResponse; myTeamId: string }) {
               <HelpTip text={TIP.bias} label="About the bias" />
             </span>
           </div>
+          <div className="mu-colhead" aria-hidden="true">
+            <span />
+            <span className="mu-opp" />
+            <span title={TIP.ours}>Ours</span>
+            <span className="mu-ycol" title={TIP.yahoo}>Yahoo</span>
+            <span title={TIP.score}>Final</span>
+            <span />
+          </div>
           <ExpandableList label="Weekly results" className="mu-list">
             {weeks.map((w) => (
               <WeekRow key={w.week} w={w} myTeamId={myTeamId} name={name} />
@@ -363,13 +376,13 @@ function WeekRow({ w, myTeamId, name }: { w: RecordWeek; myTeamId: string; name:
           <span className="strong">Wk {w.week}</span>
           <span className="mu-opp">{opp}</span>
           <span className="num" title={nr ? TIP.notRecorded : TIP.ours}>
-            {nr ? <span className="muted">not recorded</span> : pair(g.ours[0], g.ours[1])}
+            {nr ? <span className="muted">not recorded</span> : recordPair(g.ours, g.oursMissing)}
           </span>
           <span className="num mu-ycol" title={TIP.yahoo}>
-            {pair(g.yahoo[0], g.yahoo[1])}
+            {recordPair(g.yahoo, g.yahooMissing)}
           </span>
           <span className="num" title={TIP.score}>
-            {pair(g.points[0], g.points[1])}
+            {pairOrDash(g.points[0], g.points[1])}
           </span>
           <span className="mu-calls" title={TIP.call}>
             <span className={`call c-${g.oursCall}`}>{nr ? "—" : callMark(g.oursCall)}</span>
@@ -384,9 +397,9 @@ function WeekRow({ w, myTeamId, name }: { w: RecordWeek; myTeamId: string; name:
           key={i}
           items={[
             { label: `${name(x.teams[0])} vs ${name(x.teams[1])}`, value: "" },
-            { label: "Ours", value: notRecorded(x) ? "not recorded" : pair(x.ours[0], x.ours[1]), title: TIP.ours },
-            { label: "Yahoo", value: pair(x.yahoo[0], x.yahoo[1]), title: TIP.yahoo },
-            { label: "Final", value: pair(x.points[0], x.points[1]), title: TIP.score },
+            { label: "Ours", value: notRecorded(x) ? "not recorded" : recordPair(x.ours, x.oursMissing), title: TIP.ours },
+            { label: "Yahoo", value: recordPair(x.yahoo, x.yahooMissing), title: TIP.yahoo },
+            { label: "Final", value: pairOrDash(x.points[0], x.points[1]), title: TIP.score },
             { label: "Winner call", value: `ours ${notRecorded(x) ? "—" : callMark(x.oursCall)} · Yahoo ${callMark(x.yahooCall)}`, title: TIP.call },
           ]}
         />

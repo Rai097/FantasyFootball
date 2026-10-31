@@ -409,7 +409,7 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
         </div>
       )}
       <footer className="footer">
-        Numbers are rest-of-season projections under your league's scoring. Tap <span className="why-btn inline">?</span> for how each one is made.
+        {tab === "matchup" ? "Numbers are this week's projections under your league's scoring." : "Numbers are rest-of-season projections under your league's scoring."} Tap <span className="why-btn inline">?</span> for how each one is made.
       </footer>
     </div>
   );

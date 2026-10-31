@@ -31,9 +31,9 @@ const B: typeof A = [
 const sum = (xs: (number | null)[]) => Math.round(xs.reduce<number>((t, x) => t + (x ?? 0), 0) * 10) / 10;
 const pts = (xs: typeof A) => sum(xs.map((r) => r[5]));
 
-function game(mine: boolean, teams: [string, string], ours: [number | null, number | null], yahoo: [number, number], points: [number, number]): RecordGame {
+function game(mine: boolean, teams: [string, string], ours: [number | null, number | null], yahoo: [number, number], points: [number, number], captured = true): RecordGame {
   const call = (p: [number | null, number | null]) => (p[0] == null || p[1] == null || p[0] === p[1] ? null : p[0] > p[1] === points[0] > points[1]);
-  return { teams, mine, ours, yahoo, yahooPage: yahoo, oursMissing: [0, 0], yahooMissing: [0, 0], points, oursCall: call(ours), yahooCall: call(yahoo) };
+  return { teams, mine, ours, yahoo, yahooPage: yahoo, oursMissing: (ours[0] == null && ours[1] == null && !captured ? [0, 0] : ours.map((x) => (x == null ? 2 : 0))) as [number, number], yahooMissing: [0, 0], points, oursCall: call(ours), yahooCall: call(yahoo) };
 }
 
 export function mockMatchup(week?: number): MatchupResponse {
@@ -68,8 +68,8 @@ export function mockMatchup(week?: number): MatchupResponse {
     record: {
       weeks: [
         { week: 7, recorded: true, games: [game(true, ["1", "2"], [128.4, 121.0], [131.8, 121.1], [165.8, 123.9]), game(false, ["3", "4"], [110.2, 114.0], [112.0, 111.3], [98.4, 120.6])] },
-        { week: 6, recorded: true, games: [game(true, ["3", "1"], [104.1, 118.7], [109.5, 116.2], [101.7, 109.2])] },
-        { week: 5, recorded: false, games: [game(true, ["1", "4"], [null, null], [122.0, 115.0], [131.5, 101.9])] },
+        { week: 6, recorded: true, games: [game(true, ["3", "1"], [null, 118.7], [109.5, 116.2], [101.7, 109.2])] },
+        { week: 5, recorded: false, games: [game(true, ["1", "4"], [null, null], [122.0, 115.0], [131.5, 101.9], false)] },
       ],
       summary: { games: 3, oursCalls: 2, yahooCalls: 2, teamWeeks: 6, oursMae: 14.2, yahooMae: 15.6, oursBias: 6.1, yahooBias: 4.4 },
     },
