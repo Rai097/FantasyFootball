@@ -1900,3 +1900,25 @@ ours, Yahoo, final, ✓ / ✗ per source), details on tap. Every number has a "w
 - New collect code ⇒ bookmark "Trade Desk import v9" (the owner re-drags it; auto-import picks it up on deploy).
 - Fixtures (anonymized: teams "Team A–L", no manager names, no profile links): league-home module week 8 in progress
   and week 7 final; matchup page week 8 pre-game and week 7 final (both with bench).
+
+**Implemented: collector + payload (import v9).** `web/src/import/matchups.ts` `withMatchups(collect())` (bookmarklet
+`run()` and the auto-import entry `collectEntry.ts`); pure parsers `matchupsHtml.ts` (string parsing like
+yahooHtml.ts, no DOM). Fetch plan, at most 4 pages: (1) league home `<base>` → W = the `<option selected>` of
+`#matchupweek` and, when its header says "Week W Matchups", W's pairings (else `<base>?matchup_week=W&module=matchups`);
+(2) the owner's page `<base>/matchup?week=W&mid1=A&mid2=B` (owner = payload `myTeamId`; unknown → no pages);
+(3) `<base>?matchup_week=W−1&module=matchups` (a module showing another week is not used); (4) the owner's page for
+W−1. Matchup page: left side = mid1 (verified week 7: mid1 = 4 = the left Total 123.86 / 165.78); columns by header
+(Player / Proj / Fan Pts per side, the visible Pos column = slot); tables `id="statTableN"` (1 = starters + Total,
+2 = bench + IR); weather tooltip tables inside player cells are dropped; a cut / unclosed row is dropped. Numbers are
+strict full matches: "–" / empty / "Bye" = null, Yahoo's "0.00" = 0. Payload additions (absent when not read):
+```
+matchupWeek: number                       // Yahoo's current matchup week (the picker's selected week)
+matchups: { weeks: [{                     // W first, then W−1
+  week, status: "final" | "live" | "pre" | "unknown", statusText?,
+  pairings: [{ mid1, mid2, sides: [{ teamId, name?, record?, points: number|null, yahooProj: number|null }] x2 }],
+  pages: [{ mid1, mid2, sides: [{ teamId, totalProj: number|null, totalPts: number|null,
+            rows: [{ slot, yahooId?, name?, pos?, team?, status?, yahooProj: number|null, points: number|null }] }] x2 }]
+}] }
+```
+Diagnostics: one `{ step: "matchups", url, kind: "module" | "page", … }` per page read and a `note: "summary"` entry
+(`matchupWeek`, `weeks` "8:live:6p/1pg", `fetches`). Wire size on the fixtures ≈ 10 KB.

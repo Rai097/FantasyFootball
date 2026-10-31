@@ -8,7 +8,10 @@
 // signed-in POST /api/import. It never sends data anywhere else. See docs/DESIGN.md "One-click import (v7)".
 // v8: after the ack it waits for the app's result (from that window and origin only) and shows "Import completed";
 // the app tab closes itself on success. See docs/DESIGN.md "Trade Desk import v8".
+// v9: after collect(), the matchups of Yahoo's current week and the week before (matchups.ts; docs/DESIGN.md
+// "Matchups and results log (2026-10-31)"); a matchups failure is a diagnostics note only.
 import { collect, leagueIdOf } from "./collect";
+import { withMatchups } from "./matchups";
 import { createResultReceiver, HANDOFF_ACK, HANDOFF_HASH, HANDOFF_TYPE, HANDOFF_VERSION, HANDOFF_WINDOW, type ImportResultReport } from "./handoff";
 
 declare const __FTD_APP_URL__: string | undefined;
@@ -131,7 +134,7 @@ async function run(): Promise<void> {
     return;
   }
   const popup = openApp();
-  const payload = await collect(say);
+  const payload = await withMatchups(await collect(say), say);
   const { teams, diagnostics, settingsSource } = payload;
   const myTeamId = payload.myTeamId;
   const faOut = payload.freeAgents ?? [];
@@ -146,7 +149,7 @@ async function run(): Promise<void> {
 
   // ---- summary
   box.textContent = "";
-  box.appendChild(el("div", "Trade Desk import v8", "font-weight:700;font-size:15px;margin-bottom:6px"));
+  box.appendChild(el("div", "Trade Desk import v9", "font-weight:700;font-size:15px;margin-bottom:6px"));
   const summary = el("div");
   const noPos = diagnostics.reduce((a, d) => a + (Array.isArray(d.noPos) ? d.noPos.length : 0), 0);
   summary.textContent =
@@ -155,6 +158,7 @@ async function run(): Promise<void> {
     `Yahoo projections: ${projRos ? `${projRos} of ${rostered} players rest of season` : "rest of season NOT found"}, ${projWeek} this week · ` +
     `${faOut.length} available players (${faOut.filter((f) => f.onWaivers === true).length} on waivers, ${faOut.filter((f) => f.onWaivers === undefined).length} unknown) · ` +
     `${faWeek} available player${faWeek === 1 ? "" : "s"} with this week's projection${faRos ? `, ${faRos} rest of season` : ""} · settings: ${settingsSource === "page" ? "read from Yahoo" : settingsSource === "partial" ? "partly read (check them after import)" : "NOT found, Yahoo defaults used (check them after import)"}` +
+    ` · matchups: ${payload.matchups ? payload.matchups.weeks.map((w) => `week ${w.week}`).join(", ") : "NOT found"}` +
     (noPos ? ` · ${noPos} player link(s) without a position were skipped` : "");
   box.appendChild(summary);
   const list = el("ol", undefined, "margin:8px 0;padding-left:20px;max-height:180px;overflow:auto");

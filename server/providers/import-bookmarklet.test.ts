@@ -14,7 +14,7 @@ test("bundle: injected app URL present, postMessage never targets '*', self-cont
   assert.ok(!/__FTD_APP_URL__/.test(code), "define replaced the global");
   assert.ok(code.includes("postMessage"), "handoff code bundled");
   assert.ok(!/["'`]\*["'`]/.test(code), "no \"*\" string anywhere (so never a postMessage target)");
-  assert.ok(code.includes("Trade Desk import v8"));
+  assert.ok(code.includes("Trade Desk import v9"));
   assert.ok(!/\bimport\s*[{(*]|\brequire\(/.test(code), "must be self-contained");
   const other = await bookmarkletCode("http://localhost:5173");
   assert.ok(other.includes('"http://localhost:5173"') && !other.includes(APP), "cached per app URL");
@@ -105,7 +105,7 @@ test("no app URL injected (unbundled run) → no window opened, old flow unchang
   const { overlay, handoff } = await runBookmarklet(oneTeam);
   assert.equal(handoff.opened.length, 0);
   assert.doesNotMatch(overlay, /Trade Desk didn't answer|Sent to Trade Desk|Pop-up/);
-  assert.match(overlay, /Trade Desk import v8/);
+  assert.match(overlay, /Trade Desk import v9/);
 });
 
 test("collector bundle (auto-import): exposes __ftdCollect only — no overlay, no handoff, no auto-run, self-contained", async () => {
