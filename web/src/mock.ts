@@ -5,6 +5,7 @@
 import type { League, LineupSlot, Position, SlotKind, TeamAnalysis, Team, Trade, TradeFinderResult, TradeSide, WaiverTarget } from "../../server/model/types";
 import type { Analysis, AppState, PlayerLite, ValueRow, VP, WaiversResponse, YahooLeague } from "./api";
 import { ApiError } from "./lib/errors";
+import { mockMatchup } from "./mockMatchup";
 
 type Row = [name: string, pos: Position, team: string, ppg: number, bye: number, owner: number, injury?: string];
 
@@ -486,12 +487,13 @@ function route(method: string, url: URL, body: unknown): unknown {
   if (method === "GET" && p === "/api/import") return [];
   if (method === "GET" && p === "/api/import/bookmarklet.js") return { url: "javascript:alert('Mock mode: run the real server to get the bookmarklet.')" };
   if (p.startsWith("/api/import")) throw new ApiError("Importing is not available in mock mode", 400, "Run the real server (npm run dev) to import a league.");
-  const m = p.match(/^\/api\/league\/(demo|yahoo|import)\/([^/]+)(?:\/(analysis|trades2|bench-upgrades|trade\/evaluate|waivers|breakouts|values|league))?$/);
+  const m = p.match(/^\/api\/league\/(demo|yahoo|import)\/([^/]+)(?:\/(analysis|trades2|bench-upgrades|trade\/evaluate|waivers|breakouts|values|league|matchup))?$/);
   if (!m) throw new ApiError(`Mock has no route for ${method} ${p}`, 404);
   const [, provider, id, sub] = m;
   if (provider === "yahoo" && !yahooConnected) throw new ApiError("Not connected to Yahoo", 401, "Reconnect on the Connect tab.");
   const league = makeLeague(provider as League["provider"], decodeURIComponent(id));
   if (!sub) return league;
+  if (sub === "matchup") return mockMatchup(Number(url.searchParams.get("week")) || undefined);
   if (sub === "analysis") {
     const players: Record<string, VP> = {};
     for (const x of PLAYERS) players[x.id] = x;

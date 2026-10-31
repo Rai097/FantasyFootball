@@ -13,6 +13,7 @@ import { activeAfterImport, postImport } from "./import/importFlow";
 import { reportImportResult, useImportHandoff } from "./import/useImportHandoff";
 import { ConnectTab } from "./tabs/ConnectTab";
 import { LeagueTab } from "./tabs/LeagueTab";
+import { MatchupTab } from "./tabs/MatchupTab";
 import { MyTeamTab } from "./tabs/MyTeamTab";
 import { TradesTab } from "./tabs/TradesTab";
 import { TargetsTab } from "./tabs/TargetsTab";
@@ -28,6 +29,7 @@ function staleDays(iso: string | undefined): number {
 const TABS = [
   { id: "connect", label: "Connect" },
   { id: "team", label: "My Team" },
+  { id: "matchup", label: "Matchup" },
   { id: "league", label: "League" },
   { id: "trades", label: "Trade Finder" },
   { id: "waivers", label: "Waivers" },
@@ -384,6 +386,8 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
             {(a, act) =>
               tab === "team" ? (
                 <MyTeamTab analysis={a} onOpenLeague={() => setTab("league")} />
+              ) : tab === "matchup" ? (
+                <MatchupTab active={act} />
               ) : tab === "league" ? (
                 <LeagueTab analysis={a} active={act} />
               ) : tab === "trades" ? (
