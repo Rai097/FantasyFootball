@@ -33,7 +33,7 @@ const pts = (xs: typeof A) => sum(xs.map((r) => r[5]));
 
 function game(mine: boolean, teams: [string, string], ours: [number | null, number | null], yahoo: [number, number], points: [number, number]): RecordGame {
   const call = (p: [number | null, number | null]) => (p[0] == null || p[1] == null || p[0] === p[1] ? null : p[0] > p[1] === points[0] > points[1]);
-  return { teams, mine, ours, yahoo, points, oursCall: call(ours), yahooCall: call(yahoo) };
+  return { teams, mine, ours, yahoo, yahooPage: yahoo, oursMissing: [0, 0], yahooMissing: [0, 0], points, oursCall: call(ours), yahooCall: call(yahoo) };
 }
 
 export function mockMatchup(week?: number): MatchupResponse {

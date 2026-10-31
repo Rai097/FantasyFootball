@@ -504,6 +504,7 @@ function matchupContext(
     // No game data for the week at all → kickoffs unknown (never a league-wide bye).
     gameOf: (t) => (playing.size === 0 || playing.has(t) ? { ...(kickoffs.byTeam.get(t) ? { kickoff: Date.parse(kickoffs.byTeam.get(t)!) } : {}) } : undefined),
     ...(kickoffs.first ? { firstKickoff: Date.parse(kickoffs.first) } : {}),
+    starterCount: starting.length,
   };
 }
 

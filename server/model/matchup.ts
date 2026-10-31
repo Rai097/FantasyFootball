@@ -67,6 +67,8 @@ export interface MatchupContext {
   gameOf: (nflTeam: string) => { kickoff?: number } | undefined;
   /** The week's first kickoff (ms): the cut-off for a team whose own kickoff is unknown. */
   firstKickoff?: number;
+  /** The league's starting slots per team (not BN / IR): a projlog lineup with fewer captured starters is incomplete. */
+  starterCount?: number;
 }
 
 // ------------------------------------------------------------------ response
@@ -120,16 +122,24 @@ export interface RecordGame {
   /** [left, right] team ids; `mine` = the request team plays. */
   teams: [string, string];
   mine: boolean;
+  /** Σ the final starters' LOCKED projlog values (app); null = incomplete or not recorded. */
   ours: [number | null, number | null];
+  /** Recorded week: Σ the same starters' LOCKED Yahoo values (projlog), null = incomplete. Week never captured: Yahoo's
+   *  own pre-game total (= `yahooPage`), shown but never compared. */
   yahoo: [number | null, number | null];
+  /** Yahoo's own pre-game total from its module / matchup page (locked); display only, never in the metrics. */
+  yahooPage: [number | null, number | null];
+  /** Final starters without a locked value of ours / Yahoo's ("n starters not projected"); 0 = complete. */
+  oursMissing: [number, number];
+  yahooMissing: [number, number];
   points: [number | null, number | null];
-  /** The projected winner won; null = no call (no complete projection, or a tie projection). */
+  /** The projected winner won; null = no call (not compared, a tie projection, or a tied final). */
   oursCall: boolean | null;
   yahooCall: boolean | null;
 }
 export interface RecordWeek {
   week: number;
-  /** Our projection exists for at least one game of the week (weeks before the first capture: Yahoo only). */
+  /** The projection log holds the week (weeks before the first capture: Yahoo's page totals only). */
   recorded: boolean;
   games: RecordGame[];
 }
@@ -205,6 +215,8 @@ interface TeamLineup {
   source: LineupSource;
   starters: { slot: string; cell: MatchupCell | null }[];
   bench: { slot: string; cell: MatchupCell | null }[];
+  /** Starting slots the source cannot see (log source only): counted as unprojected for both sources. */
+  unseen?: number;
 }
 
 /** A team's lineup for the week: Yahoo's matchup page (when read), else the latest import's slots (that week only), else the projection log's starters. */
@@ -239,6 +251,9 @@ function lineupOf(ctx: MatchupContext, wk: MatchWeek | undefined, teamId: string
       cell: { id: e.id, name: e.name, pos: e.pos, nflTeam: e.team, ours: r1(e.app), yahoo: e.yahoo ?? null, points: null, status: null, locked: true },
     })),
     bench: [],
+    // The log only holds starters captured before their kickoff: the league's other starting slots are unseen (a
+    // Thursday starter added late, a bye starter, an empty slot). More captured starters than slots = lineup unclear.
+    unseen: ctx.starterCount !== undefined ? Math.abs(ctx.starterCount - logged.length) : 0,
   };
 }
 
@@ -252,12 +267,13 @@ function sideView(ctx: MatchupContext, wk: MatchWeek | undefined, teamId: string
     .flatMap((p) => p.sides)
     .find((s) => s.teamId === teamId);
   const tot = lu ? teamTotal(lu.starters.map((s) => s.cell)) : { ours: null, missing: 0 };
+  const missing = tot.missing + (lu?.unseen ?? 0);
   return {
     teamId,
     name: team?.name ?? mod?.name ?? `Team ${teamId}`,
     record: mod?.record ?? team?.record ?? null,
-    ours: tot.ours,
-    oursIncomplete: tot.missing,
+    ours: missing ? null : tot.ours,
+    oursIncomplete: missing,
     yahoo: wk?.yahooLock[teamId]?.proj ?? null,
     yahooLive: page?.totalProj ?? mod?.yahooProj ?? null,
     points: mod?.points ?? page?.totalPts ?? null,
@@ -278,6 +294,36 @@ export const call = (proj: [number | null, number | null], pts: [number | null, 
   return proj[0] > proj[1] === pts[0] > pts[1];
 };
 
+/** One team-week of the record: Σ over the team's FINAL starters of each starter's LOCKED projlog value, ours and
+ *  Yahoo's alike (symmetry). Starters: Yahoo's final matchup page when read, else the projlog's starter flags at each
+ *  player's last capture before his kickoff (a starter never captured is unseen: counted missing). A bye = a real 0
+ *  for both; an unmatched Yahoo name or a starter without a locked value = missing (never 0). */
+export function recordSide(ctx: MatchupContext, wk: MatchWeek, teamId: string): { ours: number | null; oursMissing: number; yahoo: number | null; yahooMissing: number } {
+  const lu = lineupOf(ctx, wk, teamId);
+  const unseen = lu ? lu.unseen ?? 0 : ctx.starterCount ?? 0;
+  let ours = 0;
+  let yahoo = 0;
+  let oursMissing = unseen;
+  let yahooMissing = unseen;
+  for (const { cell } of lu?.starters ?? []) {
+    if (!cell) continue; // an empty slot: nothing
+    if (cell.id === null) {
+      oursMissing++;
+      yahooMissing++;
+      continue;
+    }
+    if (cell.nflTeam !== null && !ctx.gameOf(cell.nflTeam)) continue; // bye: a real 0 for both
+    const e = ctx.proj?.[cell.id];
+    if (e?.app === undefined) oursMissing++;
+    else ours += e.app;
+    if (e?.yahoo === undefined) yahooMissing++;
+    else yahoo += e.yahoo;
+  }
+  // No lineup at all and no starting-slot count: nothing seen → unknown, never a 0.
+  if (!lu && ctx.starterCount === undefined) return { ours: null, oursMissing: 0, yahoo: null, yahooMissing: 0 };
+  return { ours: oursMissing ? null : r1(ours), oursMissing, yahoo: yahooMissing ? null : r1(yahoo), yahooMissing };
+}
+
 /** Track record over the final weeks of the log. */
 export function trackRecord(ctxFor: (week: number) => MatchupContext | undefined, log: MatchLog | null, myTeamId: string): { weeks: RecordWeek[]; summary: RecordSummary } {
   const weeks: RecordWeek[] = [];
@@ -292,16 +338,33 @@ export function trackRecord(ctxFor: (week: number) => MatchupContext | undefined
   for (const week of finals) {
     const wk = log!.weeks[String(week)];
     const ctx = ctxFor(week);
-    const out: RecordWeek = { week, recorded: false, games: [] };
+    // Recorded = the projection log holds the week; else (weeks before the first capture) Yahoo's page totals only.
+    const recorded = !!ctx && Object.keys(ctx.proj ?? {}).length > 0;
+    const out: RecordWeek = { week, recorded, games: [] };
     for (const p of wk.pairings) {
       const ids: [string, string] = [p.sides[0].teamId, p.sides[1].teamId];
-      const ours = ids.map((t) => (ctx ? sideView(ctx, wk, t, lineupOf(ctx, wk, t)).ours : null)) as [number | null, number | null];
-      const yahoo = ids.map((t) => wk.yahooLock[t]?.proj ?? null) as [number | null, number | null];
+      const yahooPage = ids.map((t) => wk.yahooLock[t]?.proj ?? null) as [number | null, number | null];
       const points: [number | null, number | null] = [p.sides[0].points, p.sides[1].points];
-      const g: RecordGame = { teams: ids, mine: ids.includes(myTeamId), ours, yahoo, points, oursCall: call(ours, points), yahooCall: call(yahoo, points) };
-      if (ours.some((x) => x !== null)) out.recorded = true;
-      // Same set for both sources: games with complete projections from both and a final score.
-      if (ours.every((x) => x !== null) && yahoo.every((x) => x !== null) && points.every((x) => x !== null) && points[0] !== points[1]) {
+      const base = { teams: ids, mine: ids.includes(myTeamId), yahooPage, points };
+      if (!recorded) {
+        out.games.push({ ...base, ours: [null, null], yahoo: yahooPage, oursMissing: [0, 0], yahooMissing: [0, 0], oursCall: null, yahooCall: call(yahooPage, points) });
+        continue;
+      }
+      const [a, b] = ids.map((t) => recordSide(ctx!, wk, t));
+      const ours: [number | null, number | null] = [a.ours, b.ours];
+      const yahoo: [number | null, number | null] = [a.yahoo, b.yahoo];
+      // Same team-weeks for both sources: a game is compared only when all four totals are complete.
+      const compared = [...ours, ...yahoo].every((x) => x !== null);
+      const g: RecordGame = {
+        ...base,
+        ours,
+        yahoo,
+        oursMissing: [a.oursMissing, b.oursMissing],
+        yahooMissing: [a.yahooMissing, b.yahooMissing],
+        oursCall: compared ? call(ours, points) : null,
+        yahooCall: compared ? call(yahoo, points) : null,
+      };
+      if (compared && points[0] !== null && points[1] !== null && points[0] !== points[1]) {
         games++;
         if (g.oursCall) oursCalls++;
         if (g.yahooCall) yahooCalls++;

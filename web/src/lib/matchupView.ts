@@ -30,11 +30,26 @@ export type OrientedGame = RecordGame;
 export function orientGame(g: RecordGame, myTeamId: string): OrientedGame {
   if (!g.mine || g.teams[0] === myTeamId) return { ...g };
   const sw = <T,>(p: [T, T]): [T, T] => [p[1], p[0]];
-  return { ...g, teams: sw(g.teams), ours: sw(g.ours), yahoo: sw(g.yahoo), points: sw(g.points) };
+  return {
+    ...g,
+    teams: sw(g.teams),
+    ours: sw(g.ours),
+    yahoo: sw(g.yahoo),
+    yahooPage: sw(g.yahooPage),
+    oursMissing: sw(g.oursMissing),
+    yahooMissing: sw(g.yahooMissing),
+    points: sw(g.points),
+  };
 }
 
-/** True when ours is unknown for the whole game (a week before the first capture). */
-export const notRecorded = (g: Pick<RecordGame, "ours">): boolean => g.ours[0] == null && g.ours[1] == null;
+/** True when ours is unknown for the whole game because the week was never captured (an incomplete week is not this). */
+export const notRecorded = (g: Pick<RecordGame, "ours"> & Partial<Pick<RecordGame, "oursMissing">>): boolean =>
+  g.ours[0] == null && g.ours[1] == null && !(g.oursMissing?.[0] || g.oursMissing?.[1]);
+
+/** A record game's "n starters not projected" (the most on either side, ours or Yahoo's); null when complete. */
+export function recordIncompleteLabel(g: Pick<RecordGame, "oursMissing" | "yahooMissing">): string | null {
+  return incompleteLabel(Math.max(...g.oursMissing, ...g.yahooMissing));
+}
 
 /** Full word for the injury chip. */
 export function chipTitle(c: Pick<MatchupCell, "status">): string | undefined {

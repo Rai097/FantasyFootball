@@ -29,13 +29,14 @@ const finalLog = (pairings: MatchPairing[], lock: Record<string, number>): Match
     },
   },
 });
-/** Projlog starters of week 8: `n` per team at `app` points each (Sunday games, captured Saturday). */
-function projlog(teams: Record<string, { n: number; app: number }>): Record<string, ProjEntry> {
+/** Projlog starters of week 8: `n` per team at `app` points each and Yahoo's locked `yahoo` (absent = not captured)
+ *  (Sunday games, captured Saturday). Fix round 1: the record sums these per-player values for BOTH sources. */
+function projlog(teams: Record<string, { n: number; app: number; yahoo?: number }>): Record<string, ProjEntry> {
   const out: Record<string, ProjEntry> = {};
-  for (const [teamId, { n, app }] of Object.entries(teams))
+  for (const [teamId, { n, app, yahoo }] of Object.entries(teams))
     for (let i = 0; i < n; i++) {
       const id = `p${teamId}-${i}`;
-      out[id] = { id, name: id, pos: "WR", team: "CIN", teamId, starter: true, app, capturedAt: "2026-10-31T19:00:00.000Z" };
+      out[id] = { id, name: id, pos: "WR", team: "CIN", teamId, starter: true, app, ...(yahoo !== undefined ? { yahoo } : {}), capturedAt: "2026-10-31T19:00:00.000Z" };
     }
   return out;
 }
@@ -57,59 +58,63 @@ function ctx(log: MatchLog, proj: Record<string, ProjEntry>, over: Partial<Match
     today: () => undefined,
     gameOf: () => ({ kickoff: SUNDAY }),
     firstKickoff: Date.parse(FIRST),
+    starterCount: 9, // as the API passes it: the league's starting slots
     ...over,
   };
 }
 
-test(
-  "record: a team whose projlog holds only some of its starters (log source) is incomplete, never a complete partial sum",
-  { todo: "DEFECT lineupOf 'log' source sums whatever starters the projlog captured and reports oursIncomplete 0: on the owner's real projlog (week 8: 4–7 starters per team captured, Thursday players and K/DEF missing) every other team's final-week total is a partial sum counted in winner calls, MAE and bias (dry run: team totals 64–81 vs Yahoo 99–132, 12 team-weeks scored). Fix: compare the captured starter count with the league's starting slots and mark the rest unprojected" },
-  () => {
-    const log = finalLog([pair("1", "2", 120, 110), pair("3", "4", 100, 130)], { "1": 115, "2": 112, "3": 105, "4": 118 });
-    const p = projlog({ "1": { n: 9, app: 13 }, "2": { n: 9, app: 12 }, "3": { n: 5, app: 14 }, "4": { n: 9, app: 13 } });
-    const c = (w: number) => (w === 8 ? ctx(log, p) : undefined);
-    const r = buildMatchup(c(8)!, c);
-    const other = r.others[0].sides.find((s) => s.teamId === "3")!;
-    assert.equal(other.ours, null, `team 3: 5 of 9 starters captured → ${other.ours}`);
-    assert.ok(other.oursIncomplete >= 4);
-    const rec = trackRecord(c, log, "1");
-    assert.equal(rec.summary.teamWeeks, 3, "only the three complete team-weeks are scored");
-    assert.equal(rec.summary.games, 1, "only game 1–2 has complete projections on both sides");
-  },
-);
+// Fixed (fix round 1, decision 2). Per-player Yahoo values added to the projlog fixture: the record's Yahoo number is
+// now Σ the same starters' LOCKED Yahoo values (the page / module totals in `finalLog` are display only).
+test("record: a team whose projlog holds only some of its starters (log source) is incomplete, never a complete partial sum", () => {
+  const log = finalLog([pair("1", "2", 120, 110), pair("3", "4", 100, 130)], { "1": 115, "2": 112, "3": 105, "4": 118 });
+  const p = projlog({ "1": { n: 9, app: 13, yahoo: 12.5 }, "2": { n: 9, app: 12, yahoo: 12 }, "3": { n: 5, app: 14, yahoo: 13 }, "4": { n: 9, app: 13, yahoo: 13 } });
+  const c = (w: number) => (w === 8 ? ctx(log, p) : undefined);
+  const r = buildMatchup(c(8)!, c);
+  const other = r.others[0].sides.find((s) => s.teamId === "3")!;
+  assert.equal(other.ours, null, `team 3: 5 of 9 starters captured → ${other.ours}`);
+  assert.equal(other.oursIncomplete, 4);
+  const rec = trackRecord(c, log, "1");
+  assert.equal(rec.summary.teamWeeks, 3, "only the three complete team-weeks are scored");
+  assert.equal(rec.summary.games, 1, "only game 1–2 has complete projections on both sides");
+  const g34 = rec.weeks[0].games.find((g) => g.teams.includes("3"))!;
+  assert.deepEqual([g34.ours, g34.yahoo, g34.oursMissing, g34.yahooMissing, g34.yahooPage], [[null, 117], [null, 117], [4, 0], [4, 0], [105, 118]]);
+  assert.deepEqual([g34.oursCall, g34.yahooCall], [null, null], "an incomplete team-week: no call for either source");
+  // More captured starters than slots (a lineup we cannot tell apart): incomplete too.
+  const over = (w: number) => (w === 8 ? ctx(log, projlog({ "1": { n: 10, app: 13, yahoo: 12 }, "2": { n: 9, app: 12, yahoo: 12 } })) : undefined);
+  assert.deepEqual(trackRecord(over, log, "1").weeks[0].games[0].oursMissing, [1, 0]);
+});
 
-test("record: MAE / bias use the SAME team-weeks for ours and Yahoo's (a team without Yahoo's lock is out of both)", () => {
-  const log = finalLog([pair("1", "2", 120, 110)], { "1": 115 }); // team 2: no Yahoo lock
-  const p = projlog({ "1": { n: 9, app: 12 }, "2": { n: 9, app: 12 } });
+test("record: MAE / bias use the SAME team-weeks for ours and Yahoo's (a team without Yahoo's locked values is out of both)", () => {
+  const log = finalLog([pair("1", "2", 120, 110)], { "1": 115, "2": 100 });
+  const p = projlog({ "1": { n: 9, app: 12, yahoo: 12.5 }, "2": { n: 9, app: 12 } }); // team 2: no Yahoo value captured
   const c = (w: number) => (w === 8 ? ctx(log, p) : undefined);
   const rec = trackRecord(c, log, "1");
   assert.equal(rec.summary.teamWeeks, 1);
   assert.equal(rec.summary.games, 0, "a game counts only with both sources complete");
-  assert.deepEqual([rec.summary.oursMae, rec.summary.yahooMae, rec.summary.oursBias, rec.summary.yahooBias], [12, 5, 12, 5]);
-  assert.equal(rec.weeks[0].games[0].yahooCall, null);
+  assert.deepEqual([rec.summary.oursMae, rec.summary.yahooMae, rec.summary.oursBias, rec.summary.yahooBias], [12, 7.5, 12, 7.5]);
+  const g = rec.weeks[0].games[0];
+  assert.deepEqual([g.yahoo, g.yahooMissing, g.yahooPage, g.oursCall, g.yahooCall], [[112.5, null], [0, 9], [115, 100], null, null]);
 });
 
-test(
-  "record: a tied final is no call (null), not a miss",
-  () => {
-    const log = finalLog([pair("1", "2", 110, 110)], { "1": 115, "2": 100 });
-    const p = projlog({ "1": { n: 9, app: 13 }, "2": { n: 9, app: 12 } });
-    const c = (w: number) => (w === 8 ? ctx(log, p) : undefined);
-    const rec = trackRecord(c, log, "1");
-    assert.equal(rec.summary.games, 0);
-    assert.deepEqual([rec.weeks[0].games[0].oursCall, rec.weeks[0].games[0].yahooCall], [null, null]);
-  },
-);
+test("record: a tied final is no call (null), not a miss", () => {
+  const log = finalLog([pair("1", "2", 110, 110)], { "1": 115, "2": 100 });
+  const p = projlog({ "1": { n: 9, app: 13, yahoo: 13 }, "2": { n: 9, app: 12, yahoo: 12 } });
+  const c = (w: number) => (w === 8 ? ctx(log, p) : undefined);
+  const rec = trackRecord(c, log, "1");
+  assert.equal(rec.summary.games, 0);
+  assert.equal(rec.summary.teamWeeks, 2, "the team totals still count for the errors");
+  assert.deepEqual([rec.weeks[0].games[0].oursCall, rec.weeks[0].games[0].yahooCall], [null, null]);
+});
 
 test("record: a tie projection is no call; incomplete ours (unprojected starter) never counts as 0", () => {
   const log = finalLog([pair("1", "2", 120, 110), pair("3", "4", 100, 90)], { "1": 110, "2": 110, "3": 100, "4": 90 });
-  const p = projlog({ "1": { n: 9, app: 12 }, "2": { n: 9, app: 12 }, "3": { n: 9, app: 10 }, "4": { n: 9, app: 10 } });
+  const p = projlog({ "1": { n: 9, app: 12, yahoo: 12 }, "2": { n: 9, app: 12, yahoo: 12 }, "3": { n: 9, app: 10, yahoo: 11 }, "4": { n: 9, app: 10, yahoo: 10 } });
   const c = (w: number) => (w === 8 ? ctx(log, p) : undefined);
   const rec = trackRecord(c, log, "1");
   const [g1, g2] = rec.weeks[0].games;
-  assert.deepEqual([g1.oursCall, g1.yahooCall], [null, null], "both projected 108 / 110 even");
+  assert.deepEqual([g1.oursCall, g1.yahooCall], [null, null], "both projected 108 / 108 even");
   assert.equal(g2.oursCall, null, "ours 90 – 90: tie projection");
-  assert.equal(g2.yahooCall, true);
+  assert.equal(g2.yahooCall, true, "Yahoo 99 – 90");
   assert.equal(rec.summary.games, 2);
   assert.equal(rec.summary.oursCalls, 0);
 });

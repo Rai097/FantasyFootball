@@ -67,14 +67,14 @@ before(async () => {
 
 const ref = (r: MatchRow): PlayerRef | undefined => (r.yahooId ? { id: r.pos === "DEF" ? `DEF:${r.team}` : `y${r.yahooId}`, name: r.name ?? "", pos: r.pos ?? "", nflTeam: r.team ?? "" } : undefined);
 const TEAMS = Array.from({ length: 12 }, (_, i) => ({ id: String(i + 1), name: `Team ${String.fromCharCode(65 + i)}` }));
-/** Week-7 projlog: every starter of both owner-pairing teams at 15 pts, except `skip`. */
+/** Week-7 projlog: every starter of both owner-pairing teams at 15 pts (Yahoo's locked value 14), except `skip`. */
 function proj7(skip: string[] = []): Record<string, ProjEntry> {
   const out: Record<string, ProjEntry> = {};
   for (const s of log.weeks["7"].pages["4-3"].sides)
     for (const r of s.rows) {
       const p = ref(r);
       if (!p || /^(BN|IR)$/.test(r.slot) || skip.includes(p.name)) continue;
-      out[p.id] = { id: p.id, name: p.name, pos: p.pos as never, team: p.nflTeam, teamId: s.teamId, starter: true, app: 15, capturedAt: "2026-10-22T12:00:00.000Z" };
+      out[p.id] = { id: p.id, name: p.name, pos: p.pos as never, team: p.nflTeam, teamId: s.teamId, starter: true, app: 15, yahoo: 14, capturedAt: "2026-10-22T12:00:00.000Z" };
     }
   return out;
 }
@@ -93,6 +93,7 @@ function ctxOf(week: number, over: Partial<MatchupContext> = {}): MatchupContext
     today: () => 10,
     gameOf: () => ({ kickoff: Date.parse(week === 7 ? "2026-10-26T17:00:00Z" : "2026-11-01T17:00:00Z") }),
     firstKickoff: Date.parse(week === 7 ? "2026-10-23T00:15:00Z" : "2026-10-30T00:15:00Z"),
+    starterCount: 9,
     ...over,
   };
 }
@@ -119,6 +120,8 @@ test("a starter without a locked projection → incomplete, excluded from the re
   assert.deepEqual([r.mine!.sides[0].ours, r.mine!.sides[0].oursIncomplete, r.mine!.sides[0].winPct], [null, 1, null]);
   const g = r.record.weeks[0].games[0];
   assert.deepEqual(g.ours, [null, 135]);
+  // Fix round 1: Yahoo's record number is Σ the same starters' locked values → Burrow missing for Yahoo too.
+  assert.deepEqual([g.yahoo, g.oursMissing, g.yahooMissing, g.yahooPage], [[null, 126], [1, 0], [1, 0], [123.86, 134.97]]);
   assert.equal(g.oursCall, null);
   assert.equal(r.record.summary.games, 0);
   assert.equal(r.record.summary.teamWeeks, 1, "only the complete team-week counts");
@@ -128,17 +131,41 @@ test("record: winner calls and errors over the SAME team-weeks; owner's game fir
   // Week 7 ours: owner 4 = 9 × 15 + a nudge so we call team 4; team 3 = 135.
   const p = proj7();
   p["y32671"].app = 25; // Burrow
+  p["y32671"].yahoo = 5; // Yahoo's locked Burrow: Yahoo projects team 3 ahead
   const c = (w: number) => ctxOf(w, w === 7 ? { proj: p } : {});
   const rec = trackRecord(c, log, "4");
   assert.deepEqual(rec.weeks.map((w) => [w.week, w.recorded, w.games.length]), [[7, true, 6]]);
   const g = rec.weeks[0].games[0];
   assert.equal(g.mine, true);
   assert.deepEqual(g.teams, ["4", "3"]);
-  assert.deepEqual([g.ours, g.yahoo, g.points], [[145, 135], [123.86, 134.97], [165.78, 129.62]]);
+  // Fix round 1: Yahoo = Σ the same final starters' locked Yahoo values (8 × 14 + 5 = 117, 9 × 14 = 126); the page's
+  // totals ride along as yahooPage (display only).
+  assert.deepEqual([g.ours, g.yahoo, g.yahooPage, g.points], [[145, 135], [117, 126], [123.86, 134.97], [165.78, 129.62]]);
   assert.deepEqual([g.oursCall, g.yahooCall], [true, false], "ours called team 4, Yahoo called team 3; team 4 won");
-  assert.deepEqual(rec.summary, { games: 1, oursCalls: 1, yahooCalls: 0, teamWeeks: 2, oursMae: r1((Math.abs(165.78 - 145) + Math.abs(129.62 - 135)) / 2), yahooMae: r1((Math.abs(165.78 - 123.86) + Math.abs(129.62 - 134.97)) / 2), oursBias: r1((165.78 - 145 + 129.62 - 135) / 2), yahooBias: r1((165.78 - 123.86 + 129.62 - 134.97) / 2) });
-  // Other games of week 7 have Yahoo's numbers but not ours: listed, not counted.
-  assert.ok(rec.weeks[0].games.slice(1).every((x) => x.ours[0] === null && x.yahoo[0] !== null && x.oursCall === null));
+  assert.deepEqual(rec.summary, { games: 1, oursCalls: 1, yahooCalls: 0, teamWeeks: 2, oursMae: r1((Math.abs(165.78 - 145) + Math.abs(129.62 - 135)) / 2), yahooMae: r1((Math.abs(165.78 - 117) + Math.abs(129.62 - 126)) / 2), oursBias: r1((165.78 - 145 + 129.62 - 135) / 2), yahooBias: r1((165.78 - 117 + 129.62 - 126) / 2) });
+  // Other games of week 7: none of their starters was captured → incomplete for both sources (9 not projected each),
+  // Yahoo's page totals shown apart; listed, not counted.
+  assert.ok(rec.weeks[0].games.slice(1).every((x) => x.ours[0] === null && x.yahoo[0] === null && x.yahooPage[0] !== null && x.oursMissing[0] === 9 && x.yahooMissing[0] === 9 && x.oursCall === null && x.yahooCall === null));
+});
+
+test("record: a week never captured (no projection log) shows Yahoo's page totals and 'not recorded' ours, out of the metrics", () => {
+  const c = (w: number) => ctxOf(w, { proj: {} });
+  const rec = trackRecord(c, log, "4");
+  const g = rec.weeks[0].games[0];
+  assert.equal(rec.weeks[0].recorded, false);
+  assert.deepEqual([g.ours, g.yahoo, g.yahooPage, g.oursMissing, g.yahooMissing, g.oursCall, g.yahooCall], [[null, null], [123.86, 134.97], [123.86, 134.97], [0, 0], [0, 0], null, false]);
+  assert.deepEqual([rec.summary.games, rec.summary.teamWeeks], [0, 0]);
+});
+
+test("record: a final starter on bye counts a real 0 for both sources; an unmatched starter name is missing for both", () => {
+  const p = proj7();
+  const c = (w: number) => ctxOf(w, w === 7 ? { proj: p, gameOf: (t: string) => (t === "CIN" ? undefined : { kickoff: Date.parse("2026-10-26T17:00:00Z") }) } : {});
+  const g = trackRecord(c, log, "4").weeks[0].games[0];
+  assert.equal(g.oursMissing[0], 0);
+  assert.ok(g.ours[0] !== null && g.ours[0] < 135, `Burrow (CIN, bye) counted 0: ${g.ours[0]}`);
+  const unmatched = (w: number) => ctxOf(w, w === 7 ? { proj: p, resolveRow: (r: MatchRow) => (r.name === "Joe Burrow" ? undefined : ref(r)) } : {});
+  const u = trackRecord(unmatched, log, "4").weeks[0].games[0];
+  assert.deepEqual([u.ours[0], u.yahoo[0], u.oursMissing[0], u.yahooMissing[0]], [null, null, 1, 1]);
 });
 const r1 = (x: number) => Math.round(x * 10) / 10;
 

@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RecordGame } from "../../../server/model/matchup";
-import { callMark, incompleteLabel, notRecorded, orientGame, pair, winPcts } from "./matchupView";
+import { callMark, incompleteLabel, notRecorded, orientGame, pair, recordIncompleteLabel, winPcts } from "./matchupView";
+
+test("record (fix round 1): orientGame swaps every pair; an incomplete week is not 'not recorded'; n starters not projected", () => {
+  const g: RecordGame = { teams: ["2", "1"], mine: true, ours: [null, 120], yahoo: [null, 110], yahooPage: [91, 111], oursMissing: [3, 0], yahooMissing: [4, 0], points: [95, 130], oursCall: null, yahooCall: null };
+  const o = orientGame(g, "1");
+  assert.deepEqual([o.yahooPage, o.oursMissing, o.yahooMissing], [[111, 91], [0, 3], [0, 4]]);
+  assert.equal(notRecorded({ ours: [null, null], oursMissing: [9, 9] }), false, "captured week, starters missing");
+  assert.equal(notRecorded({ ours: [null, null], oursMissing: [0, 0] }), true, "week never captured");
+  assert.equal(recordIncompleteLabel(g), "4 starters not projected");
+  assert.equal(recordIncompleteLabel({ oursMissing: [0, 0], yahooMissing: [0, 0] }), null);
+});
 
 test("incompleteLabel pluralises and hides when complete", () => {
   assert.equal(incompleteLabel(0), null);
@@ -22,7 +32,7 @@ test("winPcts sums to 100 and is null when unknown", () => {
 });
 
 test("orientGame puts the request team first", () => {
-  const g: RecordGame = { teams: ["2", "1"], mine: true, ours: [100, 120], yahoo: [90, 110], points: [95, 130], oursCall: true, yahooCall: false };
+  const g: RecordGame = { teams: ["2", "1"], mine: true, ours: [100, 120], yahoo: [90, 110], yahooPage: [90, 110], oursMissing: [0, 0], yahooMissing: [0, 0], points: [95, 130], oursCall: true, yahooCall: false };
   const o = orientGame(g, "1");
   assert.deepEqual(o.teams, ["1", "2"]);
   assert.deepEqual(o.ours, [120, 100]);
