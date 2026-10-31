@@ -10,6 +10,7 @@ import { ago, stamp } from "../lib/format";
 import { activeAfterImport, postImport } from "../import/importFlow";
 import { removeImportBackup, saveImportBackup } from "../lib/storage";
 import { toApiError, useAsync } from "../lib/useAsync";
+import { AutoImportLine, AutoImportRefresh, type AutoImportHandle } from "../components/AutoImport";
 
 interface Props {
   active: Active | null;
@@ -19,9 +20,11 @@ interface Props {
   /** Called after a successful import / re-import; the app refetches and opens My Team. */
   onImported: (r: ImportResult) => void;
   onSettingsSaved: () => void;
+  /** Server-side scheduled Yahoo import (stopgap until the Yahoo API): status line + admin refresh button. */
+  autoImport?: AutoImportHandle;
 }
 
-export function ImportSection({ active, canManage, onChoose, onImported, onSettingsSaved }: Props) {
+export function ImportSection({ active, canManage, onChoose, onImported, onSettingsSaved, autoImport }: Props) {
   const list = useAsync(() => api.imports(), []);
   const activeImport = active?.provider === "import" ? active.id : undefined;
 
@@ -34,6 +37,12 @@ export function ImportSection({ active, canManage, onChoose, onImported, onSetti
         </a>
       </div>
       <div className="muted small">No Yahoo API needed: a bookmark reads your league pages and sends them here.</div>
+      {autoImport?.status?.enabled && (
+        <div className="row gap wrap">
+          <AutoImportLine status={autoImport.status} />
+          {canManage && <AutoImportRefresh handle={autoImport} />}
+        </div>
+      )}
       <div className="grid-2">
         <BookmarkletCard />
         <PasteCard

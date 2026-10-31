@@ -6,6 +6,7 @@ import { ago, record, stamp } from "../lib/format";
 import { Disclosure } from "../components/ExpandableRow";
 import { toApiError, useAsync, type AsyncState } from "../lib/useAsync";
 import { ImportSection } from "./ImportSection";
+import type { AutoImportHandle } from "../components/AutoImport";
 
 interface Props {
   me: Me;
@@ -17,9 +18,11 @@ interface Props {
   onGo: () => void;
   /** After a successful import / re-import (the app refetches and moves to My Team). */
   onImported: (r: ImportResult) => void;
+  /** Server-side scheduled Yahoo import status (stopgap until the Yahoo API). */
+  autoImport?: AutoImportHandle;
 }
 
-export function ConnectTab({ me, state, active, analysis, justConnected, onChoose, onGo, onImported }: Props) {
+export function ConnectTab({ me, state, active, analysis, justConnected, onChoose, onGo, onImported, autoImport }: Props) {
   // A user (or an admin viewing as one) sees only their own league: re-import yes; demo, Yahoo, delete, settings no.
   const isUser = !!me.scope;
   return (
@@ -64,6 +67,7 @@ export function ConnectTab({ me, state, active, analysis, justConnected, onChoos
         onChoose={onChoose}
         onImported={onImported}
         onSettingsSaved={analysis.reload}
+        autoImport={autoImport}
       />
 
       {state.data && (

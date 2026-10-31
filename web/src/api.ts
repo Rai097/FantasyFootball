@@ -157,6 +157,24 @@ export interface TradeQuery {
   maxGet?: number;
 }
 
+/** GET /api/autoimport — server-side scheduled Yahoo import (stopgap until the Yahoo API; docs/DESIGN.md "Auto-import"). */
+export interface AutoImportStatus {
+  enabled: boolean;
+  disabledReason?: string;
+  leagueId?: string;
+  /** The stored import it refreshes ("y<leagueId>"). */
+  importId?: string;
+  state: "ok" | "paused";
+  reason?: "signed_out" | "captcha" | "empty" | "partial" | "timeout" | "error" | string;
+  detail?: string;
+  lastSuccessAt?: string;
+  lastAttemptAt?: string;
+  lastTeams?: number;
+  nextRunAt?: string;
+  running: boolean;
+  timezone?: string;
+}
+
 /** GET /api/auth/me: who is signed in and what they may see (docs/DESIGN.md "Discord sign-in"). */
 export interface Me {
   id: string;
@@ -291,4 +309,7 @@ export const api = {
   importDelete: (id: string) => request<{ ok: true }>("DELETE", `/api/import/${encodeURIComponent(id)}`),
   importSettings: (id: string, patch: ImportSettingsPatch) => request<StoredImport>("PUT", `/api/import/${encodeURIComponent(id)}/settings`, patch),
   bookmarkletUrl: () => request<{ url: string; version: string }>("GET", "/api/import/bookmarklet-url"),
+  autoImport: () => request<AutoImportStatus>("GET", "/api/autoimport"),
+  /** "Refresh from Yahoo now" (admin): 202 running; 409 busy/disabled; 429 within 2 minutes. */
+  autoImportRefresh: () => request<{ status: "running"; runId: string }>("POST", "/api/autoimport/refresh"),
 };

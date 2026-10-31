@@ -5,6 +5,7 @@ import { ErrorBox, Loading } from "./components/common";
 import { SignIn } from "./components/SignIn";
 import type { ApiError } from "./lib/errors";
 import { HelpTip } from "./components/HelpTip";
+import { AutoImportLine, useAutoImport } from "./components/AutoImport";
 import { ago, stamp } from "./lib/format";
 import { loadActive, loadImportBackup, saveActive } from "./lib/storage";
 import { toApiError, useAsync, type AsyncState } from "./lib/useAsync";
@@ -160,6 +161,9 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
   const state = useAsync(() => api.state(), []);
   const activeKey = active ? `${active.provider}/${active.id}/${active.team ?? ""}` : "";
   const analysis = useAsync(() => (active ? api.analysis(active) : null), [activeKey]);
+  // Server-side scheduled Yahoo import (stopgap until the Yahoo API): refetch the league when a run ends.
+  const autoImport = useAutoImport(() => analysis.reload());
+  const autoForActive = active?.provider === "import" && !!autoImport.status?.enabled && autoImport.status.importId === active.id ? autoImport.status : null;
 
   // Imported leagues live in the server's .data/, which hosted servers lose on restart:
   // re-upload this browser's backup once when the server no longer knows the league.
@@ -262,6 +266,7 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
               League updated {stamp(league.import.importedAt)} · by {league.import.importedBy ?? "—"}
             </span>
           )}
+          {autoForActive && <AutoImportLine status={autoForActive} pill />}
           {state.data && (
             <span className="pill muted">
               Stats {ago(state.data.dbBuiltAt)}
@@ -328,7 +333,13 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
             }}
             onGo={() => setTab("team")}
             onImported={onImported}
+            autoImport={autoImport}
           />
+        )}
+        {autoForActive?.state === "paused" && !autoForActive.running && (
+          <div className="banner">
+            <AutoImportLine status={autoForActive} />
+          </div>
         )}
         {league?.import && staleDays(league.import.importedAt) >= STALE_DAYS && (
 
