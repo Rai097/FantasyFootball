@@ -228,7 +228,7 @@ GET    /api/import                    → [{ id, name, importedAt, numTeams, tea
 GET    /api/import/:id                → stored import (raw rosters + settings)
 PUT    /api/import/:id/settings       { scoring?: Partial<Scoring>, slots?: "QB, WR x2, W/R/T, BN x6", waiverPriority?, myTeamId?, name?, tradeDeadlineWeek? }
 DELETE /api/import/:id                → { ok: true }
-GET    /api/import/bookmarklet.js     → minified bookmarklet (?format=url → { url: "javascript:…" })
+GET    /api/import/bookmarklet.js     → minified bookmarklet (GET /api/import/bookmarklet-url → { url: "javascript:…", version })
 GET    /api/docs/import               → docs/IMPORT.md as text
 ```
 
@@ -1662,3 +1662,26 @@ Display only (web/src); the one API change: `POST /trade/evaluate` now sends `mo
   "Your lineup — rest of season, pts/g" / "<Partner>'s lineup — rest of season, pts/g". Each tooltip says in one sentence
   why the two numbers differ (playoff weeks with matchups vs rest-of-season per-game average).
 
+## One-click import (v7) (2026-10-31) — overrides "Import provider" on how the bookmarklet result reaches the app
+
+- **Flow.** Clicking "Trade Desk import v7" on a Yahoo league page opens `APP_URL/?ftd=<ms>#import-handoff` in a window
+  named `ftd-import` (synchronously, before any await, so the click's user gesture lets the pop-up through; the `?ftd`
+  cache-buster forces a real page load when that tab is already open). The collection runs unchanged; then the
+  bookmarklet posts `{ type: "ftd-import", v: 1, payload }` with targetOrigin = the app's origin (never `"*"`) every
+  400 ms until the app replies `{ type: "ftd-import-ack" }`, the window closes, or 10 s pass. The overlay shows one line:
+  "Sent to Trade Desk ✓", "Pop-up blocked…", "window was closed…" or "Trade Desk didn't answer…". Copy / Download /
+  Diagnostics stay as the fallback.
+- **APP_URL** is injected at bundle time (esbuild `define` `__FTD_APP_URL__`, `bookmarkletCode(appUrl)` cached per URL):
+  PUBLIC_URL when Discord sign-in is configured (never request headers), the request's own origin in dev mode. An
+  unbundled run (node test harness without the global) skips the handoff.
+- **App.** `startImportHandoff()` (main.tsx, before the first render) listens only when the page loaded on
+  `#import-handoff`. `web/src/import/handoff.ts` (pure, tested) accepts a message only from
+  `^https://([a-z0-9-]+\.)*fantasysports\.yahoo\.com$` with `type === "ftd-import"`, `v === 1` and an object payload, and
+  only the first valid one per page load; everything else is ignored silently. The app acks to `event.source` with
+  `event.origin` as target, holds the payload in memory only (never localStorage), and the signed-in desk posts it
+  through `postImport` (`web/src/import/importFlow.ts`, the same POST /api/import + backup path as a paste, same CSRF and
+  Origin guard), then lands on My Team with the usual toast. Signed out: the sign-in screen says the import arrived and
+  to click the bookmark again after signing in (sign-in reloads the page, so the payload is not kept).
+- **No server auth or guard change, no new endpoint;** still read-only toward Yahoo.
+- **Unverified:** a real Yahoo page (pop-up permission for a javascript: bookmark; a Cross-Origin-Opener-Policy on
+  Yahoo would cut the opener link: the overlay then says the window was closed and Copy still works).

@@ -63,12 +63,46 @@ const walk = (e: FakeEl, out: FakeEl[] = []): FakeEl[] => (out.push(e), e.childr
 
 export type Route = (url: URL) => { status: number; html: string } | "throw";
 let runN = 0;
-/** Runs the real bookmarklet against `route`; returns the payload it would copy. */
-export async function runBookmarklet(route: Route): Promise<{ payload: any; diagnostics: any[]; overlay: string }> {
+/** One-click handoff (v7) under test: the injected app URL and how the opened Trade Desk window behaves. */
+export interface HandoffOpts {
+  appUrl: string;
+  /** "ack" = the app answers on the first message; "silent" = never answers; "blocked" = window.open returns null. */
+  popup: "ack" | "silent" | "blocked";
+}
+export interface HandoffLog {
+  opened: { url: string; name: string }[];
+  sent: { data: any; target: string }[];
+}
+const HANDOFF_DONE = /Sent to Trade Desk|Pop-up blocked|didn't answer|window was closed|Nothing sent/;
+
+/** Runs the real bookmarklet against `route`; returns the payload it would copy (and the handoff log when `handoff`). */
+export async function runBookmarklet(route: Route, handoff?: HandoffOpts): Promise<{ payload: any; diagnostics: any[]; overlay: string; handoff: HandoffLog }> {
   const body = fakeEl("body");
   const g = globalThis as any;
-  const saved = { location: g.location, document: g.document, fetch: g.fetch };
+  const saved = { location: g.location, document: g.document, fetch: g.fetch, window: g.window, app: g.__FTD_APP_URL__ };
   let copied = "";
+  const log: HandoffLog = { opened: [], sent: [] };
+  if (handoff) {
+    const listeners = new Set<(e: unknown) => void>();
+    const appOrigin = new URL(handoff.appUrl).origin;
+    const popup = {
+      closed: false,
+      postMessage(data: unknown, target: string) {
+        log.sent.push({ data, target });
+        if (handoff.popup === "ack" && target === appOrigin)
+          setTimeout(() => listeners.forEach((l) => l({ source: popup, origin: appOrigin, data: { type: "ftd-import-ack" } })), 0);
+      },
+    };
+    g.__FTD_APP_URL__ = handoff.appUrl;
+    g.window = {
+      open: (url: string, name: string) => (log.opened.push({ url, name }), handoff.popup === "blocked" ? null : popup),
+      addEventListener: (_t: string, l: (e: unknown) => void) => void listeners.add(l),
+      removeEventListener: (_t: string, l: (e: unknown) => void) => void listeners.delete(l),
+    };
+  } else {
+    delete g.__FTD_APP_URL__;
+    delete g.window;
+  }
   g.location = { pathname: "/f1/1405188/players", hostname: "football.fantasysports.yahoo.com", origin: "https://football.fantasysports.yahoo.com" };
   g.document = {
     documentElement: { outerHTML: "<html></html>" },
@@ -93,13 +127,21 @@ export async function runBookmarklet(route: Route): Promise<{ payload: any; diag
       if (Date.now() > deadline) throw new Error("bookmarklet did not finish");
       await new Promise((r) => setTimeout(r, 10));
     }
+    while (handoff && !walk(body).some((e) => HANDOFF_DONE.test(e.textContent))) {
+      if (Date.now() > deadline + 15_000) throw new Error("bookmarklet handoff did not finish");
+      await new Promise((r) => setTimeout(r, 10));
+    }
     await copy.onclick!();
     const payload = JSON.parse(copied);
-    return { payload, diagnostics: payload.diagnostics, overlay: walk(body).map((e) => e.textContent).join("\n") };
+    return { payload, diagnostics: payload.diagnostics, overlay: walk(body).map((e) => e.textContent).join("\n"), handoff: log };
   } finally {
     g.location = saved.location;
     g.document = saved.document;
     g.fetch = saved.fetch;
+    if (saved.window === undefined) delete g.window;
+    else g.window = saved.window;
+    if (saved.app === undefined) delete g.__FTD_APP_URL__;
+    else g.__FTD_APP_URL__ = saved.app;
   }
 }
 

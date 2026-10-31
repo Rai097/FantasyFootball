@@ -7,7 +7,9 @@ import type { ApiError } from "./lib/errors";
 import { HelpTip } from "./components/HelpTip";
 import { ago, stamp } from "./lib/format";
 import { loadActive, loadImportBackup, saveActive } from "./lib/storage";
-import { useAsync, type AsyncState } from "./lib/useAsync";
+import { toApiError, useAsync, type AsyncState } from "./lib/useAsync";
+import { activeAfterImport, postImport } from "./import/importFlow";
+import { useImportHandoff } from "./import/useImportHandoff";
 import { ConnectTab } from "./tabs/ConnectTab";
 import { LeagueTab } from "./tabs/LeagueTab";
 import { MyTeamTab } from "./tabs/MyTeamTab";
@@ -88,7 +90,10 @@ export function App() {
     return () => setAuthProblemHandler(undefined);
   }, [loadMe, setMe]);
 
-  if (problem) return <SignIn problem={problem} />;
+  // A one-click Yahoo import that arrives while signed out stays in memory only; signing in reloads the page.
+  const handoff = useImportHandoff();
+  if (problem)
+    return <SignIn problem={problem} note={handoff.payload ? "Your Yahoo import arrived but you are signed out: sign in, then click the bookmark on Yahoo again." : undefined} />;
   if (meErr)
     return (
       <div className="app">
@@ -114,7 +119,8 @@ export function App() {
 function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSignedOut: () => void }) {
   const [active, setActiveRaw] = useState<Active | null>(() => scopedActive(me, loadActive()));
   const [justConnected, setJustConnected] = useState(false);
-  const [tab, setTabRaw] = useState<TabId>(() => tabFromHash() ?? (scopedActive(me, loadActive()) ? "team" : "connect"));
+  const handoff = useImportHandoff();
+  const [tab, setTabRaw] = useState<TabId>(() => (handoff.opened ? "connect" : tabFromHash() ?? (scopedActive(me, loadActive()) ? "team" : "connect")));
 
   const setTab = useCallback((t: TabId) => {
     setTabRaw(t);
@@ -205,6 +211,26 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
     [state, analysis, setTab],
   );
 
+  // One-click import (v7): the payload the Yahoo bookmarklet handed over goes through the same POST as a paste.
+  const [handoffStatus, setHandoffStatus] = useState<{ phase: "waiting" | "importing" } | { phase: "failed"; error: ApiError } | null>(() =>
+    handoff.opened ? { phase: "waiting" } : null,
+  );
+  const { payload: handoffPayload, take: takeHandoff } = handoff;
+  useEffect(() => {
+    if (!handoffPayload) return;
+    const body = takeHandoff(); // claimed once, even when effects run twice
+    if (!body) return;
+    setHandoffStatus({ phase: "importing" });
+    postImport(body, true).then(
+      (r) => {
+        setHandoffStatus(null);
+        setActive(activeAfterImport(r, active));
+        onImported(r);
+      },
+      (e) => setHandoffStatus({ phase: "failed", error: toApiError(e) }),
+    );
+  }, [handoffPayload, takeHandoff, active, setActive, onImported]);
+
   const league = analysis.data?.league;
   const week = league?.settings.currentWeek ?? state.data?.currentWeek;
 
@@ -273,6 +299,23 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
       </nav>
 
       <main className="main">
+        {tab === "connect" && handoffStatus?.phase === "waiting" && (
+          <div className="notice banner" role="status">
+            Waiting for your Yahoo league…{" "}
+            <HelpTip text="The Trade Desk bookmark on Yahoo is reading your league (10–30 s) and sends it here when done. Keep the Yahoo tab open. If its box says the send failed, click Copy to clipboard there and paste below." label="About the one-click import" />
+          </div>
+        )}
+        {handoffStatus?.phase === "importing" && (
+          <div className="notice banner" role="status">
+            Importing your Yahoo league…
+          </div>
+        )}
+        {tab === "connect" && handoffStatus?.phase === "failed" && (
+          <div className="stack-sm">
+            <div className="notice warn banner">One-click import failed: copy the result from the Yahoo box and paste it below.</div>
+            <ErrorBox error={handoffStatus.error} />
+          </div>
+        )}
         {tab === "connect" && (
           <ConnectTab
             me={me}
@@ -291,11 +334,11 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
 
           <div className="notice warn banner">
             Rosters were imported <b>{ago(league.import.importedAt)}</b>, so trades, adds and drops since then are missing. Open your Yahoo
-            league, click the <b>Trade Desk import</b> bookmark and paste the result on the{" "}
+            league and click the <b>Trade Desk import</b> bookmark to refresh (or paste the result on the{" "}
             <button className="link-btn" onClick={() => setTab("connect")}>
               Connect tab
-            </button>{" "}
-            to refresh. Your settings are kept.
+            </button>
+            ). Your settings are kept.
           </div>
         )}
         {tab !== "connect" && league?.import?.settingsSource === "default" && (

@@ -3,8 +3,18 @@
 // GET /api/import/bookmarklet.js. It runs on football.fantasysports.yahoo.com
 // pages while the user is logged in, reads the league's own pages with
 // same-origin fetches, and shows the result for the user to copy/download.
-// It never sends data anywhere else.
+// One-click (v7): it also opens Trade Desk (APP_URL, injected by the server's esbuild `define`) in a named window and
+// hands the result over with postMessage to exactly that origin (never "*"); the app then imports it through its own
+// signed-in POST /api/import. It never sends data anywhere else. See docs/DESIGN.md "One-click import (v7)".
 import { LIST_VIEW, NAV_TEXT, findStatsView, navLink, parseListProjectionHtml, parseMyTeamId, parsePlayersHtml, parseProjectionHtml, parseSettingsHtml, parseStandingsHtml, playerKey, waiverGroupOf, waiverStatusOf, type ScrapedPlayer, type StandingsRecord, type WaiverGroup, type WaiverGroupList, type WaiverList } from "./yahooHtml";
+import { HANDOFF_ACK, HANDOFF_HASH, HANDOFF_TYPE, HANDOFF_VERSION, HANDOFF_WINDOW } from "./handoff";
+
+declare const __FTD_APP_URL__: string | undefined;
+/** Trade Desk's URL (origin + optional path), injected at bundle time; "" = no one-click handoff (unbundled runs). */
+const APP_URL: string = typeof __FTD_APP_URL__ === "string" ? __FTD_APP_URL__ : "";
+/** How long the result is re-sent while waiting for Trade Desk's ack. */
+const SEND_MS = 10_000;
+const SEND_EVERY_MS = 400;
 
 const DEFAULT_SLOTS = ["QB", "WR", "WR", "RB", "RB", "TE", "FLEX", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN", "IR"];
 const HALF_PPR = { passYd: 0.04, passTd: 4, passInt: -1, rushYd: 0.1, rushTd: 6, rec: 0.5, recYd: 0.1, recTd: 6, twoPt: 2, fumLost: -2, teRec: 0 };
@@ -50,6 +60,51 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, style?
   return e;
 }
 
+/**
+ * Opens Trade Desk in the named import window. Must run before the first await so the click still counts as a user
+ * gesture (pop-up blockers). undefined = no handoff configured; null = the browser blocked the pop-up.
+ */
+function openApp(): Window | null | undefined {
+  if (!APP_URL || typeof window === "undefined" || typeof window.open !== "function") return undefined;
+  try {
+    // A fresh query string forces a real page load when the named tab is already open on Trade Desk (a hash-only
+    // change would not reload it, and the app accepts one message per page load).
+    return window.open(`${APP_URL}/?ftd=${Date.now()}#${HANDOFF_HASH}`, HANDOFF_WINDOW);
+  } catch {
+    return null;
+  }
+}
+
+/** Sends the result to the Trade Desk window until it acks, the window closes, or SEND_MS passes. */
+function sendToApp(popup: Window, payload: unknown): Promise<"acked" | "closed" | "timeout"> {
+  const origin = new URL(APP_URL).origin;
+  return new Promise((resolve) => {
+    const started = Date.now();
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const finish = (r: "acked" | "closed" | "timeout") => {
+      clearInterval(timer);
+      window.removeEventListener("message", onMessage);
+      resolve(r);
+    };
+    function onMessage(e: MessageEvent) {
+      if (e.source === popup && e.origin === origin && (e.data as { type?: unknown } | null)?.type === HANDOFF_ACK) finish("acked");
+    }
+    const send = () => {
+      if (popup.closed) return finish("closed");
+      if (Date.now() - started > SEND_MS) return finish("timeout");
+      try {
+        // targetOrigin = Trade Desk's origin: a window that navigated anywhere else gets nothing.
+        popup.postMessage({ type: HANDOFF_TYPE, v: HANDOFF_VERSION, payload }, origin);
+      } catch {
+        /* retried on the next tick */
+      }
+    };
+    window.addEventListener("message", onMessage);
+    timer = setInterval(send, SEND_EVERY_MS);
+    send();
+  });
+}
+
 const BTN = "font:inherit;font-weight:600;margin:8px 8px 0 0;padding:6px 12px;border-radius:6px;border:1px solid #3b82f6;cursor:pointer;";
 
 async function run(): Promise<void> {
@@ -63,6 +118,7 @@ async function run(): Promise<void> {
     say("open any page of your league on football.fantasysports.yahoo.com (the URL contains /f1/<league number>/) and click the bookmark again.");
     return;
   }
+  const popup = openApp();
   const leagueId = m[1];
   const base = `${location.origin}/f1/${leagueId}`;
   const diagnostics: Diag[] = [];
@@ -373,7 +429,7 @@ async function run(): Promise<void> {
 
   // ---- summary
   box.textContent = "";
-  box.appendChild(el("div", "Trade Desk import v6", "font-weight:700;font-size:15px;margin-bottom:6px"));
+  box.appendChild(el("div", "Trade Desk import v7", "font-weight:700;font-size:15px;margin-bottom:6px"));
   const summary = el("div");
   const noPos = diagnostics.reduce((a, d) => a + (Array.isArray(d.noPos) ? d.noPos.length : 0), 0);
   summary.textContent =
@@ -390,6 +446,9 @@ async function run(): Promise<void> {
   if (!teams.length)
     box.appendChild(el("div", "No teams found. Please copy the diagnostics (button below) and send them to whoever maintains your Trade Desk.", "color:#ffb3b3"));
 
+  // One-click handoff line: the Copy / Download buttons below stay as the fallback.
+  const handoff = el("div", "", "margin-top:8px;font-weight:600");
+  if (popup !== undefined) box.appendChild(handoff);
   const out = el("div", "", "margin-top:6px;color:#9fb0c8");
   const copy = el("button", "Copy to clipboard", BTN + "background:#3b82f6;color:#fff");
   copy.onclick = async () => {
@@ -424,6 +483,18 @@ async function run(): Promise<void> {
   const close = el("button", "Close", BTN + "background:transparent;color:#9fb0c8;border-color:#445");
   close.onclick = () => box.remove();
   box.append(copy, dl, diag, close, out);
+
+  if (popup === null) handoff.textContent = "Pop-up blocked: Trade Desk could not open. Copy the result and paste it in Trade Desk → Connect.";
+  else if (popup && teams.length) {
+    handoff.textContent = "Sending to Trade Desk…";
+    const r = await sendToApp(popup, payload);
+    handoff.textContent =
+      r === "acked"
+        ? "Sent to Trade Desk ✓ It imports there; you can close this box."
+        : r === "closed"
+          ? "The Trade Desk window was closed (or Yahoo cut it off). Copy the result and paste it in Trade Desk → Connect."
+          : "Trade Desk didn't answer. Sign in there and click the bookmark again, or copy the result and paste it.";
+  } else if (popup) handoff.textContent = "Nothing sent to Trade Desk: no teams found.";
 }
 
 run().catch((e: Error) => {

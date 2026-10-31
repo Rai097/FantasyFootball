@@ -1,7 +1,8 @@
 // Sign-in screen shown when there is no session (any 401) or the Discord account isn't on the access list.
 import type { AuthProblem } from "../api";
 
-export function SignIn({ problem }: { problem: AuthProblem }) {
+/** `note`: one extra line, e.g. that a one-click Yahoo import arrived while signed out. */
+export function SignIn({ problem, note }: { problem: AuthProblem; note?: string }) {
   const next = `${window.location.pathname}${window.location.hash}`;
   return (
     <div className="signin">
@@ -17,6 +18,7 @@ export function SignIn({ problem }: { problem: AuthProblem }) {
         ) : (
           <p className="muted no-margin">Sign in to see your team.</p>
         )}
+        {note && <div className="notice warn small">{note}</div>}
         <a className="btn primary signin-btn" href={`/auth/login?next=${encodeURIComponent(next)}`}>
           Sign in with Discord
         </a>

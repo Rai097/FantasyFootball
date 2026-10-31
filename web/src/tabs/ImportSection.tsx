@@ -7,6 +7,7 @@ import { ErrorBox, Loading } from "../components/common";
 import { DetailList, Disclosure, ExpandableList, ExpandableRow, type DetailLine } from "../components/ExpandableRow";
 import { ApiError } from "../lib/errors";
 import { ago, stamp } from "../lib/format";
+import { activeAfterImport, postImport } from "../import/importFlow";
 import { removeImportBackup, saveImportBackup } from "../lib/storage";
 import { toApiError, useAsync } from "../lib/useAsync";
 
@@ -32,7 +33,7 @@ export function ImportSection({ active, canManage, onChoose, onImported, onSetti
           Step-by-step guide
         </a>
       </div>
-      <div className="muted small">No Yahoo API needed: a bookmark reads your league pages, you paste the result here.</div>
+      <div className="muted small">No Yahoo API needed: a bookmark reads your league pages and sends them here.</div>
       <div className="grid-2">
         <BookmarkletCard />
         <PasteCard
@@ -40,9 +41,7 @@ export function ImportSection({ active, canManage, onChoose, onImported, onSetti
           activeImport={activeImport}
           onImported={(r) => {
             list.reload();
-            // Re-import keeps the team the user picked; a new league starts on its detected team.
-            const team = r.updated && active?.provider === "import" && active.id === r.id && active.team && r.teams.some((t) => t.id === active.team) ? active.team : r.myTeamId ?? r.teams[0]?.id;
-            onChoose({ provider: "import", id: r.id, team });
+            onChoose(activeAfterImport(r, active));
             onImported(r);
           }}
         />
@@ -70,7 +69,7 @@ function BookmarkletCard() {
       <div className="row gap wrap">
         {bm.data ? (
           <a ref={ref} draggable className="btn primary bookmarklet" onClick={(e) => (e.preventDefault(), alert("Drag this button to your bookmarks bar, then click it while on your Yahoo league page."))}>
-            Trade Desk import v6
+            Trade Desk import v7
           </a>
         ) : bm.loading ? (
           <span className="muted">loading…</span>
@@ -80,17 +79,15 @@ function BookmarkletCard() {
         </span>
       </div>
       {bm.error && <ErrorBox error={bm.error} onRetry={bm.reload} />}
-      <Disclosure title="How to use it (4 steps)">
+      <Disclosure title="How to use it (3 steps)">
         <ol className="steps">
-          <li>Drag the button above to your bookmarks bar.</li>
+          <li>Drag the button above to your bookmarks bar (replace any older Trade Desk bookmark).</li>
           <li>
             Open your league on <b>football.fantasysports.yahoo.com</b> (address contains <code>/f1/</code>).
           </li>
-          <li>Click the bookmark and wait 10–30 s for the box.</li>
-          <li>
-            Click <b>Copy to clipboard</b>, then paste in step 2.
-          </li>
+          <li>Click the bookmark: Trade Desk opens and imports on its own in 10–30 s.</li>
         </ol>
+        <div className="muted small">Pop-up blocked or no answer: click Copy to clipboard in the Yahoo box and paste in step 2.</div>
         <div className="muted small">On a phone: paste roster text instead.</div>
       </Disclosure>
     </div>
@@ -122,12 +119,7 @@ function PasteCard({ imports, activeImport, onImported }: { imports: ImportSumma
     } else body = { text: trimmed, teamName: teamName.trim() || undefined, id: !multi && target ? target : undefined };
     setBusy(true);
     try {
-      const r = await api.importPost(body);
-      // Replace (never merge with) this league's browser backup: the server's merged copy, else the payload.
-      removeImportBackup(r.id);
-      await api.importGet(r.id).then(saveImportBackup, () => {
-        if (isJson) saveImportBackup({ ...(body as object), id: r.id });
-      });
+      const r = await postImport(body, isJson);
       if (r.skippedLines) setNote(`${r.skippedLines} line(s) were not recognised as players and were skipped.`);
       setText("");
       onImported(r);
@@ -146,7 +138,7 @@ function PasteCard({ imports, activeImport, onImported }: { imports: ImportSumma
         if (trimmed) submit();
       }}
     >
-      <h3 className="no-margin">2 · Paste it here</h3>
+      <h3 className="no-margin">2 · Or paste it here</h3>
       <label className="field">
         <span>Paste import JSON or roster text</span>
         <textarea

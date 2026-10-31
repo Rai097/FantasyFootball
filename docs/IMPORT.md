@@ -2,14 +2,14 @@
 
 Yahoo now approves Fantasy API apps one at a time, which can take one to two
 weeks. Until yours is approved you can still use Trade Desk with your real
-league: you copy the information from Yahoo's own web pages (where you are
-already logged in) and paste it into Trade Desk.
+league: a bookmark reads Yahoo's own web pages (where you are already logged
+in) and hands the result to Trade Desk.
 
 There are two ways. **The bookmark** (recommended) grabs every team, your
 league settings and the free-agent list in one click. **Paste roster text** is
 a manual fallback that works on any device.
 
-Nothing is ever changed on Yahoo. Trade Desk only reads what you paste.
+Nothing is ever changed on Yahoo. Trade Desk only reads what the bookmark sends or you paste.
 
 ---
 
@@ -21,7 +21,7 @@ You do this once:
 2. Find **Import from Yahoo (browser)**. Make sure your browser's bookmarks
    bar is visible (Chrome/Edge: Ctrl+Shift+B, Mac: Cmd+Shift+B; Firefox: View
    → Toolbars → Bookmarks Toolbar; Safari: View → Show Favorites Bar).
-3. Drag the blue **Trade Desk import v6** button onto the bookmarks bar (delete any older "Trade Desk import" bookmark first: old bookmarks keep their old code, and v2 lacks Yahoo projections). (Clicking it
+3. Drag the blue **Trade Desk import v7** button onto the bookmarks bar (delete any older "Trade Desk import" bookmark first: old bookmarks keep their old code; v6 and older need copy and paste, and v2 lacks Yahoo projections). (Clicking it
    on the Trade Desk page does nothing; it only works on Yahoo.)
 
 Each time you want fresh data:
@@ -30,21 +30,26 @@ Each time you want fresh data:
    **football.fantasysports.yahoo.com**. Any page of the league works: the
    address must contain `/f1/` followed by your league number, for example
    `https://football.fantasysports.yahoo.com/f1/1405188`.
-2. Click **Trade Desk import v6** on your bookmarks bar.
-3. Wait 10–30 seconds. A dark box appears in the top-right corner listing
-   the teams it found and how many players each has.
-4. Click **Copy to clipboard** (or **Download JSON** and open the file in a
-   text editor and copy everything).
-5. Back in Trade Desk → Connect → **Paste import JSON or roster text**, paste
-   and click **Import**. You land on **My Team**.
-6. Go back to the Connect tab and check **League settings** under the import
-   box: scoring, roster slots, your waiver priority and which team is yours.
-   Click **Save settings** after any change.
+2. Click **Trade Desk import v7** on your bookmarks bar. Trade Desk opens in
+   a new tab and says "Waiting for your Yahoo league…". Be signed in to
+   Trade Desk in this browser.
+3. Wait 10–30 seconds. The bookmark sends the result to that tab, which
+   imports it on its own and lands on **My Team**. The dark box on the Yahoo
+   tab says **Sent to Trade Desk ✓**.
+4. The first time: go to the Connect tab and check **League settings** under
+   the import box: scoring, roster slots, your waiver priority and which team
+   is yours. Click **Save settings** after any change.
+
+If the box on Yahoo says the pop-up was blocked or Trade Desk didn't answer
+(for example you were signed out), the old way still works: click **Copy to
+clipboard** (or **Download JSON** and copy the file's text), then in Trade
+Desk → Connect → **Paste import JSON or roster text**, paste and click
+**Import**. Allowing pop-ups from football.fantasysports.yahoo.com makes the
+next run one click again.
 
 ### Updating rosters (re-import)
 
-After trades, adds and drops on Yahoo, run the bookmark again and paste the
-result the same way. **You do not need to delete the league first.** Trade
+After trades, adds and drops on Yahoo, run the bookmark again. **You do not need to delete the league first.** Trade
 Desk recognises the same Yahoo league (by its league number) and updates it
 in place:
 
@@ -94,7 +99,8 @@ in `.data/import-<id>-history.json`) for this comparison.
   show stay "—".
 
 It only makes requests to Yahoo pages of *your* league, in *your* browser,
-and never sends the data anywhere. You carry it over by copy and paste.
+and sends the data only to the Trade Desk window it opened (or you carry it
+over by copy and paste).
 
 ### If the counts look wrong
 

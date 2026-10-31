@@ -35,6 +35,7 @@ import {
 import { parseRosterText } from "./providers/import-text.js";
 import { createHash } from "node:crypto";
 import { bookmarkletCode, bookmarkletUrl } from "./providers/import-bookmarklet.js";
+import { config } from "./config.js";
 import { analyzeLeague, analyzeTeams, type LeagueContext } from "./model/analysis.js";
 import { buildLeagueView } from "./model/league.js";
 import { attachFloor } from "./model/signals.js";
@@ -663,11 +664,19 @@ apiRouter.get(
 );
 
 // ---------------------------------------------------------------- import (Yahoo web pages, no API)
+/**
+ * Where the bookmarklet hands its result over (one-click import, v7): PUBLIC_URL when Discord sign-in is configured
+ * (never request headers, like the OAuth redirect URI); in dev mode the request's own origin (Vite keeps Host :5173).
+ */
+function bookmarkletAppUrl(req: Request): string {
+  return config.auth.mode === "discord" ? config.auth.publicUrl : `${req.protocol}://${req.get("host") ?? `localhost:${config.port}`}`;
+}
+
 apiRouter.get(
   "/api/import/bookmarklet.js",
-  h(async (_req, res) => {
+  h(async (req, res) => {
     // no-store: Cloudflare caches ".js" paths at the edge and gave browsers a 4-hour copy of an old bookmarklet.
-    res.type("application/javascript").set("Cache-Control", "no-store").send(await bookmarkletCode());
+    res.type("application/javascript").set("Cache-Control", "no-store").send(await bookmarkletCode(bookmarkletAppUrl(req)));
   }),
 );
 
@@ -675,10 +684,11 @@ apiRouter.get(
 // deploy changes the next drag at once; `version` lets the UI and the import box show which code a bookmark holds.
 apiRouter.get(
   "/api/import/bookmarklet-url",
-  h(async (_req, res) => {
-    const code = await bookmarkletCode();
+  h(async (req, res) => {
+    const appUrl = bookmarkletAppUrl(req);
+    const code = await bookmarkletCode(appUrl);
     const version = createHash("sha256").update(code).digest("hex").slice(0, 8);
-    res.set("Cache-Control", "no-store").json({ url: await bookmarkletUrl(), version });
+    res.set("Cache-Control", "no-store").json({ url: await bookmarkletUrl(appUrl), version });
   }),
 );
 
