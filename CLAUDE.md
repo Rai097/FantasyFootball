@@ -44,6 +44,10 @@ Open work and "Resume here" live in TASKS.md.
   under a short card, e.g. Byes & injuries); the same kind of data uses the same component everywhere (bench = the same
   table as the starting lineup, never a different two-column list). Charts, graphs and tables before text.
 - Never commit `.env`, `.cache/`, `.data/` (already in .gitignore).
+- Leftovers (owner, 2026-10-30/31): Claude and its agents delete their OWN scratch files and finished agent worktrees
+  themselves (`rm -rf` under the session scratchpad /private/tmp/claude-501/…, `git worktree remove`/`prune`,
+  `git branch -d` of merged agent branches) without asking or listing them for the owner. Never `.data/`, backups
+  (`*.bak-*`), ~/FantasyFootball-run or the Yahoo Chrome profile. Allow/deny rules: .claude/settings.local.json.
 - Yahoo API access is pending Yahoo's approval (since July 2026 apps need it); until then
   the `import` provider is the real-league path. Yahoo code must stay defensive and
   log the raw response on parse failure.
