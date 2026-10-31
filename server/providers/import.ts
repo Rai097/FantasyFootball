@@ -11,7 +11,7 @@ import { draftBoard } from "./demo.js";
 import { withLock } from "./lock.js";
 import { DATA_DIR, readJson, removeJson, writeJson } from "./store.js";
 import { findPlayer, withYahooStatus, type YahooPlayerEntry } from "./yahoo-parse.js";
-import { mergeCapture, SKILL_POS, type Kickoffs, type MergeResult, type ProjEntry, type ProjLog } from "../model/projLog.js";
+import { CAPTURE_POS, mergeCapture, type Kickoffs, type MergeResult, type ProjEntry, type ProjLog } from "../model/projLog.js";
 
 export const MAX_BYTES = 1_000_000;
 export const MAX_TEAMS = 20;
@@ -838,7 +838,8 @@ export async function deleteProjLog(id: string): Promise<void> {
 }
 
 /**
- * This import's capture for `week`: every rostered and free-agent skill player (QB/RB/WR/TE) whose NFL team has a game
+ * This import's capture for `week`: every rostered and free-agent player (QB/RB/WR/TE/K/DEF; DEF = the team defense's
+ * resolved id "DEF:<team>", its kickoff = its team's) whose NFL team has a game
  * that week, with the app's projection for the week (`appWeek`, undefined = no projection → skipped, never 0) and
  * Yahoo's weekly number only when it was captured in that same week (`projWeek === week`).
  */
@@ -852,7 +853,7 @@ export function projCaptureEntries(
   const out = new Map<string, Omit<ProjEntry, "capturedAt">>();
   const add = (raw: ImportPlayerRaw, teamId: string | null, starter: boolean) => {
     const p = resolvePlayer(db, raw);
-    if (!p || out.has(p.id) || !SKILL_POS.includes(p.pos) || !hasGame(p.team)) return;
+    if (!p || out.has(p.id) || !CAPTURE_POS.includes(p.pos) || !hasGame(p.team)) return;
     const app = appWeek(p);
     if (app === undefined || !Number.isFinite(app)) return;
     const e: Omit<ProjEntry, "capturedAt"> = { id: p.id, name: p.name, pos: p.pos, team: p.team, teamId, starter, app };

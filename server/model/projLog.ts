@@ -1,10 +1,17 @@
 // Projection accuracy log (docs/DESIGN.md "Projection accuracy log (2026-10-30)"). Pure: merge a weekly capture of the
 // app's and Yahoo's projections into the log (only captures taken before the player's kickoff count), resolve actual
 // points, and score both projections over the SAME player-weeks. I/O lives in server/providers/import.ts.
+// The log is the one per-player record of pre-kickoff projections (K and DEF included since "Matchups and results log
+// (2026-10-31)": the matchup view locks team totals from it); the accuracy metrics score skill players only (K / DEF
+// have no nflverse actuals), filtered at the report, never at capture.
 import { score } from "./scoring.js";
 import type { DetailItem, Position, Scoring, StatLine } from "./types.js";
 
 export const SKILL_POS: readonly Position[] = ["QB", "RB", "WR", "TE"];
+/** Positions the log captures: every starting fantasy position (K / DEF feed matchup totals, not accuracy metrics). */
+export const CAPTURE_POS: readonly Position[] = ["QB", "RB", "WR", "TE", "K", "DEF"];
+/** Accuracy metrics (report, per-player "Vs Yahoo", per-team numbers) score skill positions only. */
+const skillOnly = <T extends { pos: Position }>(rows: T[]): T[] => rows.filter((r) => SKILL_POS.includes(r.pos));
 /** Weeks kept (an NFL regular season has 18) and entries per week (rostered + free agents; imports cap FAs at 600). */
 export const PROJLOG_MAX_WEEK = 18;
 export const PROJLOG_MAX_PER_WEEK = 1200;
@@ -47,7 +54,7 @@ export interface MergeResult {
   log: ProjLog;
   /** Entries written (new or replacing an older pre-kickoff capture). */
   kept: number;
-  /** Entries refused: taken at/after kickoff, kickoff unknown, not a skill player, bad number, or an older capture. */
+  /** Entries refused: taken at/after kickoff, kickoff unknown, not a fantasy position, bad number, or an older capture. */
   ignored: number;
 }
 
@@ -76,7 +83,7 @@ export function mergeCapture(
     const kick = ms(cap.kickoffs.byTeam.get(e.team) ?? cap.kickoffs.first);
     const prev = week[e.id];
     const ok =
-      SKILL_POS.includes(e.pos) &&
+      CAPTURE_POS.includes(e.pos) &&
       finite(e.app) &&
       e.app >= 0 &&
       (e.yahoo === undefined || finite(e.yahoo)) &&
@@ -233,10 +240,10 @@ function errStats(rows: Compared[]): ErrStats {
   return { n, appMae: r2(am / n), yahooMae: r2(ym / n), appBias: r2(ab / n), yahooBias: r2(yb / n) };
 }
 
-/** Per-player comparison (≥ `min` compared weeks). */
+/** Per-player comparison (≥ `min` compared weeks; skill players only). */
 export function playerAccuracy(rows: ResolvedRow[], min = MIN_PLAYER_WEEKS): Map<string, PlayerAccuracy> {
   const by = new Map<string, Compared[]>();
-  for (const r of rows) if (isCompared(r)) by.set(r.id, [...(by.get(r.id) ?? []), r]);
+  for (const r of skillOnly(rows)) if (isCompared(r)) by.set(r.id, [...(by.get(r.id) ?? []), r]);
   const out = new Map<string, PlayerAccuracy>();
   for (const [id, rs] of by) {
     if (rs.length < min) continue;
@@ -258,7 +265,9 @@ export function playerAccuracy(rows: ResolvedRow[], min = MIN_PLAYER_WEEKS): Map
   return out;
 }
 
-export function accuracyReport(rows: ResolvedRow[], listSize = 5): AccuracyReport {
+/** The accuracy report over skill players only: K / DEF rows in the log never reach it (no nflverse actuals). */
+export function accuracyReport(allRows: ResolvedRow[], listSize = 5): AccuracyReport {
+  const rows = skillOnly(allRows);
   const compared = rows.filter(isCompared);
   const played = rows.filter((r) => r.outcome.status === "played") as (ResolvedRow & { outcome: { status: "played"; pts: number } })[];
   const weeks = [...new Set(compared.map((r) => r.week))].sort((a, b) => a - b);

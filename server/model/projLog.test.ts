@@ -58,9 +58,16 @@ test("merge: unknown team kickoff falls back to the week's first kickoff; nothin
   assert.equal(r.kept, 0, "no kickoff known at all: fail safe");
 });
 
-test("merge: skill players only, bounded weeks, a new season starts a fresh log, Yahoo absent stays absent", () => {
-  const r = cap(null, "2026-10-28T12:00:00.000Z", [e("k", "GB", { pos: "K" }), e("d", "GB", { pos: "DEF" }), e("n", "GB", { app: NaN }), e("y", "GB", { yahoo: undefined })]);
-  assert.deepEqual(Object.keys(r.log.weeks["8"]), ["y"]);
+test("merge: fantasy positions incl. K and DEF (not IDP / unknown), bounded weeks, a new season starts a fresh log, Yahoo absent stays absent", () => {
+  const r = cap(null, "2026-10-28T12:00:00.000Z", [
+    e("k", "GB", { pos: "K" }),
+    e("d", "GB", { pos: "DEF" }),
+    e("lb", "GB", { pos: "LB" as never }),
+    e("n", "GB", { app: NaN }),
+    e("y", "GB", { yahoo: undefined }),
+  ]);
+  assert.deepEqual(Object.keys(r.log.weeks["8"]), ["k", "d", "y"]);
+  assert.equal(r.log.weeks["8"].d.pos, "DEF");
   assert.equal("yahoo" in r.log.weeks["8"].y, false);
   assert.equal(cap(null, "2026-10-28T12:00:00.000Z", [e("a", "GB")], PROJLOG_MAX_WEEK + 1).kept, 0);
   assert.equal(cap(null, "2026-10-28T12:00:00.000Z", [e("a", "GB")], 0).kept, 0);
@@ -165,4 +172,24 @@ test("Vs Yahoo bullet: only from 3 weeks, one short idea (≤ 90 chars)", () => 
   const worst = vsYahooItem({ id: "a", name: "A", pos: "WR", team: "GB", weeks: 18, vsYahoo: -123.4, vsApp: 0, beatYahoo: 0, beatApp: 0 })!;
   assert.equal(worst.value, "−123.4 pts/wk over 18 wks (beat 0 of 18)");
   assert.deepEqual(detailProblems([it, worst]), []);
+});
+
+test("K / DEF rows in the log never reach the accuracy report, the per-player Vs Yahoo numbers or the per-team numbers", () => {
+  const skill = [row("a", 5, 10, 12, played(14)), row("a", 6, 10, 12, played(14)), row("a", 7, 10, 12, played(14))];
+  const kdef = [5, 6, 7].flatMap((w) => [
+    row("k", w, 8, 7, played(20), { pos: "K" }),
+    row("DEF:GB", w, 7, 6, played(-2), { pos: "DEF" }),
+    row("DEF:BUF", w, 7, 6, { status: "dnp" }, { pos: "DEF" }), // a defense has no nflverse row: would read as DNP
+    row("k2", w, 8, undefined, played(3), { pos: "K", teamId: "2" }),
+  ]);
+  const withKdef = accuracyReport([...skill, ...kdef]);
+  assert.deepEqual(withKdef, accuracyReport(skill), "the report is the skill-only report");
+  assert.ok(!withKdef.byPos.some((p) => p.pos === "K" || p.pos === "DEF"));
+  assert.equal(withKdef.counts.captured, 3);
+  assert.equal(withKdef.counts.dnp, 0);
+  assert.equal(withKdef.appAll.n, 3);
+  assert.deepEqual(withKdef.teams.map((t) => t.teamId), ["1"]);
+  const acc = playerAccuracy([...skill, ...kdef]);
+  assert.deepEqual([...acc.keys()], ["a"]);
+  assert.equal(vsYahooItem(acc.get("k")), undefined);
 });

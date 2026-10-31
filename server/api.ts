@@ -402,7 +402,7 @@ async function resolvedRows(db: PlayerDb, league: League, id: string): Promise<R
 
 /**
  * After an import is saved: value the league and record this week's app + Yahoo projections for every rostered and
- * free-agent skill player with a game (only players whose kickoff is still ahead count). Runs after the response,
+ * free-agent player (skill, K and DEF) with a game (only players whose kickoff is still ahead count). Runs after the response,
  * one at a time per league; a failure is logged and never fails the import.
  */
 let projCaptures: Promise<unknown> = Promise.resolve();

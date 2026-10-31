@@ -141,7 +141,7 @@ before(
 after(() => server?.close());
 
 describe("projection accuracy API", { timeout: 300_000 }, () => {
-  test("import capture: only skill players, only before their own kickoff, Yahoo only for the capture week", async () => {
+  test("import capture: fantasy positions (K / DEF included), only before their own kickoff, Yahoo only for the capture week", async () => {
     const db = await getPlayerDb();
     const week = db.state.currentWeek;
     const { games } = await getSeasonTables(db.season);
@@ -152,7 +152,7 @@ describe("projection accuracy API", { timeout: 300_000 }, () => {
     const entries: ProjEntry[] = Object.values(log?.weeks?.[String(week)] ?? {});
     for (const e of entries) {
       assert.ok(Date.parse(e.capturedAt) > Date.parse("2025-01-01"), `${e.name}: capturedAt ${e.capturedAt} taken from the payload`);
-      assert.ok(["QB", "RB", "WR", "TE"].includes(e.pos), `${e.name} ${e.pos}`);
+      assert.ok(["QB", "RB", "WR", "TE", "K", "DEF"].includes(e.pos), `${e.name} ${e.pos}`);
       const k = kick.get(e.team);
       assert.ok(k !== undefined && Date.parse(e.capturedAt) < k, `${e.name} (${e.team}) captured at/after kickoff`);
       assert.equal(e.yahoo, 10);
@@ -238,6 +238,9 @@ describe("projection accuracy API", { timeout: 300_000 }, () => {
     if (dnp) assert.ok(j.counts.dnp >= 1, "a final game with no stat row = did not play");
     assert.ok(j.teams.length > 0 && j.teams.every((t: any) => typeof t.name === "string" && t.name.length > 0));
     assert.ok(j.mostBeat.length <= 5 && j.mostMissed.length <= 5);
+    // K / DEF are captured (matchup totals) but never scored here.
+    assert.ok(!j.byPos.some((x: any) => x.pos === "K" || x.pos === "DEF"), JSON.stringify(j.byPos));
+    assert.ok(![...j.mostBeat, ...j.mostMissed].some((x: any) => x.pos === "K" || x.pos === "DEF"));
 
     // Value details: the "Vs Yahoo" bullet for a player with ≥ 3 compared weeks.
     const v = await call(admin, "GET", `/api/league/import/yY/values?id=${encodeURIComponent(target!.id)}&refresh=1`);

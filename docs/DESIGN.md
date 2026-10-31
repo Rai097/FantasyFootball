@@ -1560,7 +1560,9 @@ January, activated from PUP, practising) was out; Stash watch kept a WR whose to
   actually happened (League tab card "Projection accuracy"; "Vs Yahoo" bullet in a player's value details).
 - Capture (POST /api/import, after the save; runs after the response, one at a time per league, a failure is logged
   `[projlog] capture failed` and never fails the import): week W = the league's current NFL week; every rostered and
-  free-agent QB/RB/WR/TE whose NFL team plays in W (K / DEF excluded: no actual-points source). Per player: id, name,
+  free-agent QB/RB/WR/TE/K/DEF whose NFL team plays in W (K / DEF captured since 2026-10-31 for matchup totals; the
+  accuracy report, the "Vs Yahoo" bullet and the per-team numbers filter to QB/RB/WR/TE: no K / DEF actual-points
+  source; DEF id = the resolved team defense "DEF:<team>", kickoff = its team's). Per player: id, name,
   pos, NFL team, fantasy team id (null = free agent), starter (Yahoo slot not BN / IR at capture), app = projection v4
   `weekly[W]` (matchup + availability included; an Out player's 0 is a real projection; no weekly = skipped, never 0),
   yahoo = `yahooProjWeekly` only when the import's `projWeek` = W (absent otherwise), capturedAt = the server's clock
