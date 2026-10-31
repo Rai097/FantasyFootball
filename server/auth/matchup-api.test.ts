@@ -214,6 +214,66 @@ describe("matchups log (import v9)", { timeout: 300_000 }, () => {
     assert.equal(readLog("yR").currentWeek, yw);
   });
 
+  test("GET matchup: auth fails closed (401 / 403 / demo + yahoo 404); bad week 400; own league 200", async () => {
+    const none = await call(null, "GET", "/api/league/import/yM/matchup");
+    assert.equal(none.status, 401);
+    assert.equal(none.json.week, undefined);
+    const other = await call(c, "GET", "/api/league/import/yM/matchup");
+    assert.equal(other.status, 403);
+    assert.equal(other.json.week, undefined);
+    assert.equal((await call(a, "GET", "/api/league/import/yZ/matchup")).status, 403);
+    assert.equal((await call(a, "GET", "/api/league/yahoo/yM/matchup")).status, 403);
+    assert.equal((await call(admin, "GET", "/api/league/demo/42/matchup")).status, 404);
+    assert.equal((await call(admin, "GET", "/api/league/yahoo/yM/matchup")).status, 404);
+    assert.equal((await call(admin, "GET", "/api/league/import/nope/matchup")).status, 404);
+    for (const w of ["0", "19", "x", "1.5"]) assert.equal((await call(admin, "GET", `/api/league/import/yM/matchup?week=${w}`)).status, 400, w);
+    assert.equal((await call(a, "GET", "/api/league/import/yM/matchup?team=1")).status, 403, "a user cannot pick another team");
+    assert.equal((await call(a, "GET", "/api/league/import/yM/matchup")).status, 200);
+  });
+
+  test("GET matchup: current week (default) and the final week before; mine first, others, record; payload ≤ 30 KB", async () => {
+    const p = await call(admin, "POST", "/api/import", { ...mLeague(), matchupWeek: W, matchups: await fixtureMatchups(W) });
+    assert.equal(p.status, 200);
+    await projCaptureIdle();
+    const r = await call(a, "GET", "/api/league/import/yM/matchup");
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.ok(r.bytes <= 30_000, `${r.bytes} bytes`);
+    const j = r.json;    assert.deepEqual([j.week, j.currentWeek, j.status], [W, W, "live"]);
+    assert.ok(j.weeks.includes(W) && j.weeks.includes(W - 1));
+    assert.equal(j.mine.lineupSource, "page");
+    assert.deepEqual(j.mine.sides.map((s: any) => s.teamId), ["4", "7"]);
+    assert.equal(j.mine.sides[0].yahooLive, 131.79);
+    assert.equal(j.mine.rows[0].a.name, "Joe Burrow");
+    assert.equal(j.mine.rows[0].a.points, null, "'–' on Yahoo's page: null, never 0");
+    for (const s of j.mine.sides) assert.ok(s.ours === null ? s.oursIncomplete > 0 : s.oursIncomplete === 0, JSON.stringify(s));
+    assert.equal(j.others.length, 5);
+    assert.ok(typeof j.teams["7"] === "string");
+    // Week W−1 (final): Yahoo's totals and points from the final page; no projlog for it → ours not recorded.
+    const prev = await call(a, "GET", `/api/league/import/yM/matchup?week=${W - 1}`);
+    assert.equal(prev.status, 200);
+    assert.deepEqual([prev.json.status, prev.json.mine.sides[0].yahoo, prev.json.mine.sides[0].points, prev.json.mine.sides[1].yahoo], ["final", 123.86, 165.78, 134.97]);
+    const rw = prev.json.record.weeks.find((x: any) => x.week === W - 1);
+    assert.ok(rw && rw.games[0].mine && rw.games[0].yahooCall === false, JSON.stringify(rw?.games[0]));
+    assert.equal(prev.json.record.summary.teamWeeks, 0, "no projection of ours for W−1: not in the metrics");
+    // User B (team 1): their own pairing, starters from the import's Yahoo slots (no page read for it).
+    const rb = await call(b, "GET", "/api/league/import/yM/matchup");
+    assert.equal(rb.status, 200);
+    assert.equal(rb.json.mine.sides[0].teamId, "1");
+    assert.equal(rb.json.mine.lineupSource, "import");
+    assert.equal(rb.json.mine.rows.length, 9);
+  });
+
+  test("GET matchup: a new matchlog write invalidates the cached answer", async () => {
+    const first = await call(admin, "GET", "/api/league/import/yM/matchup");
+    assert.equal(first.json.mine.sides[0].points, 0);
+    const m = await fixtureMatchups(W);
+    m.weeks[0].pairings[0].sides[0].points = 42.5;
+    await call(admin, "POST", "/api/import", { ...mLeague(), matchupWeek: W, matchups: m });
+    await projCaptureIdle();
+    const second = await call(admin, "GET", "/api/league/import/yM/matchup");
+    assert.equal(second.json.mine.sides[0].points, 42.5);
+  });
+
   test("deleting the league removes its matchups log", async () => {
     assert.ok(fs.existsSync(logFile("yR")));
     const d = await call(admin, "DELETE", "/api/import/yR");

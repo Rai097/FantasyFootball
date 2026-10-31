@@ -23,8 +23,11 @@ import {
   newPasteImport,
   projCaptureEntries,
   readHistory,
+  readMatchLog,
   readProjLog,
   recordMatchLog,
+  resolvePlayer,
+  toSlotKind,
   recordProjLog,
   readImport,
   recordHistory,
@@ -43,7 +46,8 @@ import { buildLeagueView } from "./model/league.js";
 import { attachFloor } from "./model/signals.js";
 import { defaultMode, type ValueMode } from "./model/projectionV4.js";
 import { getProjectionTables, getSeasonTables } from "./data/signalTables.js";
-import { cleanMatchups, type MatchWeekCapture } from "./model/matchLog.js";
+import { cleanMatchups, type MatchRow, type MatchWeekCapture } from "./model/matchLog.js";
+import { buildMatchup, type LineupSlot, type MatchupContext, type MatchupResponse, type PlayerRef } from "./model/matchup.js";
 import { accuracyReport, outcomeOf, playerAccuracy, resolveLog, teamWeeksWithRows, toAccuracyResponse, vsYahooItem, weekKickoffs, type AccuracyResponse, type ResolvedRow } from "./model/projLog.js";
 import type { ProjectionTables } from "./model/projectionV4.js";
 import { getPriorWeeks } from "./data/priorWeeks.js";
@@ -449,6 +453,57 @@ function captureMatchups(id: string, capturedAt: string, matchupWeek: number | u
   projCaptures = projCaptures.then(() => run);
 }
 
+/** The matchup model's inputs for one week (I/O already done): lineups, projections, the week's games. */
+function matchupContext(
+  l: Loaded,
+  stored: StoredImport,
+  o: { week: number; currentWeek: number; now: number; log: MatchupContext["log"]; team: string; games: Iterable<{ week: number; home: string; away: string; kickoff?: string }>; proj: MatchupContext["proj"] },
+): MatchupContext {
+  const { kickoffs, teams: playing } = weekKickoffs(o.games, o.week);
+  const ref = (p: Player, status?: string): PlayerRef => ({ id: p.id, name: p.name, pos: p.pos, nflTeam: p.team, ...(status ? { status } : {}) });
+  // Latest import's lineups in league slot order (starting slots filled in order, the rest bench / IR).
+  const starting = l.league.settings.slots.filter((k) => k !== "BN" && k !== "IR");
+  const lineups = new Map<string, LineupSlot[]>();
+  for (const t of stored.teams) {
+    const slots: LineupSlot[] = starting.map((kind) => ({ kind, player: null }));
+    const rest: LineupSlot[] = [];
+    for (const rp of t.players) {
+      const p = resolvePlayer(l.db, rp);
+      const kind = rp.slot ? toSlotKind(rp.slot) : undefined;
+      const slot: LineupSlot = { kind: kind === "IR" ? "IR" : "BN", player: p ? ref(p, rp.status) : null, ...(p ? {} : { rawName: rp.name }) };
+      if (stored.projWeek === o.week && typeof rp.yahooProjWeekly === "number") slot.yahoo = rp.yahooProjWeekly;
+      const open = kind && kind !== "BN" && kind !== "IR" ? slots.find((s) => s.kind === kind && !s.player && !s.rawName) : undefined;
+      if (open) Object.assign(open, { ...slot, kind });
+      else rest.push(slot);
+    }
+    lineups.set(t.id, [...slots, ...rest]);
+  }
+  return {
+    week: o.week,
+    currentWeek: o.currentWeek,
+    now: o.now,
+    log: o.log,
+    proj: o.proj,
+    teams: l.league.teams.map((t) => ({ id: t.id, name: t.name, ...(t.record ? { record: `${t.record.wins}-${t.record.losses}-${t.record.ties}` } : {}) })),
+    myTeamId: o.team,
+    lineups,
+    lineupWeek: stored.projWeek,
+    resolveRow: (r: MatchRow) => {
+      const p = resolvePlayer(l.db, { name: r.name ?? "", pos: r.pos ?? "", ...(r.pos === "DEF" ? {} : r.yahooId ? { yahooId: r.yahooId } : {}), ...(r.team ? { team: r.team } : {}) });
+      return p ? ref(p, r.status) : undefined;
+    },
+    today: (id) => {
+      const v = l.ctx.players.get(id);
+      if (!v?.weekly || v.weeklyFrom === undefined) return undefined;
+      const x = v.weekly[o.week - v.weeklyFrom];
+      return typeof x === "number" && Number.isFinite(x) ? x : undefined;
+    },
+    // No game data for the week at all → kickoffs unknown (never a league-wide bye).
+    gameOf: (t) => (playing.size === 0 || playing.has(t) ? { ...(kickoffs.byTeam.get(t) ? { kickoff: Date.parse(kickoffs.byTeam.get(t)!) } : {}) } : undefined),
+    ...(kickoffs.first ? { firstKickoff: Date.parse(kickoffs.first) } : {}),
+  };
+}
+
 // ---------------------------------------------------------------- routes
 export const apiRouter = Router();
 
@@ -662,6 +717,35 @@ apiRouter.get(
       const log = await readProjLog(id);
       const rows = await resolvedRows(db, league, id);
       return toAccuracyResponse(log && log.season === db.season ? log : null, accuracyReport(rows), (t) => league.teams.find((x) => x.id === t)?.name);
+    });
+    res.json(body);
+  }),
+);
+
+// Matchup + results log (docs/DESIGN.md "Matchups and results log (2026-10-31)"): import leagues only; the request team
+// (pinned for a user, else ?team= / my team) is side a of its pairing.
+apiRouter.get(
+  "/api/league/:provider/:id/matchup",
+  h(async (req, res) => {
+    const provider = parseProvider(req.params.provider);
+    if (provider !== "import") throw new HttpError(404, "Matchups are tracked for imported leagues only");
+    requireOwnImport(req, req.params.id);
+    const id = req.params.id;
+    const stored = await mustReadImport(id);
+    const { l, team } = await loadForTeam(req, "import", id, false);
+    const season = l.db.season;
+    const mlog = await readMatchLog(id);
+    const log = mlog && mlog.season === season ? mlog : null;
+    const currentWeek = log?.currentWeek ?? l.league.settings.currentWeek;
+    const raw = req.query.week;
+    const week = raw === undefined || raw === "" ? currentWeek : Number(raw);
+    if (!Number.isInteger(week) || week < 1 || week > 18) throw new HttpError(400, `Bad week "${String(raw)}"`, "A week number from 1 to 18.");
+    const body = await cached<MatchupResponse>(`import:${id}:matchup:${week}:${team}`, isRefresh(req), async () => {
+      const plog = await readProjLog(id);
+      const { games } = await getSeasonTables(season);
+      const now = Date.now();
+      const ctxFor = (w: number): MatchupContext => matchupContext(l, stored, { week: w, currentWeek, now, log, team, games: games.values(), proj: plog && plog.season === season ? plog.weeks[String(w)] : undefined });
+      return buildMatchup(ctxFor(week), ctxFor);
     });
     res.json(body);
   }),

@@ -1937,3 +1937,34 @@ warning) and the projlog capture uses that week. After the save, queued behind t
 a final week, that capture's Total "Proj" (`pregame: false`); unknown first kickoff = never pre-game. An older capture
 never replaces a newer week; a capture without pairings keeps the stored ones; pages not re-read are kept. Deleted
 with the league (DELETE /api/import/:id); a new season replaces the log.
+
+**Implemented: model + API.** `server/model/matchup.ts` (pure; `MatchupResponse` and its parts are exported for the
+web app, like `AccuracyResponse`). `GET /api/league/import/:id/matchup?week=W` (W 1–18, default = the log's
+`currentWeek` = Yahoo's, else the calendar's; bad week → 400; demo / yahoo → 404; the generic league guard rule covers
+it and the handler re-checks ownership; the request team = the pinned user's team, else `?team=` / my team, is side
+`a`). Cached `import:<id>:matchup:<W>:<team>`, cleared by an import, a matchlog write and a projlog write.
+```
+{ week, currentWeek, weeks: number[], status: "final"|"live"|"pre"|"unknown", asOf: ISO|null,
+  teams: { [teamId]: name },
+  mine: null | { lineupSource: "page"|"import"|"log",
+    sides: [{ teamId, name, record|null, ours|null, oursIncomplete, yahoo|null, yahooLive|null, points|null,
+              winPct|null }] x2,                     // side a = the request team
+    rows:  [{ slot, a: Cell|null, b: Cell|null }],   // starters, Yahoo slot order
+    bench: [{ slot, a: Cell|null, b: Cell|null }] },
+  others: [{ sides: [{ teamId, name, ours|null, oursIncomplete, yahoo|null, points|null }] x2, lineupSource|null }],
+  record: { weeks: [{ week, recorded, games: [{ teams: [a, b], mine, ours: [x|null, y|null], yahoo: […], points: […],
+                                                oursCall: bool|null, yahooCall: bool|null }] }],   // newest first, mine first
+            summary: { games, oursCalls, yahooCalls, teamWeeks, oursMae|null, yahooMae|null, oursBias|null, yahooBias|null } } }
+Cell = { id|null, name, pos|null, nflTeam|null, ours|null, yahoo|null, points|null, status: "Q"|"D"|"O"|"IR"|null, locked }
+```
+Rules: per starter `ours` = bye → 0; game started (own kickoff, else the week's first) → the projlog value (`locked`),
+none → null; before kickoff → today's projection v4 `weekly[W]`, else the projlog value. Team `ours` = Σ starters, null
+with `oursIncomplete` = n when any starter is unprojected (an unmatched Yahoo name counts as unprojected; an
+"(Empty)" slot as nothing). Starters: the owner's matchup page when read (`page`); else the latest import's Yahoo
+slots when the import is for week W and W is not final (`import`); else the projlog's captured starters of the week
+(`log`: "lineup as of the last capture", cannot see an unprojected starter). `yahoo` = the locked pre-game total,
+`yahooLive` = the latest capture's total (blends live points; never used for the record). `winPct` = Φ((ours_a −
+ours_b) / `MATCHUP.marginSd` 35), pre-game estimate, null unless both totals are complete. Record over final weeks:
+a call = the projected winner won (tie projection = no call); `games` / calls count only games with complete
+projections from BOTH sources and a decided final; MAE / bias over the same team-weeks (ours, Yahoo's and points all
+present). Measured: 6.8 KB on the fixture-built league (weeks 8 + 7).
