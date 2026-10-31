@@ -153,6 +153,28 @@ no other team to trade with.
 
 ---
 
+## Auto-import on the server (stopgap until the Yahoo API)
+
+The server that hosts Trade Desk can run the same bookmark code by itself on a
+schedule, in a headless copy of Google Chrome that is signed in to Yahoo. It is
+a stopgap: once Yahoo approves the API app this goes away.
+
+* **When:** Mon–Fri 6 AM, 12 PM and 6 PM; Saturday every 2 hours from 6 AM to
+  10 PM; Sunday 9 AM (Pacific time). Trade Desk shows one line in the header and
+  on the Connect tab: **Auto-import: last 2:00 PM · next 6:00 PM**.
+* **Refresh now:** the league owner can tap **Refresh from Yahoo now** on the
+  Connect tab (at most once every 2 minutes).
+* **When it stops:** if Yahoo signs the server out, shows a captcha, or returns
+  nothing, the line turns into **Auto-import paused: … — use the bookmark**.
+  Your last good import is never replaced by a failed or partial one. The
+  bookmark keeps working as before; the schedule keeps trying and clears the
+  warning on the next success.
+* **Signing the server in (owner, on the server Mac):** in the release folder
+  run `AUTO_IMPORT_LEAGUE_ID=<league number> npm run yahoo:login`. A normal
+  Chrome window opens on Trade Desk's own Chrome profile; sign in to Yahoo
+  yourself, check your league shows, and close the window. Trade Desk never
+  sees your password and never signs in for you.
+
 ## Good to know
 
 * **Waiver priority** is not on the pages the bookmark reads. Enter yours in

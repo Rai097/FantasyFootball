@@ -1685,3 +1685,45 @@ Display only (web/src); the one API change: `POST /trade/evaluate` now sends `mo
 - **No server auth or guard change, no new endpoint;** still read-only toward Yahoo.
 - **Unverified:** a real Yahoo page (pop-up permission for a javascript: bookmark; a Cross-Origin-Opener-Policy on
   Yahoo would cut the opener link: the overlay then says the window was closed and Copy still works).
+
+## Auto-import (stopgap until Yahoo API) (2026-10-31) — extends "One-click import (v7)"
+
+STOPGAP: retire it when the Yahoo API app is approved. Read-only toward Yahoo (the collector only GETs league pages).
+
+- **Collector.** `web/src/import/collect.ts` `collect(log?)` is the bookmarklet's collection, moved out unchanged (no
+  UI, no handoff); `bookmarklet.ts` `run()` checks the page, opens the app window before the first await, then calls
+  it. `collectorCode()` (server/providers/import-bookmarklet.ts) bundles `collectEntry.ts` (sets
+  `globalThis.__ftdCollect`) as a second esbuild IIFE.
+- **Browser.** `server/autoimport/collector.ts`: playwright-core `chromium.launchPersistentContext(profileDir,
+  { channel: "chrome", headless: true })` = system Google Chrome, never a downloaded browser. Profile: dedicated
+  `<cwd>/.data/yahoo-chrome-profile` (live: ~/FantasyFootball-run/.data/yahoo-chrome-profile), signed in by the owner
+  with `npm run yahoo:login` (headed, no automation). The code never reads or logs its cookies. Opens
+  `https://football.fantasysports.yahoo.com/f1/<league>`; landing on login.yahoo.com = `signed_out`; guce/consent or a
+  captcha path = `captcha`; any other page = `error`; then `page.evaluate` of the bundle; 0 teams = `empty`. The
+  browser is always closed in `finally` and any process still carrying `--user-data-dir=<profile>` is killed by PID
+  (never the owner's own Chrome). Chrome writes only inside its profile; the server is the only writer of the rest of
+  .data.
+- **Runner** (`runner.ts`). One run at a time (mutex; a trigger during a run is rejected). 3-minute abort per attempt.
+  One retry after 30 s for `timeout` / `error` / `empty` / `partial`; none for `signed_out` / `captcha`. Then state
+  `paused` with the reason; scheduled runs keep trying and a success clears it. Only an ok result reaches the import:
+  `importPayload()` in api.ts = the POST /api/import bookmarklet path (size limit, validation, same-league merge,
+  history, projlog capture), run as the admin with `importedBy: "Auto-import"` and `refusePartial` (fewer teams than
+  the stored league → `PartialImportError` → `partial`, nothing written). State persists in
+  `.data/autoimport-state.json`. One log line per run: `[autoimport] event=run run=<id> trigger=schedule|manual
+  result=ok|failed reason=… ms=… teams=… attempts=…`; URLs lose their query and hash, never cookies.
+- **Schedule** (`schedule.ts`, croner, America/Los_Angeles): `0 6,12,18 * * 1-5`, `0 6-22/2 * * 6`, `0 9 * * 0`;
+  override with `AUTO_IMPORT_CRON` ("p1; p2") and `AUTO_IMPORT_TZ`. DST is croner's (tested on Nov 1 2026 and Mar 14 2027).
+- **Config.** On only when `AUTO_IMPORT=1`, `AUTO_IMPORT_LEAGUE_ID` is a number and the profile dir exists
+  (`AUTO_IMPORT_PROFILE` overrides the path); off in tests and dev. Startup logs one line: enabled, league, next fire.
+- **API.** `GET /api/autoimport` (signed in): `{ enabled, disabledReason?, leagueId, importId, state: ok|paused,
+  reason?, detail?, lastSuccessAt?, lastAttemptAt?, lastTeams?, nextRunAt?, running }`. `POST
+  /api/autoimport/refresh` (admin: guard rule `autoimport` writes = admin, plus session + Origin + CSRF): 202
+  `{ status: "running", runId }`, 409 `busy` / `disabled`, 429 `rate_limited` (1 accepted per 2 min, Retry-After).
+- **UI.** Header pill and Connect → Import line: "Auto-import: last 2:00 PM · next 6:00 PM" (tap: last good import,
+  next try, what it is). Paused: one-line banner "Auto-import paused: Yahoo signed out — use the bookmark" (tap: why,
+  detail, last try, fix). Admin button "Refresh from Yahoo now" (44 px). Status polls every 3 s only while running.
+- **Deploy.** The plist gained `AUTO_IMPORT=1` and `AUTO_IMPORT_LEAGUE_ID`: an env change, so `launchctl unload` +
+  copy the template + `launchctl load` (kickstart keeps the old environment). `npm ci` in the release worktree
+  (new deps playwright-core, croner; no browser download). The owner runs `npm run yahoo:login` there once first.
+- **Unverified:** real Yahoo under headless Chrome (bot checks, a different page shell, the exact sign-in / consent
+  URLs) and Chrome's profile lock if `yahoo:login` is open during a run (that run fails `error`).

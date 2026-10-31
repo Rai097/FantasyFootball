@@ -13,7 +13,10 @@
        (the server refuses to start without them); .data/access.json lists who may sign in.
        Install: cp scripts/com.fantasy.tradedesk.plist ~/Library/LaunchAgents/ &&
          launchctl load ~/Library/LaunchAgents/com.fantasy.tradedesk.plist
-       Stop: launchctl unload ~/Library/LaunchAgents/com.fantasy.tradedesk.plist -->
+       Stop: launchctl unload ~/Library/LaunchAgents/com.fantasy.tradedesk.plist
+       Auto-import (stopgap until the Yahoo API): AUTO_IMPORT=1 + AUTO_IMPORT_LEAGUE_ID run the scheduled headless
+       import with system Chrome on .data/yahoo-chrome-profile (off until that profile exists: npm run yahoo:login).
+       An env change here needs unload + copy + load (kickstart keeps the old environment). -->
   <key>ProgramArguments</key>
   <array>
     <string>/Users/raitsai/FantasyFootball-run/node_modules/.bin/tsx</string>
@@ -28,6 +31,10 @@
     <string>5070</string>
     <key>HOST</key>
     <string>127.0.0.1</string>
+    <key>AUTO_IMPORT</key>
+    <string>1</string>
+    <key>AUTO_IMPORT_LEAGUE_ID</key>
+    <string>1405188</string>
     <key>PATH</key>
     <string>/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
   </dict>

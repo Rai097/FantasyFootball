@@ -14,7 +14,8 @@
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p web/tsconfig.json",
     "test": "SKIP_TIMING=1 tsx --test \"server/**/*.test.ts\" \"web/src/**/*.test.ts\" && tsx --test server/auth/v4-api.adversarial.test.ts",
-    "yahoo:probe": "tsx scripts/yahoo-probe.mts"
+    "yahoo:probe": "tsx scripts/yahoo-probe.mts",
+    "yahoo:login": "tsx scripts/yahoo-login.mts"
   },
   "dependencies": {
     "croner": "^11.0.0",
