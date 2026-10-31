@@ -55,6 +55,7 @@ import { findBreakouts, type MarketValue } from "./model/breakouts.js";
 import { getDepthChart } from "./data/depthCharts.js";
 import { getMarketData, pprBucket } from "./data/fantasycalc.js";
 import { errors as authErrors, pinnedTeam, scopeOf } from "./auth/guard.js";
+import { getAutoImport } from "./autoimport/service.js";
 import type { Availability, BreakoutResponse, BreakoutResult, BreakoutTarget, CardPlayer, League, Player, Trade, TradeFinderResult, ValuedPlayer, ValueRow, WaiverBreakout, WaiverTarget } from "./model/types.js";
 
 const CACHE_TTL_MS = 60_000;
@@ -721,6 +722,59 @@ function leagueSettingsOf(s: StoredImport): Partial<StoredImport> {
   return { name, numTeams, slots, scoring, regularSeasonEnd, finalWeek, tradeDeadlineWeek, waiverPriority, settingsSource, leagueId };
 }
 
+/** Refused by `refusePartial`: the payload has fewer teams than the stored league (a run cut short mid-way). */
+export class PartialImportError extends Error {}
+
+/** The bookmarklet / collector payload as a stored import, merged over the same Yahoo league when present. */
+async function bookmarkletImport(body: Record<string, unknown>, ownLeague: string | undefined, refusePartial: boolean) {
+  const incoming = validateImport(body);
+  // Release (d) fix: the NFL week the Yahoo projections belong to (a later week drops the stale weekly number).
+  incoming.projWeek = (await getNflState()).currentWeek;
+  // Same Yahoo league again: update rosters in place, keep the user's settings.
+  const previous = await findExistingImport(incoming);
+  if (ownLeague !== undefined && (previous?.id ?? incoming.id) !== ownLeague) throw authErrors.league();
+  if (refusePartial && previous && incoming.teams.length < previous.teams.length)
+    throw new PartialImportError(`${incoming.teams.length} of ${previous.teams.length} teams read`);
+  if (ownLeague !== undefined) delete incoming.myTeamId;
+  if (previous) {
+    const r = upsertImport(previous, { ...incoming, importedAt: new Date().toISOString() });
+    return { stored: r.stored, previous, changes: r.changes as RosterChanges | undefined };
+  }
+  return { stored: incoming, previous, changes: undefined as RosterChanges | undefined };
+}
+
+/** Everything after parsing, shared by every import path: scope rules, save, history, cache, projection capture. */
+async function finishImport(stored: StoredImport, previous: StoredImport | null, ownLeague: string | undefined, importedBy: string): Promise<StoredImport> {
+  if (ownLeague !== undefined) {
+    if (previous?.myTeamId) stored.myTeamId = previous.myTeamId;
+    else delete stored.myTeamId;
+    // League settings are admin-only: a user's re-import refreshes rosters and free agents, nothing else.
+    if (previous) stored = { ...stored, ...leagueSettingsOf(previous) };
+  }
+  // Who ran this import (header "League updated … · by <name>"): the session's name, never the payload's.
+  // Not a league setting, so a member's re-import sets it too.
+  stored = { ...stored, importedBy };
+  await saveImport(stored);
+  await recordHistory(stored, previous);
+  invalidateLeague("import", stored.id);
+  // Capture time = the server's clock at save (never the payload's importedAt, which a first import may carry over):
+  // later than the bookmarklet's read, so the before-kickoff rule errs on the safe side.
+  captureProjections(stored, new Date().toISOString());
+  return stored;
+}
+
+/**
+ * The server-side import of a bookmarklet / collector payload: the same path as POST /api/import (size limit,
+ * validation, same-league merge, history, projection log). Used by the auto-import (server/autoimport) as the admin,
+ * with `refusePartial` so a run cut short never replaces a fuller league (PartialImportError).
+ */
+export async function importPayload(body: Record<string, unknown>, opts: { importedBy: string; ownLeague?: string; refusePartial?: boolean }) {
+  if (JSON.stringify(body).length > MAX_BYTES) throw new HttpError(413, "Import is larger than 1 MB");
+  const r = await bookmarkletImport(body, opts.ownLeague, !!opts.refusePartial);
+  const stored = await finishImport(r.stored, r.previous, opts.ownLeague, opts.importedBy);
+  return { stored, previous: r.previous, changes: r.changes };
+}
+
 apiRouter.post(
   "/api/import",
   h(async (req, res) => {
@@ -746,32 +800,8 @@ apiRouter.post(
       stored = previous ? mergeTeams(previous, parsed.teams) : newPasteImport(parsed.teams, parsed.teams.length > 1 ? "Pasted league" : `${teamName} (pasted)`);
       for (const t of stored.teams) if (t.players.length > 40) throw new HttpError(400, `Team "${t.name}" has ${t.players.length} players; the limit is 40`);
       stored.importedAt = new Date().toISOString();
-    } else {
-      const incoming = validateImport(body);
-      // Release (d) fix: the NFL week the Yahoo projections belong to (a later week drops the stale weekly number).
-      incoming.projWeek = (await getNflState()).currentWeek;
-      // Same Yahoo league again: update rosters in place, keep the user's settings.
-      previous = await findExistingImport(incoming);
-      if (ownLeague !== undefined && (previous?.id ?? incoming.id) !== ownLeague) throw authErrors.league();
-      if (ownLeague !== undefined) delete incoming.myTeamId;
-      if (previous) ({ stored, changes } = upsertImport(previous, { ...incoming, importedAt: new Date().toISOString() }));
-      else stored = incoming;
-    }
-    if (ownLeague !== undefined) {
-      if (previous?.myTeamId) stored.myTeamId = previous.myTeamId;
-      else delete stored.myTeamId;
-      // League settings are admin-only: a user's re-import refreshes rosters and free agents, nothing else.
-      if (previous) stored = { ...stored, ...leagueSettingsOf(previous) };
-    }
-    // Who ran this import (header "League updated … · by <name>"): the session's name, never the payload's.
-    // Not a league setting, so a member's re-import sets it too.
-    stored = { ...stored, importedBy: importerName(scope) };
-    await saveImport(stored);
-    await recordHistory(stored, previous);
-    invalidateLeague("import", stored.id);
-    // Capture time = the server's clock at save (never the payload's importedAt, which a first import may carry over):
-    // later than the bookmarklet's read, so the before-kickoff rule errs on the safe side.
-    captureProjections(stored, new Date().toISOString());
+    } else ({ stored, previous, changes } = await bookmarkletImport(body, ownLeague, false));
+    stored = await finishImport(stored, previous, ownLeague, importerName(scope));
     res.json({
       id: stored.id,
       name: stored.name,
@@ -784,6 +814,31 @@ apiRouter.post(
       ...(changes ? { changes: { teams: changes.teams, playersChanged: changes.playersChanged } } : {}),
       ...(skippedLines !== undefined ? { skippedLines } : {}),
     });
+  }),
+);
+
+// ---------------------------------------------------------------- auto-import (stopgap until the Yahoo API)
+// docs/DESIGN.md "Auto-import (stopgap until Yahoo API)". Status for any signed-in account; refresh = admin (guard).
+apiRouter.get(
+  "/api/autoimport",
+  h(async (_req, res) => {
+    const s = getAutoImport();
+    res.set("Cache-Control", "no-store").json(s ? s.status() : { enabled: false, disabledReason: "not started", state: "ok", running: false });
+  }),
+);
+
+apiRouter.post(
+  "/api/autoimport/refresh",
+  h(async (_req, res) => {
+    const s = getAutoImport();
+    const r = s ? s.refreshNow() : ({ ok: false, code: "disabled" } as const);
+    if (r.ok) return void res.status(202).json({ status: r.status, runId: r.runId });
+    if (r.code === "rate_limited") {
+      res.set("Retry-After", String(r.retryAfterSec ?? 120));
+      return void res.status(429).json({ error: "Refreshed less than 2 minutes ago.", code: r.code, retryAfterSec: r.retryAfterSec });
+    }
+    if (r.code === "busy") return void res.status(409).json({ error: "An auto-import is already running.", code: r.code });
+    res.status(409).json({ error: "Auto-import is off on this server.", code: r.code, hint: s?.status().disabledReason });
   }),
 );
 
