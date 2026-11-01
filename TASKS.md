@@ -98,6 +98,11 @@ SEASON-ENDING INJURIES + BYE K/DEF (2026-10-28, DESIGN "Season-ending injuries +
    this week", chip "bye", gain "—", sorted below K/DEF who play. Data copy: 8 season-ending, Stash watch 4 → 3.
    Deploy note: the first start on the Mac fetches Sleeper once (then daily). Unverified: chip at 390 px.
 NEXT (backlog, highest value first):
+- WEEKLY START/SIT MISSES (owner, 2026-11-01, week 8): the weekly projection ignores this week's injury news on
+  both sides. (1) A back returning from a high-ankle sprain into a 3-RB committee kept his full pre-injury share
+  (Love: ours 13.4 vs Yahoo 11.3). (2) Teammates' targets aren't moved when two WRs are ruled out (Lemon: ours 9.7 vs
+  Yahoo 10.7). Fix idea: first-game-back snap discount, plus redistributing the vacated targets of week-scoped Out
+  players (reuse signals/vacated.ts evidence). Measure the effect on /accuracy before and after.
 - DONE in (d): (owner, Trade Finder vs Yahoo evaluator): "Fairness: Favors them (+16%)" reads as "bad for me" but is
   MARKET value (FantasyCalc) — split into "Lineup impact: good for you (+0.3/wk you, −0.2/wk them)" and "Market value:
   they get +16% (why they'd accept)"; pitch text must not say "you win on value" ambiguously; name the projection
