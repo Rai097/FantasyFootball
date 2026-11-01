@@ -1621,7 +1621,7 @@ as `League.seasonMarks` and applied by id to every copy of the player (rostered,
   "Out for season" — Auto / Out for season / Not out (league owner on an import league; others read-only), the
   automatic finding with its source, and a one-sentence "?" ; chip "Out for season" in Values and the lineup table.
 
-**Real data (2026-10-31 copy, week 8, final week ends 2026-12-28)**: ESPN 800 entries, 400 at fantasy positions, 70 with
+**Real data (2026-10-31 copy, week 8, final week 17 ends 2027-01-04 per games.csv)**: ESPN 800 entries, 400 at fantasy positions, 70 with
 a date, 399 matched. Season over: Sleeper 8 (as before) + ESPN 5 new (the patellar-tendon WR, 3 more WRs, a TE; all
 returning 2027-02-15); the hamstring WR (ESPN Nov 25) stays on Stash watch with the ESPN bullet. Stash watch: the patellar WR
 out; the WR flex level 10.3 → 10.2 (his healthy projection left the pool), so a PCL WR at 10.2 now clears the floor.

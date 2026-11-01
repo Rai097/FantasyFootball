@@ -15,7 +15,7 @@ import { buildWeekEnds, type GameInfo } from "../data/signalTables.js";
 import type { League, Player, Position, StatLine, ValuedPlayer, WeekLine } from "./types.js";
 import type { RosterInfo } from "./signals/types.js";
 
-const END = "2026-12-28"; // last game of week 17 (Monday night)
+const END = "2026-12-28"; // fixture: the day of the final week's last game (the real 2026 week 17 ends 2027-01-04)
 
 test("ESPN rule: return date strictly after the final week's last game day; non-absent statuses, missing dates and an unknown final week never count", () => {
   const ir = (returnDate?: string, status = "Injured Reserve") => ({ status, ...(returnDate ? { returnDate } : {}) });
