@@ -416,7 +416,8 @@ export function findBreakouts(input: BreakoutInput): BreakoutResult {
   for (const p of players.values()) {
     if (!BREAKOUT_POS.includes(p.pos) || p.games < 1 || p.team === "FA" || mine.has(p.id)) continue;
     const kind = injuryKind(p.injury);
-    if (kind === "long" || kind === "return" || p.remainingGames <= 0) continue;
+    // Out for the season (any source or the owner's mark): never a target.
+    if (kind === "long" || kind === "return" || p.remainingGames <= 0 || p.seasonStatus?.over) continue;
     const m = roleMetrics(p, S);
     const ecrStar = p.ecrPos !== undefined && p.ecrPos <= (ECR_STARTER[p.pos] ?? 0);
     if ((m.roleNow >= ESTABLISHED.snaps && p.ppg26 >= ESTABLISHED.ppg) || ecrStar) {

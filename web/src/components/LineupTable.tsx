@@ -3,6 +3,7 @@ import type { VP } from "../api";
 import { f1 } from "../lib/format";
 import { ColumnHelp, HelpTip } from "./HelpTip";
 import { PlayerChip } from "./PlayerChip";
+import { SeasonChip } from "./SeasonToggle";
 
 /** One table for the starting lineup and the bench (slot column BN / IR): every roster row looks the same. */
 export function LineupTable({ lineup, bench = [], irIds = [] }: { lineup: LineupSlot[]; bench?: VP[]; irIds?: string[] }) {
@@ -35,6 +36,7 @@ export function LineupTable({ lineup, bench = [], irIds = [] }: { lineup: Lineup
                 </td>
                 <td>
                   <PlayerChip player={p} showValue={false} />
+                  <SeasonChip status={p?.seasonStatus} />
                   {p && s.riskFactor != null && (
                     <span
                       className="tag small-tag warn-tag"

@@ -72,29 +72,52 @@ export function parseSleeperPlayers(body: string | unknown): { total: number; in
   return { total, injured };
 }
 
+/** The player db's lookups an injury listing is matched with (Sleeper and ESPN share one matcher). */
 export interface SleeperIndex {
   players: Map<string, Player>;
   bySleeper: Map<string, string>;
   byYahoo: Map<string, string>;
+  /** ESPN id → our id (DynastyProcess / nflverse id maps); absent in older fixtures. */
+  byEspn?: Map<string, string>;
   /** normName|pos → ids */
   byName: Map<string, string[]>;
 }
 
+/** An outside listing's identity: whatever ids the source carries, plus name, position and NFL team. */
+export interface ListedIdentity {
+  sleeperId?: string;
+  espnId?: string;
+  gsis?: string;
+  yahoo?: string;
+  name: string;
+  pos: string;
+  team: string;
+}
+
 /**
- * Set `sleeperInjury` on our players (mutates the db entries while the db is built). Match: Sleeper id (our id map has
- * sleeper_id), then GSIS id, then Yahoo id, then normalised name + position + team (unique). Returns the match count.
+ * The one matcher for outside injury listings (Sleeper, ESPN): Sleeper id, then ESPN id, then GSIS id, then Yahoo id,
+ * then normalised name + position + team when unique. Anything else is unmatched (undefined: unknown, never a guess).
+ */
+export function matchListed(e: ListedIdentity, ix: SleeperIndex): Player | undefined {
+  let id = e.sleeperId ? ix.bySleeper.get(e.sleeperId) : undefined;
+  if (!id && e.espnId) id = ix.byEspn?.get(e.espnId);
+  if (!id && e.gsis && ix.players.has(e.gsis)) id = e.gsis;
+  if (!id && e.yahoo) id = ix.byYahoo.get(e.yahoo);
+  if (!id) {
+    const cands = (ix.byName.get(`${normName(e.name)}|${e.pos}`) ?? []).filter((c) => ix.players.get(c)?.team === e.team);
+    if (cands.length === 1) id = cands[0];
+  }
+  return id ? ix.players.get(id) : undefined;
+}
+
+/**
+ * Set `sleeperInjury` on our players (mutates the db entries while the db is built), matched by `matchListed`.
+ * Returns the match count.
  */
 export function attachSleeperInjuries(entries: SleeperEntry[], ix: SleeperIndex): number {
   let matched = 0;
   for (const e of entries) {
-    let id = ix.bySleeper.get(e.sleeperId);
-    if (!id && e.gsis && ix.players.has(e.gsis)) id = e.gsis;
-    if (!id && e.yahoo) id = ix.byYahoo.get(e.yahoo);
-    if (!id) {
-      const cands = (ix.byName.get(`${normName(e.name)}|${e.pos}`) ?? []).filter((c) => ix.players.get(c)?.team === e.team);
-      if (cands.length === 1) id = cands[0];
-    }
-    const p = id ? ix.players.get(id) : undefined;
+    const p = matchListed(e, ix);
     if (!p || p.sleeperInjury) continue;
     p.sleeperInjury = { ...e.injury };
     matched++;

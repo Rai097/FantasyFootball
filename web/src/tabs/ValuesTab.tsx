@@ -3,6 +3,7 @@ import { api, type Active, type Analysis, type DetailItem, type ValueRow } from 
 import { Empty, ErrorBox, Loading, PosBadge } from "../components/common";
 import { ColumnHelp, HelpTip } from "../components/HelpTip";
 import { InjuryDot } from "../components/PlayerChip";
+import { SeasonChip, SeasonToggle } from "../components/SeasonToggle";
 import { deltaClass, f1, signed } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
 import { PosFilter } from "./WaiversTab";
@@ -25,7 +26,7 @@ const COLS: { key: SortKey; label: string; num: boolean; tip?: string; hideSm?: 
 ];
 const PAGE = 100;
 
-export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Active & { team: string } }) {
+export function ValuesTab({ analysis, active, canMark = false }: { analysis: Analysis; active: Active & { team: string }; canMark?: boolean }) {
   const res = useAsync(() => api.values(active), [active.provider, active.id, active.team]);
   const [pos, setPos] = useState("");
   const [q, setQ] = useState("");
@@ -42,6 +43,11 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
       whyCache.set(id, p);
     }
     return p;
+  };
+  // After the owner's "Out for season" change: drop the cached bullets and reload the values (his value changes).
+  const onMarked = () => {
+    whyCache.clear();
+    res.reload();
   };
   const teamNames = useMemo(() => new Map(analysis.teams.map((t) => [t.team.id, t.team.name])), [analysis]);
 
@@ -131,7 +137,13 @@ export function ValuesTab({ analysis, active }: { analysis: Analysis; active: Ac
                       <span className="strong">{r.name}</span>
                       <span className="muted small hide-sm">{r.team}</span>
                       <InjuryDot player={r} />
-                      <HelpTip load={() => whyOf(r.id)} label={`How ${r.name} is valued`} />
+                      <SeasonChip status={r.seasonStatus} />
+                      <HelpTip
+                        key={`${r.id}:${r.seasonStatus?.owner}:${r.seasonStatus?.over}`}
+                        load={() => whyOf(r.id)}
+                        label={`How ${r.name} is valued`}
+                        footer={canMark || r.seasonStatus ? <SeasonToggle playerId={r.id} status={r.seasonStatus} active={active} canEdit={canMark} onSaved={onMarked} /> : undefined}
+                      />
                     </div>
                   </td>
                   <td className="num strong">{f1(r.value)}</td>

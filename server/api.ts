@@ -65,6 +65,7 @@ import { errors as authErrors, pinnedTeam, scopeOf } from "./auth/guard.js";
 import { getAutoImport } from "./autoimport/service.js";
 import { partialReason } from "./autoimport/partial.js";
 import { withLock } from "./providers/lock.js";
+import { deleteOverrides, isValidPlayerId, marksOf, readOverrides, setSeasonMark } from "./providers/overrides.js";
 import type { Availability, BreakoutResponse, BreakoutResult, BreakoutTarget, CardPlayer, League, Player, Trade, TradeFinderResult, ValuedPlayer, ValueRow, WaiverBreakout, WaiverTarget } from "./model/types.js";
 
 const CACHE_TTL_MS = 60_000;
@@ -137,8 +138,12 @@ async function loadLeague(provider: Provider, id: string, refresh: boolean): Pro
     return { db, league };
   }
   if (provider === "import") {
-    const [stored, state] = await Promise.all([mustReadImport(id), getNflState()]);
-    return { db, league: buildImportLeague(db, stored, { season: db.season, currentWeek: state.currentWeek }) };
+    const [stored, state, overrides] = await Promise.all([mustReadImport(id), getNflState(), readOverrides(id)]);
+    const league: League = buildImportLeague(db, stored, { season: db.season, currentWeek: state.currentWeek });
+    // The owner's "Out for season" marks (DESIGN "Season-over injuries (2026-10-31)"): beat every automatic source.
+    const marks = marksOf(overrides);
+    if (marks) league.seasonMarks = marks;
+    return { db, league };
   }
   const league = await yahoo.getLeague(db, id, { refresh });
   return { db, league };
@@ -261,7 +266,8 @@ const isRefresh = (req: Request) => req.query.refresh === "1" || req.query.refre
 /** Players worth sending to the UI: rostered, ranked, or with value. */
 function relevantPlayers(l: Loaded): ValuedPlayer[] {
   const rostered = new Set(l.league.teams.flatMap((t) => t.playerIds));
-  return [...l.ctx.players.values()].filter((p) => rostered.has(p.id) || p.value > 0 || p.ecrOverall !== undefined || p.ecrPos !== undefined);
+  // A player out for the season (or marked by the owner) stays listed, value 0, so the owner can see and undo the call.
+  return [...l.ctx.players.values()].filter((p) => rostered.has(p.id) || p.value > 0 || p.ecrOverall !== undefined || p.ecrPos !== undefined || p.seasonStatus !== undefined);
 }
 
 /** GET /values row (types.ts ValueRow): only the rendered fields; edge unset when the market value is missing or estimated. */
@@ -281,6 +287,7 @@ export function toValueRow(p: ValuedPlayer, ownerTeamId: string | undefined, wit
   // Listed in the market (rank known) and not our estimate → a real edge; otherwise unknown ("—").
   if (p.edge !== undefined && p.marketRank !== undefined && !p.marketEstimated) row.edge = p.edge;
   if (withWhy && p.whyItems?.length) row.whyItems = p.whyItems;
+  if (p.seasonStatus) row.seasonStatus = p.seasonStatus;
   return row;
 }
 
@@ -778,6 +785,40 @@ apiRouter.get(
   }),
 );
 
+// The owner's "Out for season" toggle (DESIGN "Season-over injuries (2026-10-31)"): import leagues only, league owner
+// (admin) only — the guard classifies these writes as admin, Origin + CSRF apply. PUT { seasonOver: true | false }
+// sets the mark (false = "not out": overrules ESPN / Sleeper / the report), DELETE returns him to automatic.
+async function seasonMarkRoute(req: Request, value: boolean | null): Promise<{ playerId: string; mark: boolean | null }> {
+  requireAdmin(req);
+  if (parseProvider(req.params.provider) !== "import") throw new HttpError(404, "Season marks are kept for imported leagues only");
+  const id = req.params.id;
+  const playerId = req.params.playerId;
+  if (!isValidId(id)) throw new HttpError(400, `Bad import id "${id}"`);
+  if (!isValidPlayerId(playerId)) throw new HttpError(400, `Bad player id "${playerId}"`);
+  await mustReadImport(id);
+  if (value !== null && !(await getPlayerDb()).players.has(playerId)) throw new HttpError(404, `Unknown player "${playerId}"`);
+  await setSeasonMark(id, playerId, value, importerName(scopeOf(req)));
+  invalidateLeague("import", id);
+  console.log(`[overrides] event=${value === null ? "cleared" : "set"} league=${id} player=${playerId} seasonOver=${value === null ? "auto" : value}`);
+  return { playerId, mark: value };
+}
+
+apiRouter.put(
+  "/api/league/:provider/:id/overrides/:playerId",
+  h(async (req, res) => {
+    const v = (req.body as Record<string, unknown> | undefined)?.seasonOver;
+    if (typeof v !== "boolean") throw new HttpError(400, "Body must be { seasonOver: true | false }", "DELETE the same path to return him to automatic.");
+    res.json(await seasonMarkRoute(req, v));
+  }),
+);
+
+apiRouter.delete(
+  "/api/league/:provider/:id/overrides/:playerId",
+  h(async (req, res) => {
+    res.json(await seasonMarkRoute(req, null));
+  }),
+);
+
 // ---------------------------------------------------------------- import (Yahoo web pages, no API)
 /**
  * Where the bookmarklet hands its result over (one-click import, v7): PUBLIC_URL when Discord sign-in is configured
@@ -1055,6 +1096,7 @@ apiRouter.delete(
     });
     await deleteProjLog(req.params.id);
     await deleteMatchLog(req.params.id);
+    await deleteOverrides(req.params.id);
     invalidateLeague("import", req.params.id);
     res.json({ ok: true });
   }),

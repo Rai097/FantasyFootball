@@ -48,7 +48,7 @@ export function stashWatch(x: StashInput): StashRow[] {
   for (const p of x.players) {
     const r = p.ret;
     const floor = x.flexLevel[p.pos];
-    if (!r || x.rostered.has(p.id) || p.team === "FA" || p.pos === "K" || p.pos === "DEF" || rosteredByName(p)) continue;
+    if (!r || p.seasonStatus?.over || x.rostered.has(p.id) || p.team === "FA" || p.pos === "K" || p.pos === "DEF" || rosteredByName(p)) continue;
     if (r.healthyRate === undefined || floor === undefined || r.healthyRate < floor || !r.stashScore || r.playoffPts === undefined) continue;
     const availability = x.availability.get(p.id) ?? "unknown";
     const call: StashCall = availability === "fa" ? "add" : availability === "waivers" ? "claim-cheap" : "check";
@@ -89,6 +89,7 @@ export function stashWatch(x: StashInput): StashRow[] {
       details,
     };
     if (p.injury) row.injury = p.injury;
+    if (p.seasonStatus) row.seasonStatus = p.seasonStatus;
     if (r.practiceUp) row.flag = PRACTICE_FLAG;
     rows.push(row);
   }

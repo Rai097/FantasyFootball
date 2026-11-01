@@ -56,6 +56,13 @@ describe("classify", () => {
     assert.deepEqual(c("GET", "/api/players/search", { q: "x" }), { kind: "league", provider: "demo", id: "42" });
     assert.deepEqual(c("GET", "/api/players/search", { provider: "import", id: "yB" }), { kind: "league", provider: "import", id: "yB" });
   });
+  test("season marks (owner's 'Out for season' toggle): every write is admin-only, any case / trailing slash", () => {
+    assert.equal(c("PUT", "/api/league/import/yA/overrides/00-1").kind, "admin");
+    assert.equal(c("DELETE", "/api/league/import/yA/overrides/00-1").kind, "admin");
+    assert.equal(c("PUT", "/API/League/import/yA/Overrides/00-1/").kind, "admin");
+    assert.equal(c("POST", "/api/league/import/yA/overrides").kind, "admin");
+    assert.deepEqual(c("GET", "/api/league/import/yA/overrides/00-1"), { kind: "league", provider: "import", id: "yA" });
+  });
 });
 
 describe("resolveScope", () => {

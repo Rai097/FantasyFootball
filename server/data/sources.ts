@@ -23,4 +23,9 @@ export const sources = {
   dynastyValues: `${DP}/values-players.csv`,
   /** Sleeper player listing (injury status / body part), ≈ 15 MB, at most once a day: https://docs.sleeper.com/#players */
   sleeperPlayers: "https://api.sleeper.app/v1/players/nfl",
+  /**
+   * ESPN's league-wide NFL injuries feed (details.returnDate), ≈ 8.7 MB, at most once a day. UNDOCUMENTED public API
+   * (no official docs; verified on real data 2026-10-31): evidence only, a failure never breaks the model.
+   */
+  espnInjuries: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries",
 };

@@ -62,6 +62,40 @@ export interface SleeperInjury {
   rosterStatus?: string;
 }
 
+/**
+ * ESPN's league-wide injuries feed entry (server/data/espn.ts; undocumented public API, DESIGN "Season-over injuries
+ * (2026-10-31)"). Evidence only: a return date after the league's final week marks the season over.
+ */
+export interface EspnInjury {
+  /** "Injured Reserve", "Out", "Doubtful", "Questionable", "Suspension", … */
+  status: string;
+  /** details.returnDate, "YYYY-MM-DD" (ESPN's estimate). */
+  returnDate?: string;
+  /** details.type / details.detail, e.g. "Knee" / "Surgery". */
+  type?: string;
+  detail?: string;
+}
+
+/** Who decided a player's season is over (or, for an owner mark, that it is not). */
+export type SeasonOverSource = "owner" | "report" | "sleeper" | "espn";
+
+/**
+ * Out-for-the-season call shown with the player (projection v4, DESIGN "Season-over injuries (2026-10-31)"). Set when
+ * he is out for the season, when the owner marked him, or when an automatic source says so (even when overruled).
+ */
+export interface SeasonStatus {
+  /** The effective call: 0 for every remaining week when true. */
+  over: boolean;
+  /** What decided `over` ("owner" whenever the owner's mark is set). */
+  source: SeasonOverSource;
+  /** One short reason (≤ 90 chars), e.g. "ESPN: return Feb 15, 2027, after the final week". */
+  why: string;
+  /** The owner's mark when set: true = out for season, false = not out (beats every automatic source). */
+  owner?: boolean;
+  /** The automatic finding, when a source says season over (shown next to the owner's toggle). */
+  auto?: { source: Exclude<SeasonOverSource, "owner">; why: string };
+}
+
 export interface Player {
   id: string; // internal id: gsis id when known, otherwise "fp:<id>" / "yahoo:<id>" etc.
   name: string;
@@ -79,6 +113,8 @@ export interface Player {
    * part in the return "why". Undefined = not listed injured by Sleeper, or Sleeper unavailable (unknown).
    */
   sleeperInjury?: SleeperInjury;
+  /** ESPN's injuries feed entry (server/data/espn.ts, at most once a day). Undefined = not listed, or ESPN unavailable. */
+  espnInjury?: EspnInjury;
   /** Rest-of-season expert consensus rank (FantasyPros, PPR overall). */
   ecrOverall?: number;
   ecrPos?: number;
@@ -176,6 +212,8 @@ export interface ValuedPlayer extends Player {
    * and for flex-level players with 0 snaps in their team's last 2 games. Unset for everyone else.
    */
   ret?: ReturnInfo;
+  /** Out-for-the-season call and its source (unset = no source says so and no owner mark). */
+  seasonStatus?: SeasonStatus;
   /** Points per game the FantasyPros rest-of-season rank stands for (projection v4's ECR curve); unset = unranked. */
   ecrPts?: number;
 }
@@ -288,6 +326,12 @@ export interface League {
   fetchedAt: string;
   /** Present for provider "import" only. */
   import?: ImportMeta;
+  /**
+   * The league owner's "Out for season" marks by player id (.data/overrides-<importId>.json; import leagues only):
+   * true = out for the season, false = not out (overrules the automatic sources); a missing id = automatic. Applied by
+   * projection v4 to every copy of the player (rostered, free agent). Nothing but the owner's toggle writes them.
+   */
+  seasonMarks?: Record<string, boolean>;
 }
 
 export interface LineupSlot {
@@ -447,6 +491,8 @@ export interface StashRow {
   /** Rank score: playoff weeks 1.0, earlier weeks 0.33, × return confidence. */
   stashScore: number;
   details: DetailItem[];
+  /** The owner's mark / an overruled automatic finding (never `over`: an out-for-season player is never a stash). */
+  seasonStatus?: SeasonStatus;
 }
 
 /** Where a free agent sits on Yahoo: free to add now, on waivers (needs a claim), or not captured (old import). */
@@ -636,7 +682,7 @@ export type CardPlayer = Pick<ValuedPlayer, "id" | "name" | "pos" | "team" | "va
  */
 export type ValueRow = Pick<
   ValuedPlayer,
-  "id" | "name" | "pos" | "team" | "injury" | "value" | "market" | "marketRank" | "marketEstimated" | "edge" | "ppg" | "ppg26" | "ppgExp26" | "games" | "posRank" | "ecrOverall" | "luck" | "label" | "whyItems"
+  "id" | "name" | "pos" | "team" | "injury" | "value" | "market" | "marketRank" | "marketEstimated" | "edge" | "ppg" | "ppg26" | "ppgExp26" | "games" | "posRank" | "ecrOverall" | "luck" | "label" | "whyItems" | "seasonStatus"
 > & { ownerTeamId?: string; rostered: boolean };
 
 /** GET /breakouts row: no prose thesis, slim player. */

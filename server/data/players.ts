@@ -5,6 +5,7 @@ import { normTeam, normName, normPos, NFL_TEAM_NAMES, teamFromDefenseName } from
 import { computeNflState, type NflState } from "./nfl.js";
 import { staleMemo } from "./memo.js";
 import { loadSleeperInjuries } from "./sleeper.js";
+import { loadEspnInjuries } from "./espn.js";
 import type { Player, Position, StatLine, WeekLine } from "../model/types.js";
 
 export interface PlayerDb {
@@ -278,8 +279,10 @@ async function buildPlayerDb(generation: number): Promise<PlayerDb> {
     }
   }
 
-  // 9. Sleeper injury listing (body part, season-ending tears): its own once-a-day cache; unknown on failure.
-  await loadSleeperInjuries({ players, bySleeper, byYahoo, byName });
+  // 9. Sleeper injury listing (body part, season-ending tears) and ESPN injuries feed (return dates): each its own
+  // once-a-day cache, loaded side by side; unknown on failure (DESIGN "Season-over injuries (2026-10-31)").
+  const injuryIx = { players, bySleeper, byYahoo, byEspn, byName };
+  await Promise.all([loadSleeperInjuries(injuryIx), loadEspnInjuries(injuryIx)]);
 
   const db: PlayerDb = {
     season,

@@ -381,6 +381,13 @@ export function rankWaivers(
             : "Confirm his status before spending priority, or add him after waivers clear.";
       }
     }
+    // Out for the season by any source or the owner's mark (projection v4 seasonStatus): never a claim, bid or stash.
+    if (fa.seasonStatus?.over && recommendation !== "pass") {
+      recommendation = "pass";
+      rule = `${rule}, but out for the season`;
+      lead = `Out for the season: ${fa.seasonStatus.why}.`;
+      action = undefined;
+    }
     // An injured player is never worth rolling-list priority sight unseen: hold him as a stash until his status is known.
     // "DNP" = did not practice, no game status yet: treated like Questionable here.
     const hurt = kind === "out" || kind === "return" || kind === "doubtful" || isQuestionable(fa.injury) || fa.injury?.status.trim().toUpperCase() === "DNP";

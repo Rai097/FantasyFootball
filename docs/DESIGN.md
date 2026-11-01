@@ -1572,6 +1572,65 @@ January, activated from PUP, practising) was out; Stash watch kept a WR whose to
     report Out reads as hurt for the earlier weeks (a long healthy scratch before an injury); a starter missing weeks
     with no row and no RES (e.g. activated from PUP with the report rows missing) is unknown → not borrowed.
 
+## Season-over injuries (2026-10-31) — overrides "Fix: returning starters and season-ending injuries" root cause (a) and "Season-ending injuries + bye-week K / DEF" on who is out for the season
+
+Owner decision (2026-10-31): BOTH an automatic ESPN return-date rule and an owner-set "Out for season" toggle that
+nothing overwrites and that always wins.
+
+**One call, one place** (`projectionV4.ts` `seasonStatusOf` → `ValuedPlayer.seasonStatus`, absence `seasonOver`):
+1. The league owner's mark (both ways): "Out for season" ⇒ out; "Not out" ⇒ every automatic source is overruled (still
+   absent if a source listed him: return unconfirmed). Beats a suspension and "designated to return" too.
+2. Else the automatic sources, evidence only (`returns.ts` `autoSeasonOver`, first match): the injury report detail says
+   "season"; Sleeper's ACL / Achilles on IR (`SEASON_ENDING`, unchanged); ESPN's return date after the final week.
+   Designated to return (Yahoo IR-R / roster R48) beats Sleeper and ESPN (their daily copies can lag an activation),
+   never the report. A source without a finding never clears another one; no ESPN entry or date ≠ healthy.
+* `seasonStatus = { over, source: owner | report | sleeper | espn, why, owner?, auto? }` is set whenever a mark exists
+  or a source says season over (even when overruled), so every view can show the call and its source.
+* Out for the season ⇒ 0 for every remaining week, value 0, no hold / trade value (existing `seasonOver` path), never on
+  Stash watch (`stash.ts`), never a Target (`breakouts.ts`), a waiver "pass" ("Out for the season: <why>.",
+  `waivers.ts`). Values keeps him listed (value 0) so the owner can see and undo the call; chip "Out for season".
+
+**ESPN injuries feed** (`server/data/espn.ts`). URL `https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries`
+— UNDOCUMENTED public API (ESPN publishes no docs for site.api.espn.com); shape verified on real data 2026-10-31:
+≈ 8.7 MB, 32 teams, 800 entries, `injuries[].injuries[]` with `status` ("Injured Reserve", "Out", "Questionable",
+"Active", …), `details.returnDate` ("2027-02-15"), `details.type` / `detail`, athlete name / position / team, the ESPN
+id in `athlete.links[].href` (headshot URL fallback).
+* Cache `.cache/<sha1>-injuries`, TTL 24 h (`ESPN_TTL_HOURS`), fetch aborted after 60 s (`ESPN_TIMEOUT_MS`, new
+  `fetchCachedMeta` `timeoutMs`), validated before writing (`validateEspnBody`: ≥ 20 teams, ≥ 100 entries); any failure
+  serves the previous copy untouched, no copy = every ESPN entry unknown. Loaded beside Sleeper on every player-DB
+  build (6-hourly): at most 1 request a day, ≤ 4 attempts a day while ESPN fails. Quota: one 8.7 MB GET per day per
+  running copy; no key. Log: `[espn] refresh source ageH entries fantasy dated matched bytes ms [error]`.
+* Matching: the one matcher shared with Sleeper (`sleeper.ts` `matchListed`): Sleeper id, ESPN id (our id map), GSIS,
+  Yahoo id, then normalised name + position + team when unique. Stored as `Player.espnInjury`, apart from `injury`.
+* **Rule** (`returns.ts` `espnSeasonOverWhy`): `returnDate` strictly after the day of the last game of the league's
+  final week (games.csv gameday, `ProjectionTables.weekEnds`) ⇒ out for the season, why "ESPN: return Feb 15, 2027,
+  after the final week". Active / Questionable / Probable / Day-To-Day never count (82 Questionable rows carry dates);
+  a return on the final game day can still play; unknown final week or bad date ⇒ no decision. A date before that is
+  an evidence bullet only ("ESPN return: Nov 25, 2026 (ESPN estimate)"), never the return week.
+
+**Owner toggle** (`server/providers/overrides.ts`): `.data/overrides-<importId>.json`
+`{ version: 1, players: { <playerId>: { seasonOver: true | false, setAt, setBy } } }`, written only by the toggle under
+`withLock("overrides:<id>")`, never read-merge-written by imports, auto-import or the loaders; deleted with the league;
+≤ 500 marks; a corrupt file throws (the marks are unknown, never silently "automatic"). Loaded with the import league
+as `League.seasonMarks` and applied by id to every copy of the player (rostered, free agent).
+* API: `PUT /api/league/import/:id/overrides/:playerId` `{ seasonOver: boolean }` → `{ playerId, mark }`;
+  `DELETE` same path → back to automatic. League owner only: the guard classifies every write under
+  `/api/league/*/*/overrides` as admin (like the settings PUT; Origin + CSRF apply); 404 for other providers, an unknown
+  league or player; 400 for a bad body or id. Values rows carry `seasonStatus`; Stash rows too.
+* UI (`web/src/components/SeasonToggle.tsx`, one component): Values "?" panel and Stash watch details show a row
+  "Out for season" — Auto / Out for season / Not out (league owner on an import league; others read-only), the
+  automatic finding with its source, and a one-sentence "?" ; chip "Out for season" in Values and the lineup table.
+
+**Real data (2026-10-31 copy, week 8, final week ends 2026-12-28)**: ESPN 800 entries, 400 at fantasy positions, 70 with
+a date, 399 matched. Season over: Sleeper 8 (as before) + ESPN 5 new (the patellar-tendon WR, 3 more WRs, a TE; all
+returning 2027-02-15); the hamstring WR (ESPN Nov 25) stays on Stash watch with the ESPN bullet. Stash watch: the patellar WR
+out; the WR flex level 10.3 → 10.2 (his healthy projection left the pool), so a PCL WR at 10.2 now clears the floor.
+Every other value / ppg identical (one season-over WR 2.63 → 2.51 ppg, value 0 both), waiver calls identical (72 rows),
+acceptance players unchanged. Owner "Not out" on the patellar WR puts him back on Stash watch; DELETE restores ESPN's call.
+* Known residuals: ESPN covers only ~50 IR players (most Sleeper season-ending players absent); ESPN's 2027-02-15
+  reads as a generic "after the season" date; the toggle lives on Values / Stash watch only (a rostered player is marked
+  from Values).
+
 ## Projection accuracy log (2026-10-30)
 - Purpose: per player and overall, how the app's weekly projection and Yahoo's weekly projection compare with what
   actually happened (League tab card "Projection accuracy"; "Vs Yahoo" bullet in a player's value details).

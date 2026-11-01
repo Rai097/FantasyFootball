@@ -5,7 +5,7 @@
 // Data reality (2026 nflverse cache): the injuries file has ONE row per player-week (the week's final practice
 // participation + game status), so a practice trend is read week over week, not day by day. Players on IR do not
 // appear in the injury report until their practice window opens; roster code R48 = injured, designated to return.
-import type { DetailItem, SleeperInjury } from "./types.js";
+import type { DetailItem, EspnInjury, SeasonOverSource, SleeperInjury } from "./types.js";
 import type { StatusWeek } from "./signals/types.js";
 
 /** Evidence bullets ≤ 90 chars (a local builder: details.ts → waivers.ts would make an import cycle with projectionV4). */
@@ -63,6 +63,65 @@ export function seasonEndingWhy(s: SleeperInjury | undefined): string | null {
   return part ? `Out for the season (torn ${part.name}, on ${st})` : null;
 }
 
+/**
+ * ESPN return date rule (DESIGN "Season-over injuries (2026-10-31)"): ESPN's estimated return date strictly after the
+ * day of the last game of the league's final week ⇒ out for the season. Statuses that are not an absence (Active,
+ * Questionable, Probable, Day-To-Day) never count, whatever the date. No date, an unparsable date or an unknown final
+ * week ⇒ no evidence (never "healthy": the other sources still decide).
+ */
+export const ESPN_SEASON_OVER = {
+  notAbsent: ["active", "questionable", "probable", "day-to-day"] as readonly string[],
+};
+
+const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})/;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2027-02-15" → "Feb 15, 2027"; undefined when not a date. */
+export function dayText(iso: string | undefined): string | undefined {
+  const m = ISO_DAY.exec(iso?.trim() ?? "");
+  if (!m || +m[2] < 1 || +m[2] > 12) return undefined;
+  return `${MONTHS[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
+}
+
+/** "ESPN: return Feb 15, 2027, after the final week" when the ESPN entry meets the rule; else null. */
+export function espnSeasonOverWhy(e: EspnInjury | undefined, finalWeekEnd: string | undefined): string | null {
+  if (!e?.returnDate || !finalWeekEnd) return null;
+  if (ESPN_SEASON_OVER.notAbsent.includes(e.status.trim().toLowerCase())) return null;
+  const ret = ISO_DAY.exec(e.returnDate.trim());
+  const end = ISO_DAY.exec(finalWeekEnd.trim());
+  if (!ret || !end || !dayText(e.returnDate)) return null;
+  return ret[0] > end[0] ? `ESPN: return ${dayText(e.returnDate)}, after the final week` : null;
+}
+
+/** Evidence the automatic season-over sources read (projection v4 passes the player's fields). */
+export interface SeasonOverEvidence {
+  /** The league / nflverse injury tag is long-term and its detail says "season". */
+  reportSeason?: boolean;
+  sleeper?: SleeperInjury;
+  espn?: EspnInjury;
+  /** Day ("YYYY-MM-DD", US/Eastern) of the last game of the league's final week; undefined = unknown. */
+  finalWeekEnd?: string;
+}
+
+/**
+ * The first automatic source that says out for the season (report, then Sleeper, then ESPN), or null. Evidence only:
+ * a source without a finding never clears another one; the owner's mark (projection v4) beats all of them.
+ */
+export function autoSeasonOver(x: SeasonOverEvidence): { source: Exclude<SeasonOverSource, "owner">; why: string } | null {
+  if (x.reportSeason) return { source: "report", why: "Out for the season per the injury report" };
+  const sl = seasonEndingWhy(x.sleeper);
+  if (sl) return { source: "sleeper", why: sl };
+  const es = espnSeasonOverWhy(x.espn, x.finalWeekEnd);
+  if (es) return { source: "espn", why: es };
+  return null;
+}
+
+/** ESPN's estimated return as an evidence bullet value ("Nov 25, 2026 (ESPN estimate)"); undefined without a date. */
+export function espnReturnText(e: EspnInjury | undefined): string | undefined {
+  const d = dayText(e?.returnDate);
+  return e && d && !ESPN_SEASON_OVER.notAbsent.includes(e.status.trim().toLowerCase()) ? `${d} (ESPN estimate)` : undefined;
+}
+
 /** "IR: Knee - PCL" (Sleeper status + body part); undefined without a body part. */
 export function listingText(s: SleeperInjury | undefined): string | undefined {
   const part = s?.bodyPart?.trim();
@@ -73,6 +132,10 @@ export interface ReturnInput {
   absence: Absence;
   /** Sleeper's injury listing (body part for the "why"; the season-ending reason when absence = seasonOver). */
   listing?: SleeperInjury;
+  /** Why he is out for the season (absence = seasonOver: the deciding source's reason). */
+  seasonWhy?: string;
+  /** ESPN's injuries feed entry: its estimated return date is an evidence bullet (never the return week). */
+  espn?: EspnInjury;
   /** nflverse roster status (ACT / RES / …) and transaction code (R01 / R48 / R04 …). */
   rosterStatus?: string;
   rosterCode?: string;
@@ -163,9 +226,11 @@ export function estimateReturn(x: ReturnInput): ReturnEstimate {
     return { returnWeek: null, confidence: "unknown", reasons, practiceUp };
   };
 
-  if (x.absence === "seasonOver") return unknown(seasonEndingWhy(x.listing) ?? "out for the season per the report");
+  if (x.absence === "seasonOver") return unknown(x.seasonWhy ?? seasonEndingWhy(x.listing) ?? "out for the season per the report");
   const listed = listingText(x.listing);
   if (listed) add("Injury", listed);
+  const espnBack = espnReturnText(x.espn);
+  if (espnBack) add("ESPN return", espnBack);
   if (x.absence === "suspended") return unknown("suspended: length unknown, return unconfirmed");
 
   const dtr = x.absence === "dtr" || x.rosterCode === "R48";

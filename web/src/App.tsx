@@ -125,6 +125,9 @@ export function App() {
 }
 
 function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSignedOut: () => void }) {
+  // The "Out for season" toggle writes: the league owner (admin, not viewing as a user) on an imported league only —
+  // the same rule the server's guard enforces; everyone else sees the call read-only.
+  const canMark = (a: Active) => me.role === "admin" && !me.actingAs && a.provider === "import";
   const [active, setActiveRaw] = useState<Active | null>(() => scopedActive(me, loadActive()));
   const [justConnected, setJustConnected] = useState(false);
   const handoff = useImportHandoff();
@@ -393,11 +396,11 @@ function Desk({ me, onMe, onSignedOut }: { me: Me; onMe: (m: Me) => void; onSign
               ) : tab === "trades" ? (
                 <TradesTab analysis={a} active={act} />
               ) : tab === "waivers" ? (
-                <WaiversTab analysis={a} active={act} />
+                <WaiversTab analysis={a} active={act} canMark={canMark(act)} />
               ) : tab === "targets" ? (
                 <TargetsTab analysis={a} active={act} />
               ) : (
-                <ValuesTab analysis={a} active={act} />
+                <ValuesTab analysis={a} active={act} canMark={canMark(act)} />
               )
             }
           </NeedLeague>

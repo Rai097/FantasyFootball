@@ -10,7 +10,7 @@
 //    `ret.backWeekly` = healthy × matchup from current week + 4 if he returns; lineups mix that scenario with ½ weight:
 //    rosterScore "return scenarios").
 // K / DEF keep the ECR-rank line (no stat model). Value = surplus over replacement of mode-weighted weekly points.
-import type { DetailItem, League, Player, Position, ReturnInfo, ValuedPlayer } from "./types.js";
+import type { DetailItem, League, Player, Position, ReturnInfo, SeasonStatus, ValuedPlayer } from "./types.js";
 import { SKILL_POSITIONS } from "./types.js";
 import { recFormat, score } from "./scoring.js";
 import { clampItem } from "./details.js";
@@ -19,7 +19,7 @@ import { normTeam } from "../data/names.js";
 import { computePlayerSignals } from "./signals/index.js";
 import type { PlayerSignalInput, PlayerSignals, SkillPos } from "./signals/types.js";
 import { luckLabel, luckText } from "./labels.js";
-import { RETURNS, estimateReturn, returnText, seasonEndingWhy, type Absence, type ReturnEstimate } from "./returns.js";
+import { RETURNS, autoSeasonOver, estimateReturn, returnText, type Absence, type ReturnEstimate } from "./returns.js";
 import { FLEX_RANK } from "./signals/trend.js";
 import { SPIKE, VACATED } from "./signals/vacated.js";
 import { HALF_LIFE_GAMES } from "./signals/recency.js";
@@ -48,6 +48,11 @@ export interface ProjectionTables {
   schedule: Map<string, Map<number, ScheduledGame>>;
   /** Weeks each team has played (games missed / 0-snap stashes). Absent = weeks 1..current−1 minus the bye (tests). */
   playedWeeks?: Map<string, number[]>;
+  /**
+   * Day ("YYYY-MM-DD", US/Eastern) of each regular-season week's last game (games.csv gameday). Absent / missing week =
+   * unknown: the ESPN return-date rule then never decides (DESIGN "Season-over injuries (2026-10-31)").
+   */
+  weekEnds?: Map<number, string>;
   allowed: Map<string, Partial<Record<SkillPos, Allowed>>>;
   leagueAllowed: Partial<Record<SkillPos, number>>;
 }
@@ -208,24 +213,52 @@ export function signalInputFromPlayer(p: Player): PlayerSignalInput | null {
 
 type Avail = "noTeam" | "absent" | "doubtful" | "questionable" | "healthy";
 
+/**
+ * Out-for-the-season call (DESIGN "Season-over injuries (2026-10-31)"): the league owner's mark beats everything (both
+ * ways); else the automatic sources (returns.ts autoSeasonOver: report "season", Sleeper ACL / Achilles on IR, ESPN
+ * return date after the final week). Designated to return beats Sleeper and ESPN (positive evidence of a return; their
+ * daily copies can lag an activation), never the report rule. Undefined = no mark and no source says so.
+ */
+export function seasonStatusOf(p: Player, sig: PlayerSignals | null, finalWeekEnd: string | undefined, mark: boolean | undefined): SeasonStatus | undefined {
+  const k = injuryKind(p.injury);
+  const auto = autoSeasonOver({
+    reportSeason: k === "long" && /season/i.test(p.injury?.detail ?? ""),
+    sleeper: p.sleeperInjury,
+    espn: p.espnInjury,
+    finalWeekEnd,
+  });
+  if (mark !== undefined) {
+    const over = mark;
+    return { over, source: "owner", why: over ? "Marked out for the season by the league owner" : "Marked not out for the season by the league owner", owner: over, ...(auto ? { auto } : {}) };
+  }
+  if (!auto) return undefined;
+  const dtr = k === "return" || (sig?.rosterStatus === "RES" && sig.rosterCode === "R48");
+  const over = auto.source === "report" || !dtr;
+  return { over, source: auto.source, why: over ? auto.why : `${auto.why}; designated to return wins`.slice(0, 90), auto };
+}
+
 /** Availability class and, for an absent player, why (the return estimator's input). */
-function availKind(p: Player, sig: PlayerSignals | null): { kind: Avail; absence?: Absence } {
-  if (p.team === "FA" && p.pos !== "DEF") return { kind: "noTeam" };
+function availKind(p: Player, sig: PlayerSignals | null, finalWeekEnd: string | undefined, mark: boolean | undefined): { kind: Avail; absence?: Absence; season?: SeasonStatus } {
+  const season = seasonStatusOf(p, sig, finalWeekEnd, mark);
+  const s = season ? { season } : {};
+  if (p.team === "FA" && p.pos !== "DEF") return { kind: "noTeam", ...s };
   const k = injuryKind(p.injury);
   const st = p.injury?.status.trim().toUpperCase() ?? "";
-  if (st === "SUSP" || st === "SUSPENDED") return { kind: "absent", absence: "suspended" };
-  if (k === "long" && /season/i.test(p.injury?.detail ?? "")) return { kind: "absent", absence: "seasonOver" };
+  // The owner's "out for season" mark beats every report (a suspension included).
+  if (season?.over && season.source === "owner") return { kind: "absent", absence: "seasonOver", ...s };
+  if (st === "SUSP" || st === "SUSPENDED") return { kind: "absent", absence: "suspended", ...s };
+  // Report / Sleeper / ESPN say out for the season (designated to return already applied in seasonStatusOf); the
+  // owner's "not out" mark falls through to the reserve-list call below.
+  if (season?.over) return { kind: "absent", absence: "seasonOver", ...s };
   // Designated to return (Yahoo IR-R or roster code R48) beats the reserve list (he is RES until activated).
-  if (k === "return" || (sig?.rosterStatus === "RES" && sig.rosterCode === "R48")) return { kind: "absent", absence: "dtr" };
-  // Sleeper lists a season-ending tear on a reserve list (returns.ts SEASON_ENDING). Designated to return (above) wins:
-  // it is positive evidence of a return, and Sleeper's daily listing can lag an activation.
-  if (seasonEndingWhy(p.sleeperInjury)) return { kind: "absent", absence: "seasonOver" };
+  if (k === "return" || (sig?.rosterStatus === "RES" && sig.rosterCode === "R48")) return { kind: "absent", absence: "dtr", ...s };
   // IR / PUP / NFI / NA / long-term detail, or nflverse roster RES even with a game last week (freshly placed on IR).
-  if (k === "long" || sig?.rosterStatus === "RES") return { kind: "absent", absence: "reserve" };
-  if (k === "out") return { kind: "absent", absence: "out" };
-  if (k === "doubtful") return { kind: "doubtful" };
-  if (isQuestionable(p.injury)) return { kind: "questionable" };
-  return { kind: "healthy" };
+  // An automatic season-over finding the owner overruled ("not out") is still an absence: return unconfirmed.
+  if (k === "long" || sig?.rosterStatus === "RES" || (season?.auto && !season.over)) return { kind: "absent", absence: "reserve", ...s };
+  if (k === "out") return { kind: "absent", absence: "out", ...s };
+  if (k === "doubtful") return { kind: "doubtful", ...s };
+  if (isQuestionable(p.injury)) return { kind: "questionable", ...s };
+  return { kind: "healthy", ...s };
 }
 
 /**
@@ -308,6 +341,8 @@ interface Proj extends Base {
   rate: number;
   availKind: Avail;
   absence?: Absence;
+  /** Out-for-the-season call (owner mark / automatic sources); unset = none. */
+  season?: SeasonStatus;
   est?: ReturnEstimate;
   /** Team games played since his last game (null = unknown / no team). */
   gamesMissed: number | null;
@@ -357,6 +392,11 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
   const implied: number[] = [];
   for (const m of tables.schedule.values()) for (const g of m.values()) if (g.implied !== undefined) implied.push(g.implied);
   const impliedAvg = implied.length ? mean(implied) : 0;
+  // Day of the last game of the league's final week (ESPN return-date rule); undefined = unknown → ESPN never decides.
+  const finalWeekEnd = tables.weekEnds?.get(S.finalWeek);
+  // The league owner's "Out for season" marks (import leagues): apply to every copy of the player by id.
+  const marks = league.seasonMarks;
+  const markOf = (p: Player): boolean | undefined => (marks && Object.prototype.hasOwnProperty.call(marks, p.id) ? marks[p.id] === true : undefined);
 
   // --- pass 1: signal model rate per player
   const signalsOf = (p: Player): PlayerSignals | null => {
@@ -375,7 +415,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
   const availMemo = new Map<Player, ReturnType<typeof availCompute>>();
   const availCompute = (b: Pick<Base, "p" | "sig" | "kdef">) => {
     const p = b.p;
-    const { kind, absence } = availKind(p, b.sig);
+    const { kind, absence, season } = availKind(p, b.sig, finalWeekEnd, markOf(p));
     const sched = tables.schedule.size ? tables.schedule.get(p.team) : undefined;
     // His team's remaining game weeks and the games he has missed since his last game.
     const gameWeeks: number[] = [];
@@ -393,6 +433,8 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       est = estimateReturn({
         absence,
         ...(p.sleeperInjury ? { listing: p.sleeperInjury } : {}),
+        ...(p.espnInjury ? { espn: p.espnInjury } : {}),
+        ...(absence === "seasonOver" && season ? { seasonWhy: season.why } : {}),
         rosterStatus: b.sig?.rosterStatus,
         rosterCode: b.sig?.rosterCode,
         onIr: onIr(p, b.sig),
@@ -405,7 +447,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
         ...(/^(O|OUT)$/.test(p.injury?.status.trim().toUpperCase() ?? "") ? { tagOut: true } : {}),
       });
     }
-    return { kind, absence, sched, gameWeeks, gamesMissed, est };
+    return { kind, absence, season, sched, gameWeeks, gamesMissed, est };
   };
   const availInfo = (b: Pick<Base, "p" | "sig" | "kdef">) => {
     if (!availMemo.has(b.p)) availMemo.set(b.p, availCompute(b));
@@ -572,7 +614,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     let ecrUnranked = false;
     let rate = 0;
     let wAnchor = 0;
-    const { kind, absence } = availKind(p, b.sig);
+    const { kind, absence, season } = availKind(p, b.sig, finalWeekEnd, markOf(p));
     // A sample behind his rate: ≥ 2 unflagged games with a model rate, or a ≥ 4-game last season.
     const sampled = !b.kdef && b.model !== null && (b.unflagged >= 2 || (b.sig?.talent.priorExpPpg != null && b.sig.talent.priorGames >= V4.priorMinGames));
     // Reserve list / designated to return / suspended with a sample: no ECR anchor — experts drop an absent player's
@@ -664,6 +706,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
       rate,
       availKind: kind,
       ...(absence ? { absence } : {}),
+      ...(season ? { season } : {}),
       ...(est ? { est } : {}),
       gamesMissed,
       healthyRate,
@@ -827,6 +870,7 @@ export function valuePlayers(league: League, pool: Iterable<Player>, tables: Pro
     if (now?.game && now.avail < 1 && (x.absence === "out" || x.availKind === "doubtful" || x.availKind === "questionable")) out.availThisWeek = now.avail;
     const ret = returnInfo(x);
     if (ret) out.ret = ret;
+    if (x.season) out.seasonStatus = { ...x.season, ...(x.season.auto ? { auto: { ...x.season.auto } } : {}) };
     return out;
   };
 
@@ -868,7 +912,7 @@ const AVAIL_TEXT: Record<Exclude<Avail, "absent">, string | null> = {
 function absentText(x: Proj): string {
   const e = x.est;
   if (!e || e.returnWeek === null)
-    return `${x.absence === "seasonOver" ? (seasonEndingWhy(x.p.sleeperInjury) ?? "out for the season") : "return unconfirmed"}: 0 for every week`;
+    return `${x.absence === "seasonOver" ? (x.season?.why ?? "out for the season") : "return unconfirmed"}: 0 for every week`;
   return `${returnText(e.returnWeek, e.confidence)}: 0 before${x.absence !== "out" ? `, ×${RETURNS.ramp} first game` : ""}`;
 }
 

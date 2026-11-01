@@ -3,6 +3,7 @@ import { api, type Active, type Analysis, type StashRow, type WaiverRow } from "
 import { Empty, ErrorBox, Loading, PosBadge } from "../components/common";
 import { DetailList, Disclosure, ExpandableList, ExpandableRow } from "../components/ExpandableRow";
 import { InjuryDot } from "../components/PlayerChip";
+import { SeasonToggle } from "../components/SeasonToggle";
 import { ColumnHelp, HelpTip } from "../components/HelpTip";
 import { deltaClass, f1, signed } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
@@ -37,7 +38,7 @@ function WeekProj({ p }: { p: WaiverRow }) {
   );
 }
 
-export function WaiversTab({ analysis, active }: { analysis: Analysis; active: Active & { team: string } }) {
+export function WaiversTab({ analysis, active, canMark = false }: { analysis: Analysis; active: Active & { team: string }; canMark?: boolean }) {
   const [pos, setPos] = useState("");
   const [avail, setAvail] = useState<Avail>("all");
   const res = useAsync(() => api.waivers(active), [active.provider, active.id, active.team]);
@@ -114,7 +115,7 @@ export function WaiversTab({ analysis, active }: { analysis: Analysis; active: A
         </Disclosure>
       </section>
 
-      {stash?.length ? <StashWatch rows={stash} /> : null}
+      {stash?.length ? <StashWatch rows={stash} mark={{ active, canEdit: canMark, onSaved: res.reload }} /> : null}
 
       {rows.length === 0 ? (
         <Empty>
@@ -156,7 +157,14 @@ const STASH_TIPS = {
   score: "Rank score: points from his return week, playoff weeks counted fully and earlier weeks at a third, discounted by how sure the return is.",
 };
 
-function StashWatch({ rows }: { rows: StashRow[] }) {
+/** What the "Out for season" toggle in a stash row needs (the league, may the viewer edit, reload after a change). */
+interface MarkCtx {
+  active: Active;
+  canEdit: boolean;
+  onSaved: () => void;
+}
+
+function StashWatch({ rows, mark }: { rows: StashRow[]; mark: MarkCtx }) {
   return (
     <section className="card flush">
       <h2 className="card-pad">
@@ -164,14 +172,14 @@ function StashWatch({ rows }: { rows: StashRow[] }) {
       </h2>
       <ExpandableList label="Stash watch" className="stash-list">
         {rows.map((p) => (
-          <StashLine key={p.id} p={p} />
+          <StashLine key={p.id} p={p} mark={mark} />
         ))}
       </ExpandableList>
     </section>
   );
 }
 
-function StashLine({ p }: { p: StashRow }) {
+function StashLine({ p, mark }: { p: StashRow; mark: MarkCtx }) {
   const back = p.backWeek === null ? "return unconfirmed" : `back ~wk ${p.backWeek} (${p.confidence})`;
   return (
     <ExpandableRow
@@ -224,6 +232,7 @@ function StashLine({ p }: { p: StashRow }) {
         </span>
       </div>
       <DetailList items={p.details} />
+      {(mark.canEdit || p.seasonStatus) && <SeasonToggle playerId={p.id} status={p.seasonStatus} active={mark.active} canEdit={mark.canEdit} onSaved={mark.onSaved} />}
     </ExpandableRow>
   );
 }

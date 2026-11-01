@@ -161,6 +161,11 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accen
 .tag.surplus { background: var(--pos-bg); border-color: rgba(62, 207, 122, 0.4); }
 .small-tag { font-size: 10px; padding: 0 5px; margin: 0; }
 .warn-tag { background: var(--warn-bg); color: var(--warn); margin-left: 6px; white-space: nowrap; }
+/* "Out for season" chip + the owner's toggle row (components/SeasonToggle.tsx) */
+.season-chip { margin-left: 6px; }
+.season-toggle { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.season-toggle-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.help-footer { display: block; }
 .rank-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .rank-badge.good { background: var(--pos-bg); color: var(--pos); }
 .rank-badge.mid { background: var(--card-2); color: var(--neutral); }

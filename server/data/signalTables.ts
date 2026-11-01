@@ -107,6 +107,8 @@ export interface GameInfo {
   spread?: number;
   /** Kickoff instant (ISO, UTC) from games.csv gameday + gametime (US/Eastern); undefined when either is missing. */
   kickoff?: string;
+  /** games.csv gameday ("2026-12-28", the US/Eastern calendar day); undefined when missing or not a date. */
+  gameday?: string;
 }
 
 /**
@@ -150,6 +152,7 @@ export function parseGames(csv: string, season: number): Map<string, GameInfo> {
       total: opt(r.total_line) === undefined ? undefined : num(r.total_line),
       spread: opt(r.spread_line) === undefined ? undefined : num(r.spread_line),
       kickoff: easternKickoff(r.gameday, r.gametime),
+      ...(/^\d{4}-\d{2}-\d{2}$/.test(r.gameday?.trim() ?? "") ? { gameday: r.gameday.trim() } : {}),
     });
   }
   return out;
@@ -419,6 +422,21 @@ export function buildPlayedWeeks(games: Map<string, GameInfo>): Map<string, numb
   return out;
 }
 
+/**
+ * Day of each week's last game (latest games.csv gameday of the week, US/Eastern calendar day): the ESPN return-date
+ * rule compares against the league's final week (DESIGN "Season-over injuries (2026-10-31)"). Weeks without a dated
+ * game are left out (unknown).
+ */
+export function buildWeekEnds(games: Map<string, GameInfo>): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const g of games.values()) {
+    if (!g.gameday) continue;
+    const cur = out.get(g.week);
+    if (!cur || g.gameday > cur) out.set(g.week, g.gameday);
+  }
+  return out;
+}
+
 // ---- projection v4 tables: remaining schedule, points allowed to each position, Vegas implied totals ----
 
 /** Unplayed games per team and week (a week without an entry = bye, or the team's game is already played). */
@@ -536,6 +554,6 @@ export async function getProjectionTables(season: number, scoring: Scoring): Pro
   return projMemo.get(`${await generation()}|${season}|${JSON.stringify(scoring)}`, async () => {
     const [tables, signals] = await Promise.all([getSeasonTables(season), getAllSignals(season, scoring)]);
     const allowed = buildPointsAllowed(tables.ep, tables.games, scoring);
-    return { signals, schedule: buildSchedule(tables.games), playedWeeks: buildPlayedWeeks(tables.games), allowed: allowed.byDefense, leagueAllowed: allowed.leagueAvg };
+    return { signals, schedule: buildSchedule(tables.games), playedWeeks: buildPlayedWeeks(tables.games), weekEnds: buildWeekEnds(tables.games), allowed: allowed.byDefense, leagueAllowed: allowed.leagueAvg };
   });
 }

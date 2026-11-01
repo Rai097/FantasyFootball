@@ -1,6 +1,6 @@
 // Typed fetch wrappers for every endpoint in docs/DESIGN.md "HTTP API contract".
 // With `?mock=1` in the page URL all calls are answered by ./mock.ts instead.
-import type { BreakoutResponse, BreakoutTargetRow, CardPlayer, DetailItem, StashRow, ValueRow, WaiverRow, League, Position, Scoring, SlotKind, TeamAnalysis, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "../../server/model/types";
+import type { BreakoutResponse, BreakoutTargetRow, CardPlayer, DetailItem, SeasonStatus, StashRow, ValueRow, WaiverRow, League, Position, Scoring, SlotKind, TeamAnalysis, Trade, TradeFinderResult, ValuedPlayer, WaiverTarget } from "../../server/model/types";
 
 export type TradeMode = "now" | "balanced" | "playoffs";
 export type { TradeFinderResult };
@@ -10,7 +10,7 @@ import type { MatchupResponse } from "../../server/model/matchup";
 import { ApiError } from "./lib/errors";
 
 export { ApiError };
-export type { WaiverTarget, WaiverRow, StashRow, BreakoutTargetRow, BreakoutResponse, CardPlayer, DetailItem, LeagueView, ValueRow };
+export type { WaiverTarget, WaiverRow, StashRow, BreakoutTargetRow, BreakoutResponse, CardPlayer, DetailItem, LeagueView, SeasonStatus, ValueRow };
 
 /** ValuedPlayer as served by the API. */
 export type VP = ValuedPlayer;
@@ -300,6 +300,11 @@ export const api = {
   /** Slim rows (no value explanation); `valueWhy` fetches one player's value bullets on tap. */
   values: (a: Active) => request<ValueRow[]>("GET", `${base(a)}/values${qs({ team: a.team })}`),
   valueWhy: async (a: Active, id: string) => (await request<ValueRow[]>("GET", `${base(a)}/values${qs({ team: a.team, id })}`))[0]?.whyItems ?? [],
+  /** The owner's "Out for season" toggle (import leagues, league owner only): true / false = mark, null = automatic. */
+  seasonMark: (a: Pick<Active, "provider" | "id">, playerId: string, mark: boolean | null) =>
+    mark === null
+      ? request<{ playerId: string; mark: null }>("DELETE", `${base(a)}/overrides/${encodeURIComponent(playerId)}`)
+      : request<{ playerId: string; mark: boolean }>("PUT", `${base(a)}/overrides/${encodeURIComponent(playerId)}`, { seasonOver: mark }),
   /** Breakout Targets: rising role before rising points (RB / WR / TE). */
   breakouts: (a: Active, pos: "RB" | "WR" | "TE" | "all" | string = "all", limit = 30) =>
     request<BreakoutResponse>("GET", `${base(a)}/breakouts${qs({ team: a.team, pos, limit })}`),

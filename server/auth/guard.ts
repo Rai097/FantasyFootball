@@ -146,6 +146,9 @@ export function classify(method: string, path: string, query: Record<string, unk
     case "auth":
       return l[2] === "act-as" ? { kind: "realAdmin" } : { kind: "signed" };
     case "league":
+      // The owner's "Out for season" marks change the league's values for everyone: league owner (admin) only,
+      // like the settings PUT (DESIGN "Season-over injuries (2026-10-31)").
+      if (isWrite(method) && l[4] === "overrides") return { kind: "admin" };
       return { kind: "league", provider: seg(segs[2]), id: seg(segs[3]) };
     case "players": {
       const q = (k: string, d: string) => (typeof query[k] === "string" && query[k] ? String(query[k]) : query[k] === undefined || query[k] === "" ? d : "\u0000invalid");

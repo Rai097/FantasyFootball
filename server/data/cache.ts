@@ -24,6 +24,8 @@ export interface CachedBody {
 export interface FetchOpts {
   /** Throws when a fetched body is unusable: it is then never written, and the old copy is served (or the error thrown). */
   validate?: (body: string) => void;
+  /** Abort the network fetch (headers and body) after this many ms; the old copy is then served (or the error thrown). */
+  timeoutMs?: number;
 }
 
 /**
@@ -45,7 +47,7 @@ export async function fetchCachedMeta(url: string, ttlHours = 6, opts: FetchOpts
     /* no cache */
   }
   try {
-    const res = await fetch(url, { redirect: "follow" });
+    const res = await fetch(url, { redirect: "follow", ...(opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}) });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
     const body = await res.text();
     opts.validate?.(body);

@@ -13,12 +13,15 @@ export function HelpTip({
   items,
   load,
   label = "What does this mean?",
+  footer,
 }: {
   text?: string;
   items?: HelpItem[];
   /** Loads the items on first open (cached by the caller). */
   load?: () => Promise<HelpItem[]>;
   label?: string;
+  /** Interactive content under the bullets (e.g. the "Out for season" toggle); taps inside it keep the popover open. */
+  footer?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState<HelpItem[] | null>(null);
@@ -62,6 +65,11 @@ export function HelpTip({
           ) : load ? (
             <span className="muted">{failed ? "Could not load the explanation." : "Loading…"}</span>
           ) : null}
+          {footer && (
+            <span className="help-footer" onClick={(e) => e.stopPropagation()}>
+              {footer}
+            </span>
+          )}
         </span>
       )}
     </span>
