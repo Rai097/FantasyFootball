@@ -97,6 +97,9 @@ export interface MatchupSideView {
   ours: number | null;
   /** Starters without a projection (0 = complete). */
   oursIncomplete: number;
+  /** Display only (never the record): Σ the starters that DO have a projection; equals `ours` when complete, null when
+   *  no starter has one. Shown as "98.2 + 3 not projected", never as a silent sum. */
+  oursPartial: number | null;
   /** Yahoo's pre-game projected total (locked); null = none captured. */
   yahoo: number | null;
   /** Yahoo's projected total as of the latest capture (blends live points while in progress). */
@@ -107,16 +110,19 @@ export interface MatchupSideView {
   winPct: number | null;
 }
 export type LineupSource = "page" | "import" | "log";
-export interface MatchupMine {
-  sides: [MatchupSideView, MatchupSideView];
-  /** Where the starters come from: Yahoo's matchup page, the latest import's slots, or the projection log's captures. */
-  lineupSource: LineupSource;
-  rows: { slot: string; a: MatchupCell | null; b: MatchupCell | null }[];
-  bench: { slot: string; a: MatchupCell | null; b: MatchupCell | null }[];
+export interface MatchupSlotRow {
+  slot: string;
+  a: MatchupCell | null;
+  b: MatchupCell | null;
 }
-export interface MatchupOther {
-  sides: [Pick<MatchupSideView, "teamId" | "name" | "ours" | "oursIncomplete" | "yahoo" | "points">, Pick<MatchupSideView, "teamId" | "name" | "ours" | "oursIncomplete" | "yahoo" | "points">];
+/** One pairing of the week, mine or another (one shape, one builder: `pairingView`). */
+export interface MatchupPairing {
+  sides: [MatchupSideView, MatchupSideView];
+  /** Where the starters come from: Yahoo's matchup page, the latest import's slots, or the projection log's captures;
+   *  null = no lineup for either team. */
   lineupSource: LineupSource | null;
+  rows: MatchupSlotRow[];
+  bench: MatchupSlotRow[];
 }
 export interface RecordGame {
   /** [left, right] team ids; `mine` = the request team plays. */
@@ -166,8 +172,8 @@ export interface MatchupResponse {
   asOf: string | null;
   /** Team id → name (record games carry ids only). */
   teams: Record<string, string>;
-  mine: MatchupMine | null;
-  others: MatchupOther[];
+  mine: MatchupPairing | null;
+  others: MatchupPairing[];
   record: { weeks: RecordWeek[]; summary: RecordSummary };
 }
 
@@ -191,16 +197,21 @@ export function starterProjection(ctx: Pick<MatchupContext, "now" | "proj" | "to
   return { ours: t ?? logged ?? null, locked };
 }
 
-/** Σ starters; incomplete (null) when any starter has no projection. An empty slot is a real 0. */
-export function teamTotal(cells: (MatchupCell | null)[]): { ours: number | null; missing: number } {
+/** Σ starters; incomplete (null) when any starter has no projection. An empty slot is a real 0. `partial` (display
+ *  only) = Σ the projected starters; null when none is projected. */
+export function teamTotal(cells: (MatchupCell | null)[]): { ours: number | null; partial: number | null; missing: number } {
   let sum = 0;
   let missing = 0;
+  let projected = 0;
   for (const c of cells) {
     if (!c) continue;
     if (c.ours === null) missing++;
-    else sum += c.ours;
+    else {
+      sum += c.ours;
+      projected++;
+    }
   }
-  return { ours: missing ? null : r1(sum), missing };
+  return { ours: missing ? null : r1(sum), partial: projected || !missing ? r1(sum) : null, missing };
 }
 
 function cellOf(ctx: MatchupContext, p: PlayerRef | undefined, fallbackName: string | undefined, yahoo: number | null, points: number | null, status?: string): MatchupCell | null {
@@ -266,14 +277,16 @@ function sideView(ctx: MatchupContext, wk: MatchWeek | undefined, teamId: string
   const page = Object.values(wk?.pages ?? {})
     .flatMap((p) => p.sides)
     .find((s) => s.teamId === teamId);
-  const tot = lu ? teamTotal(lu.starters.map((s) => s.cell)) : { ours: null, missing: 0 };
+  const tot = lu ? teamTotal(lu.starters.map((s) => s.cell)) : { ours: null, partial: null, missing: 0 };
   const missing = tot.missing + (lu?.unseen ?? 0);
+  const partial = !lu || (missing && !lu.starters.some((s) => s.cell && s.cell.ours !== null)) ? null : tot.partial;
   return {
     teamId,
     name: team?.name ?? mod?.name ?? `Team ${teamId}`,
     record: mod?.record ?? team?.record ?? null,
     ours: missing ? null : tot.ours,
     oursIncomplete: missing,
+    oursPartial: partial,
     yahoo: wk?.yahooLock[teamId]?.proj ?? null,
     yahooLive: page?.totalProj ?? mod?.yahooProj ?? null,
     points: mod?.points ?? page?.totalPts ?? null,
@@ -285,6 +298,16 @@ function withWin(a: MatchupSideView, b: MatchupSideView): [MatchupSideView, Matc
   if (a.ours === null || b.ours === null) return [a, b];
   const p = winChance(a.ours - b.ours);
   return [{ ...a, winPct: p }, { ...b, winPct: r2(1 - p) }];
+}
+
+/** One pairing (mine or another): both sides' totals and the mirrored starters / bench, side a = `ids[0]`. */
+export function pairingView(ctx: MatchupContext, wk: MatchWeek | undefined, ids: [string, string]): MatchupPairing {
+  const la = lineupOf(ctx, wk, ids[0]);
+  const lb = lineupOf(ctx, wk, ids[1]);
+  const sides = withWin(sideView(ctx, wk, ids[0], la), sideView(ctx, wk, ids[1], lb));
+  const pair = (xa: TeamLineup["starters"] = [], xb: TeamLineup["starters"] = []): MatchupSlotRow[] =>
+    Array.from({ length: Math.max(xa.length, xb.length) }, (_, i) => ({ slot: xa[i]?.slot ?? xb[i]?.slot ?? "", a: xa[i]?.cell ?? null, b: xb[i]?.cell ?? null }));
+  return { sides, lineupSource: la?.source ?? lb?.source ?? null, rows: pair(la?.starters, lb?.starters), bench: pair(la?.bench, lb?.bench) };
 }
 
 // ------------------------------------------------------------------ record
@@ -397,25 +420,15 @@ export function buildMatchup(ctx: MatchupContext, ctxFor: (week: number) => Matc
   const wk = ctx.log?.weeks[String(ctx.week)];
   const teams: Record<string, string> = {};
   for (const t of ctx.teams) teams[t.id] = t.name;
-  let mine: MatchupMine | null = null;
-  const others: MatchupOther[] = [];
+  let mine: MatchupPairing | null = null;
+  const others: MatchupPairing[] = [];
   for (const p of wk?.pairings ?? []) {
-    const ids = [p.sides[0].teamId, p.sides[1].teamId];
+    const ids: [string, string] = [p.sides[0].teamId, p.sides[1].teamId];
     for (const s of p.sides) teams[s.teamId] ??= s.name ?? `Team ${s.teamId}`;
-    const mineIdx = ids.indexOf(ctx.myTeamId);
-    const [ia, ib] = mineIdx === 1 ? [1, 0] : [0, 1];
-    const la = lineupOf(ctx, wk, ids[ia]);
-    const lb = lineupOf(ctx, wk, ids[ib]);
-    const sides = withWin(sideView(ctx, wk, ids[ia], la), sideView(ctx, wk, ids[ib], lb));
-    if (mineIdx >= 0) {
-      const pair = <T>(xa: T[] = [], xb: T[] = []) => Array.from({ length: Math.max(xa.length, xb.length) }, (_, i) => [xa[i], xb[i]] as const);
-      const rows = pair(la?.starters, lb?.starters).map(([x, y]) => ({ slot: x?.slot ?? y?.slot ?? "", a: x?.cell ?? null, b: y?.cell ?? null }));
-      const bench = pair(la?.bench, lb?.bench).map(([x, y]) => ({ slot: x?.slot ?? y?.slot ?? "", a: x?.cell ?? null, b: y?.cell ?? null }));
-      mine = { sides, lineupSource: la?.source ?? lb?.source ?? "log", rows, bench };
-    } else {
-      const slim = (s: MatchupSideView) => ({ teamId: s.teamId, name: s.name, ours: s.ours, oursIncomplete: s.oursIncomplete, yahoo: s.yahoo, points: s.points });
-      others.push({ sides: [slim(sides[0]), slim(sides[1])], lineupSource: la?.source ?? lb?.source ?? null });
-    }
+    // The request team is always side a of its own pairing.
+    if (ids[1] === ctx.myTeamId) mine = pairingView(ctx, wk, [ids[1], ids[0]]);
+    else if (ids[0] === ctx.myTeamId) mine = pairingView(ctx, wk, ids);
+    else others.push(pairingView(ctx, wk, ids));
   }
   const weeks = [...new Set([...Object.keys(ctx.log?.weeks ?? {}).map(Number), ctx.currentWeek])].filter((w) => w >= 1 && w <= 18).sort((a, b) => a - b);
   return {

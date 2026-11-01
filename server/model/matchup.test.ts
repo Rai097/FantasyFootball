@@ -41,9 +41,10 @@ test("starter projection: before kickoff today's number; after kickoff the LOCKE
 
 test("team total: Σ starters; one missing → incomplete (null + count), an empty slot counts as nothing", () => {
   const cell = (ours: number | null) => ({ ours }) as MatchupCell;
-  assert.deepEqual(teamTotal([cell(10), cell(5.25), null]), { ours: 15.3, missing: 0 });
-  assert.deepEqual(teamTotal([cell(10), cell(null), cell(null)]), { ours: null, missing: 2 });
-  assert.deepEqual(teamTotal([cell(0), cell(0)]), { ours: 0, missing: 0 }, "real zeros (bye / out) are a total of 0");
+  assert.deepEqual(teamTotal([cell(10), cell(5.25), null]), { ours: 15.3, partial: 15.3, missing: 0 });
+  assert.deepEqual(teamTotal([cell(10), cell(null), cell(null)]), { ours: null, partial: 10, missing: 2 }, "display-only partial sum + count");
+  assert.deepEqual(teamTotal([cell(null), cell(null)]), { ours: null, partial: null, missing: 2 }, "nothing projected: no partial (never 0)");
+  assert.deepEqual(teamTotal([cell(0), cell(0)]), { ours: 0, partial: 0, missing: 0 }, "real zeros (bye / out) are a total of 0");
 });
 
 // ------------------------------------------------------------------ fixture-built log (real Yahoo pages, weeks 8 / 7)
@@ -216,4 +217,67 @@ test("import lineup (current week, no page): starters from the latest import's Y
   assert.equal(m.bench[0].a!.name, "b1");
   // A lineup from another week is never used for this one.
   assert.equal(buildMatchup(ctxOf(8, { myTeamId: "1", lineups, lineupWeek: 7 }), () => undefined).mine!.sides[0].ours, null);
+});
+
+// ------------------------------------------------------------------ others = the same pairing view (owner 2026-11-01)
+const lineupsAll = () =>
+  new Map(
+    TEAMS.map((t) => [
+      t.id,
+      [
+        { kind: "QB" as const, player: P(`q${t.id}`, "CIN"), yahoo: 18 },
+        { kind: "WR" as const, player: P(`w${t.id}`, t.id === "5" ? "DET" : "CIN"), yahoo: 12 },
+        { kind: "BN" as const, player: P(`b${t.id}`, "CIN"), yahoo: 7 },
+      ],
+    ]),
+  );
+const gameOf8 = (t: string) => ({ kickoff: Date.parse(t === "DET" ? "2026-10-30T00:15:00Z" : "2026-11-01T17:00:00Z") });
+
+test("others: the same rows / bench as mine (one pairingView), from the latest import; per-player points null; mine unchanged", () => {
+  const base = buildMatchup(ctxOf(8), (w) => ctxOf(w));
+  const r = buildMatchup(ctxOf(8, { lineups: lineupsAll(), gameOf: gameOf8 }), (w) => ctxOf(w));
+  assert.deepEqual(r.mine, buildMatchup(ctxOf(8, { gameOf: gameOf8 }), (w) => ctxOf(w)).mine, "mine: the owner's page wins over the import's slots, unchanged");
+  assert.equal(base.mine!.lineupSource, "page");
+  assert.equal(r.others.length, 5);
+  for (const o of r.others) {
+    assert.equal(o.lineupSource, "import");
+    assert.deepEqual(o.rows.map((x) => x.slot), ["QB", "WR"]);
+    assert.deepEqual(o.bench.map((x) => x.slot), ["BN"]);
+    assert.ok([...o.rows, ...o.bench].every((x) => x.a!.points === null && x.b!.points === null), "no per-player points for others");
+    assert.equal(o.rows[0].a!.yahoo, 18);
+    assert.equal(o.rows[0].a!.ours, 10);
+    assert.equal(o.rows[0].a!.id, `q${o.sides[0].teamId}`, "side a = the pairing's first team");
+    assert.equal(o.rows[0].b!.id, `q${o.sides[1].teamId}`);
+  }
+  // Full side views for others too (Yahoo's live total, win chance from complete totals).
+  const full = r.others.find((o) => !o.sides.some((s) => s.teamId === "5"))!;
+  assert.deepEqual(full.sides.map((s) => [s.ours, s.oursIncomplete, s.oursPartial]), [[20, 0, 20], [20, 0, 20]]);
+  assert.equal(full.sides[0].winPct, 0.5);
+  assert.ok(full.sides.every((s) => s.yahooLive !== null), "Yahoo's current total from the module");
+});
+
+test("partial totals (display only): partial sum + count, win % null; the record stays strict", () => {
+  // Team 5's WR plays Thursday (DET, started) with no locked projection → 1 not projected.
+  const r = buildMatchup(ctxOf(8, { lineups: lineupsAll(), gameOf: gameOf8 }), (w) => ctxOf(w));
+  const o = r.others.find((x) => x.sides.some((s) => s.teamId === "5"))!;
+  const s5 = o.sides.find((s) => s.teamId === "5")!;
+  assert.deepEqual([s5.ours, s5.oursIncomplete, s5.oursPartial, s5.winPct], [null, 1, 10, null]);
+  assert.ok(o.sides.every((s) => s.winPct === null), "win % null when either side is incomplete");
+  // The record is unchanged by the display-only partial: week 7 with a starter missing is still null + count.
+  const c = (w: number) => ctxOf(w, w === 7 ? { proj: proj7(["Joe Burrow"]) } : {});
+  const res = buildMatchup(c(7), c);
+  assert.deepEqual([res.record.weeks[0].games[0].ours, res.record.weeks[0].games[0].oursMissing], [[null, 135], [1, 0]]);
+  assert.equal(res.record.summary.teamWeeks, 1);
+  // Mine on the same week: partial = 8 × 15 (the projected starters), ours stays null.
+  const me = res.mine!.sides[0];
+  assert.deepEqual([me.ours, me.oursIncomplete, me.oursPartial], [null, 1, 120]);
+});
+
+test("Yahoo: no pre-game lock (week first captured after Thursday) → yahoo null, Yahoo's live total kept in yahooLive for every pairing", () => {
+  const r = buildMatchup(ctxOf(8, { lineups: lineupsAll() }), (w) => ctxOf(w));
+  for (const p of [r.mine!, ...r.others])
+    for (const s of p.sides) {
+      assert.equal(s.yahoo, null, `lock ${s.teamId}`);
+      assert.equal(typeof s.yahooLive, "number", `live ${s.teamId}`);
+    }
 });

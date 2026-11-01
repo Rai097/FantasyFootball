@@ -285,7 +285,7 @@ describe("matchups adversarial (import v9)", { timeout: 300_000 }, () => {
     assert.equal(g.json.record.weeks.find((x: any) => x.week === W - 1)?.games.length, 6, "still in the track record");
   });
 
-  test("GET matchup: no manager-identifying data (owner names never sent); payload ≤ 30 KB; week / team fuzz", async () => {
+  test("GET matchup: no manager-identifying data (owner names never sent); payload ≤ 48 KB; week / team fuzz", async () => {
     const lg = mLeague();
     lg.teams = lg.teams.map((t: any, i: number) => ({ ...t, owner: `ManagerSecret${i}` }));
     const r = await call(admin, "POST", "/api/import", { ...lg, matchupWeek: W, matchups: await fixtureMatchups(W) });
@@ -294,7 +294,7 @@ describe("matchups adversarial (import v9)", { timeout: 300_000 }, () => {
     for (const q of ["", `?week=${W - 1}`]) {
       const g = await call(a, "GET", `/api/league/import/yM/matchup${q}`);
       assert.equal(g.status, 200);
-      assert.ok(g.bytes <= 30_000, `${g.bytes} bytes`);
+      assert.ok(g.bytes <= 48_000, `${g.bytes} bytes`);
       const t = JSON.stringify(g.json);
       assert.ok(!/ManagerSecret|"owner"|profile|guid|@/.test(t), t.match(/.{40}(ManagerSecret|"owner"|profile|guid|@).{40}/)?.[0]);
     }

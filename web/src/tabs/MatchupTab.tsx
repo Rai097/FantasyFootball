@@ -1,23 +1,28 @@
 // Matchup tab (docs/DESIGN.md "Matchups and results log"): this week's two lineups side by side with OUR projection
-// next to Yahoo's, the other pairings, and a track record of how our team projections held up. Import leagues only.
+// next to Yahoo's, the other pairings (same totals + lineup table, opened on tap), and a track record of how our team
+// projections held up. Import leagues only.
 import { useState } from "react";
 import { api, type Active } from "../api";
-import type { MatchupCell, MatchupResponse, MatchupSideView, RecordWeek } from "../../../server/model/matchup";
+import type { MatchupCell, MatchupPairing, MatchupResponse, MatchupSideView, RecordWeek } from "../../../server/model/matchup";
 import { ColumnHelp, HelpTip } from "../components/HelpTip";
 import { DetailList, Disclosure, ExpandableList, ExpandableRow } from "../components/ExpandableRow";
 import { Empty, ErrorBox, Loading, PosBadge } from "../components/common";
 import { f1, stamp } from "../lib/format";
-import { callMark, chipTitle, incompleteLabel, notRecorded, orientGame, pairOrDash, recordPair, winPcts } from "../lib/matchupView";
+import { callMark, chipTitle, hasPlayerPoints, notRecorded, orientGame, oursPairShort, oursText, pairOrDash, recordPair, winPcts, yahooColumn, type YahooKind } from "../lib/matchupView";
 import { useAsync } from "../lib/useAsync";
 
 const TIP = {
   ours: "Our projection: the sum of the starters' projections this week. Once a player's game has started his number is the one captured before kickoff.",
   yahoo: "Yahoo's own projection, taken before the week's first kickoff so it stays comparable with the final score.",
+  yahooLive: "Yahoo's current projected total from its league page: no pre-game number was captured this week, and it moves with live points during games.",
   score: "Yahoo's points so far (final once the week is over); stat corrections can still move it until Thursday.",
   yahooPage: "Yahoo's own projected total from its matchup page; the track record uses each starter's pre-kickoff Yahoo projection instead.",
   pts: "Yahoo's fantasy points for this player; a dash means he has not played yet.",
   win: "Chance our projections give each team to win: the projected margin against a typical weekly spread of about 35 points. A pre-game estimate, not updated live.",
-  incomplete: "These starters have no projection of ours, so the total is left blank instead of counting them as 0.",
+  incomplete: "These starters have no projection of ours: the number is the sum of the other starters, never counting them as 0.",
+  noneProjected: "None of these starters has a projection of ours, so the total is left blank instead of counting them as 0.",
+  oursShort: "Our projected totals; (+3) means 3 starters have no projection of ours and are not in the sum.",
+  noPoints: "Yahoo's matchup page, which has each player's points, is read only for your own matchup; team scores come from the league page.",
   calls: "Games where both our projection and Yahoo's picked a winner and the final score is in: how often each picked the winner.",
   mae: "Average miss: how many points off the team total was from the final score, over the same team-weeks for both sources.",
   bias: "Average final minus projected: positive means the projection ran low, negative means it ran high.",
@@ -28,6 +33,7 @@ const TIP = {
 
 const SOURCE_LABEL = { page: "Lineup from Yahoo's matchup page", import: "Lineup as of the last import", log: "Lineup as of the last capture" } as const;
 const STATUS_LABEL = { final: "Final", live: "In progress", pre: "Not started", unknown: "Status unknown" } as const;
+const yahooTip = (kind: YahooKind, final: boolean) => (final ? TIP.yahooPage : kind === "live" ? TIP.yahooLive : TIP.yahoo);
 
 export function MatchupTab({ active }: { active: Active & { team: string } }) {
   const isImport = active.provider === "import";
@@ -43,8 +49,12 @@ export function MatchupTab({ active }: { active: Active & { team: string } }) {
       <WeekPicker m={m} onPick={setWeek} />
       {m.mine ? (
         <>
-          <HeaderCard m={m} sides={m.mine.sides} source={m.mine.lineupSource} />
-          <LineupCard mine={m.mine} />
+          <section className="card mu-head">
+            <PairingTotals m={m} p={m.mine} />
+          </section>
+          <section className="card flush mu-lineup">
+            <LineupTable p={m.mine} />
+          </section>
         </>
       ) : (
         <Empty>No lineups recorded for week {m.week} yet. Import before kickoff to capture them.</Empty>
@@ -74,13 +84,17 @@ function WeekPicker({ m, onPick }: { m: MatchupResponse; onPick: (w: number) => 
   );
 }
 
-function HeaderCard({ m, sides, source }: { m: MatchupResponse; sides: [MatchupSideView, MatchupSideView]; source: keyof typeof SOURCE_LABEL }) {
-  const [a, b] = sides;
+/** Both teams' totals (ours, Yahoo's, score) and the chips; the same block for my matchup and every other one. */
+function PairingTotals({ m, p }: { m: MatchupResponse; p: MatchupPairing }) {
+  const [a, b] = p.sides;
   const wins = winPcts(a.winPct);
   const asOf = m.asOf ? `as of ${stamp(m.asOf)}` : "not captured";
-  const inc = (s: MatchupSideView) => incompleteLabel(s.oursIncomplete);
+  const final = m.status === "final";
+  const y = yahooColumn(a, b, final);
+  const oa = oursText(a);
+  const ob = oursText(b);
   return (
-    <section className="card mu-head">
+    <div className="mu-totals">
       <div className="mu-teams">
         <span className="mu-lbl" />
         {[a, b].map((s) => (
@@ -90,12 +104,8 @@ function HeaderCard({ m, sides, source }: { m: MatchupResponse; sides: [MatchupS
           </div>
         ))}
       </div>
-      <TotalRow label="Ours" tip={TIP.ours} a={f1(a.ours)} b={f1(b.ours)} notes={[inc(a), inc(b)]} />
-      {m.status === "final" ? (
-        <TotalRow label="Yahoo (page)" tip={TIP.yahooPage} a={f1(a.yahoo)} b={f1(b.yahoo)} />
-      ) : (
-        <TotalRow label="Yahoo" tip={TIP.yahoo} a={f1(a.yahoo)} b={f1(b.yahoo)} />
-      )}
+      <TotalRow label="Ours" tip={TIP.ours} a={oa.value} b={ob.value} notes={[oa.note, ob.note]} />
+      <TotalRow label={y.label} tip={yahooTip(y.kind, final)} a={f1(y.a)} b={f1(y.b)} />
       <TotalRow label="Score" sub={asOf} tip={TIP.score} a={f1(a.points)} b={f1(b.points)} />
       <div className="mu-chips row gap wrap">
         {wins ? (
@@ -108,12 +118,14 @@ function HeaderCard({ m, sides, source }: { m: MatchupResponse; sides: [MatchupS
             Win chance —<HelpTip text="Needs a complete projection of ours for both teams." label="Why no win chance" />
           </span>
         )}
-        <span className="pill muted">
-          {SOURCE_LABEL[source]}
-          <HelpTip text={TIP.source} label="About the lineup source" />
-        </span>
+        {p.lineupSource && (
+          <span className="pill muted">
+            {SOURCE_LABEL[p.lineupSource]}
+            <HelpTip text={TIP.source} label="About the lineup source" />
+          </span>
+        )}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -130,7 +142,7 @@ function TotalRow({ label, sub, tip, a, b, notes }: { label: string; sub?: strin
           {notes?.[i] && (
             <span className="mu-incomplete">
               {notes[i]}
-              <HelpTip text={TIP.incomplete} label="Why incomplete" />
+              <HelpTip text={notes[i]!.startsWith("+") ? TIP.incomplete : TIP.noneProjected} label="Why incomplete" />
             </span>
           )}
         </span>
@@ -139,31 +151,31 @@ function TotalRow({ label, sub, tip, a, b, notes }: { label: string; sub?: strin
   );
 }
 
-// ---------------------------------------------------------------- mirrored lineup
+// ---------------------------------------------------------------- mirrored lineup (mine and every other pairing)
 type Slot = { slot: string; a: MatchupCell | null; b: MatchupCell | null };
 
-function LineupCard({ mine }: { mine: NonNullable<MatchupResponse["mine"]> }) {
-  const [a, b] = mine.sides;
+function LineupTable({ p }: { p: MatchupPairing }) {
+  const [a, b] = p.sides;
   return (
-    <section className="card flush mu-lineup">
+    <>
       <MirrorHead a={a.name} b={b.name} />
       <div role="list" aria-label="Starting lineups">
-        {mine.rows.map((r, i) => (
+        {p.rows.map((r, i) => (
           <MirrorRow key={`${r.slot}-${i}`} r={r} />
         ))}
       </div>
-      {mine.bench.length > 0 && (
+      {p.bench.length > 0 && (
         <div className="mu-bench">
-          <Disclosure title={`Bench (${mine.bench.length})`}>
+          <Disclosure title={`Bench (${p.bench.length})`}>
             <div role="list" aria-label="Benches">
-              {mine.bench.map((r, i) => (
+              {p.bench.map((r, i) => (
                 <MirrorRow key={`${r.slot}-${i}`} r={r} />
               ))}
             </div>
           </Disclosure>
         </div>
       )}
-    </section>
+    </>
   );
 }
 
@@ -270,6 +282,11 @@ function OthersCard({ m }: { m: MatchupResponse }) {
   return (
     <section className="card mu-others">
       <Disclosure title={`Other matchups (${m.others.length})`}>
+        <div className="mu-ocolhead" aria-hidden="true">
+          <span />
+          <span title={TIP.oursShort}>Ours</span>
+          <span title={TIP.score}>Score</span>
+        </div>
         <ExpandableList label="Other matchups" className="mu-list">
           {m.others.map((o, i) => {
             const [a, b] = o.sides;
@@ -283,11 +300,8 @@ function OthersCard({ m }: { m: MatchupResponse }) {
                     <span className="mu-oteams">
                       {a.name} <span className="muted">vs</span> {b.name}
                     </span>
-                    <span className="num" title={TIP.ours}>
-                      {pairOrDash(a.ours, b.ours)}
-                    </span>
-                    <span className="num mu-ycol" title={TIP.yahoo}>
-                      {pairOrDash(a.yahoo, b.yahoo)}
+                    <span className="num" title={TIP.oursShort}>
+                      {oursPairShort(a, b)}
                     </span>
                     <span className="num" title={TIP.score}>
                       {pairOrDash(a.points, b.points)}
@@ -295,18 +309,22 @@ function OthersCard({ m }: { m: MatchupResponse }) {
                   </div>
                 }
               >
-                <DetailList
-                  items={[
-                    { label: "Ours", value: pairOrDash(a.ours, b.ours), title: TIP.ours },
-                    { label: "Yahoo", value: pairOrDash(a.yahoo, b.yahoo), title: TIP.yahoo },
-                    { label: "Score", value: pairOrDash(a.points, b.points), title: TIP.score },
-                    ...[a, b].flatMap((s) => {
-                      const t = incompleteLabel(s.oursIncomplete);
-                      return t ? [{ label: s.name, value: t, tone: "warn" as const, title: TIP.incomplete }] : [];
-                    }),
-                    ...(o.lineupSource ? [{ label: "Lineup", value: SOURCE_LABEL[o.lineupSource], title: TIP.source }] : []),
-                  ]}
-                />
+                <div className="mu-other">
+                  <PairingTotals m={m} p={o} />
+                  {o.rows.length + o.bench.length > 0 ? (
+                    <div className="mu-lineup mu-embedded">
+                      {!hasPlayerPoints(o) && (
+                        <p className="muted small mu-note">
+                          Player points: only for your matchup
+                          <HelpTip text={TIP.noPoints} label="Why no player points" />
+                        </p>
+                      )}
+                      <LineupTable p={o} />
+                    </div>
+                  ) : (
+                    <p className="muted small mu-note">No lineup captured for this pairing.</p>
+                  )}
+                </div>
               </ExpandableRow>
             );
           })}

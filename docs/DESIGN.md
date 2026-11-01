@@ -1954,10 +1954,12 @@ from capture to the report. DEF identity: the same resolved player id the model 
 
 **API:** `GET /api/league/import/:id/matchup?week=W` (guard: league rule, handler re-checks ownership; demo / yahoo →
 404; cached under `import:<id>:matchup:<W>`, invalidated by import and matchlog writes). Returns { week, currentWeek,
-weeks (selectable: recorded weeks + current), status, asOf, mine: { sides[2] {teamId, name, record, ours, oursIncomplete,
-yahoo, points, winPct}, rows [{slot, a, b}], bench [{a, b}] }, others [{ sides[2] {teamId, name, ours, yahoo, points} ,
-status }], record: { weeks [...], summary } }. Player cell: { id, name, pos, nflTeam, ours | null, yahoo | null,
-points | null, status chip (Q / D / O / IR), locked (game started) }. ≤ 30 KB.
+weeks (selectable: recorded weeks + current), status, asOf, teams, mine: Pairing | null, others: Pairing[], record:
+{ weeks [...], summary } }. Pairing (one shape, one builder `pairingView`, owner 2026-11-01): { sides[2] {teamId, name,
+record, ours, oursIncomplete, oursPartial, yahoo, yahooLive, points, winPct}, lineupSource (page / import / log | null),
+rows [{slot, a, b}], bench [{slot, a, b}] }. Player cell: { id, name, pos, nflTeam, ours | null, yahoo | null,
+points | null, status chip (Q / D / O / IR), locked (game started) }. ≤ 48 KB (was 30 KB before others carried rows;
+measured 30.7 KB raw / 4.8 KB gzip on the 12-team fixture league, others 24.5 KB; 48 KB leaves room for 16 teams).
 
 **UI (new tab "Matchup", between My Team and League):** week picker; header card: the two teams, big totals row
 "Ours 128.4 – 121.0", "Yahoo 131.8 – 121.1", "Score 0.0 – 0.0 (as of 12:00)", win chance chip; slot table mirrored
@@ -2081,3 +2083,20 @@ present). Measured: 6.8 KB on the fixture-built league (weeks 8 + 7).
   `?week=` must match `/^\d{1,2}$/` (else 400).
 - Verified on a real-data copy (calendar week 8): analysis `yahooProjWeekly` 489 and waivers K/DEF streams 10 after a
   same-week v9 import, a rollover (W+1) and a far week (4); pre-fix code went to 0 / 0 on the last two.
+
+**Other matchups open + partial totals (owner report 2026-11-01, week 8; overrides the text above where they differ):**
+- Cause on real data: week 8's Thursday game kicked off before the first capture, so Thursday starters have no locked
+  projection (every team total incomplete) and no team has a Yahoo pre-game lock. Startup artefact: from week 9 the
+  Thursday 12:00 PT run captures before kickoff. The record rules (`recordSide`, `trackRecord`) stay strict.
+- Others = the same pairing as mine: `pairingView(ctx, wk, ids)` (lineup sources page → latest import's slots → log)
+  builds every pairing; the request team is side a of its own. Other teams normally come from the import's slots: per
+  player ours + Yahoo's projection, points null (Yahoo's matchup page is read only for the owner's pairing).
+- Display totals (mine and others, never the record): `oursPartial` = Σ the projected starters; the UI shows
+  "98.2 + 3 not projected" (collapsed row: "98.2 (+3)"), "—" when nothing is projected. `ours` stays null when
+  incomplete and win % stays null when either side is incomplete.
+- Yahoo column: the pre-game lock when both sides have one ("Yahoo"); else Yahoo's current projected total
+  (`yahooLive`, module / page) for both sides, labelled "Yahoo (live)" with its own tooltip; a final week keeps
+  "Yahoo (page)".
+- UI: the Other matchups row stays one line (teams, our totals, score); a tap opens the same totals block and the same
+  mirrored lineup table + bench as my matchup, with a one-line note "Player points: only for your matchup" (+ "?") when
+  no cell has points.

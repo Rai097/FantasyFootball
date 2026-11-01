@@ -1,7 +1,31 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RecordGame } from "../../../server/model/matchup";
-import { callMark, incompleteLabel, notRecorded, orientGame, pair, pairOrDash, recordPair, recordIncompleteLabel, winPcts } from "./matchupView";
+import { callMark, hasPlayerPoints, incompleteLabel, notRecorded, orientGame, oursPairShort, oursShort, oursText, pair, pairOrDash, recordPair, recordIncompleteLabel, winPcts, yahooColumn } from "./matchupView";
+
+test("display totals: full sum; partial sum + 'n not projected' (never silent, never 0); dash when nothing projected", () => {
+  assert.deepEqual(oursText({ ours: 120.44, oursIncomplete: 0, oursPartial: 120.44 }), { value: "120.4", note: null });
+  assert.deepEqual(oursText({ ours: null, oursIncomplete: 3, oursPartial: 98.21 }), { value: "98.2", note: "+ 3 not projected" });
+  assert.deepEqual(oursText({ ours: null, oursIncomplete: 9, oursPartial: null }), { value: "—", note: "9 starters not projected" });
+  assert.deepEqual(oursText({ ours: null, oursIncomplete: 0, oursPartial: null }), { value: "—", note: null }, "not recorded");
+  assert.equal(oursShort({ ours: null, oursIncomplete: 3, oursPartial: 98.21 }), "98.2 (+3)");
+  assert.equal(oursPairShort({ ours: null, oursIncomplete: 3, oursPartial: 52.3 }, { ours: 110, oursIncomplete: 0, oursPartial: 110 }), "52.3 (+3) – 110.0");
+  assert.equal(oursPairShort({ ours: null, oursIncomplete: 2, oursPartial: null }, { ours: null, oursIncomplete: 0, oursPartial: null }), "–");
+});
+
+test("Yahoo column: the pre-game lock, else Yahoo's live total labelled live (both sides one source), else unknown", () => {
+  assert.deepEqual(yahooColumn({ yahoo: 120, yahooLive: 131 }, { yahoo: 110, yahooLive: 100 }, false), { label: "Yahoo", kind: "lock", a: 120, b: 110 });
+  assert.deepEqual(yahooColumn({ yahoo: null, yahooLive: 131.8 }, { yahoo: 110, yahooLive: 100 }, false), { label: "Yahoo (live)", kind: "live", a: 131.8, b: 100 });
+  assert.deepEqual(yahooColumn({ yahoo: null, yahooLive: 123.9 }, { yahoo: null, yahooLive: 135 }, true), { label: "Yahoo (page)", kind: "live", a: 123.9, b: 135 });
+  assert.deepEqual(yahooColumn({ yahoo: 123.9, yahooLive: 1 }, { yahoo: 135, yahooLive: 2 }, true).label, "Yahoo (page)");
+  assert.deepEqual(yahooColumn({ yahoo: null, yahooLive: null }, { yahoo: null, yahooLive: null }, false), { label: "Yahoo", kind: "none", a: null, b: null });
+});
+
+test("hasPlayerPoints: others without per-player points get the 'only for your matchup' note", () => {
+  const c = (points: number | null) => ({ points }) as never;
+  assert.equal(hasPlayerPoints({ rows: [{ slot: "QB", a: c(null), b: null }], bench: [{ slot: "BN", a: null, b: c(null) }] }), false);
+  assert.equal(hasPlayerPoints({ rows: [{ slot: "QB", a: c(null), b: c(0) }], bench: [] }), true, "a real 0 is a point value");
+});
 
 test("record (fix round 1): orientGame swaps every pair; an incomplete week is not 'not recorded'; n starters not projected", () => {
   const g: RecordGame = { teams: ["2", "1"], mine: true, ours: [null, 120], yahoo: [null, 110], yahooPage: [91, 111], oursMissing: [3, 0], yahooMissing: [4, 0], points: [95, 130], oursCall: null, yahooCall: null };

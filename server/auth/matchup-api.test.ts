@@ -233,13 +233,13 @@ describe("matchups log (import v9)", { timeout: 300_000 }, () => {
     assert.equal((await call(a, "GET", "/api/league/import/yM/matchup")).status, 200);
   });
 
-  test("GET matchup: current week (default) and the final week before; mine first, others, record; payload ≤ 30 KB", async () => {
+  test("GET matchup: current week (default) and the final week before; mine first, others, record; payload ≤ 48 KB", async () => {
     const p = await call(admin, "POST", "/api/import", { ...mLeague(), matchupWeek: W, matchups: await fixtureMatchups(W) });
     assert.equal(p.status, 200);
     await projCaptureIdle();
     const r = await call(a, "GET", "/api/league/import/yM/matchup");
     assert.equal(r.status, 200, JSON.stringify(r.json));
-    assert.ok(r.bytes <= 30_000, `${r.bytes} bytes`);
+    assert.ok(r.bytes <= 48_000, `${r.bytes} bytes`);
     const j = r.json;    assert.deepEqual([j.week, j.currentWeek, j.status], [W, W, "live"]);
     assert.ok(j.weeks.includes(W) && j.weeks.includes(W - 1));
     assert.equal(j.mine.lineupSource, "page");
