@@ -26,6 +26,32 @@ export interface FetchOpts {
   validate?: (body: string) => void;
   /** Abort the network fetch (headers and body) after this many ms; the old copy is then served (or the error thrown). */
   timeoutMs?: number;
+  /** Abort a response body larger than this many bytes (declared or streamed); the old copy is then served (or thrown). */
+  maxBytes?: number;
+}
+
+/** The response body as text, aborted once it passes `max` bytes (a declared Content-Length is checked first). */
+async function readCapped(res: Response, max: number): Promise<string> {
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > max) {
+    await res.body?.cancel();
+    throw new Error(`response too large: ${declared} bytes declared, cap ${max}`);
+  }
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > max) {
+      await reader.cancel();
+      throw new Error(`response too large: over ${max} bytes`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 /**
@@ -49,7 +75,7 @@ export async function fetchCachedMeta(url: string, ttlHours = 6, opts: FetchOpts
   try {
     const res = await fetch(url, { redirect: "follow", ...(opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}) });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
-    const body = await res.text();
+    const body = opts.maxBytes ? await readCapped(res, opts.maxBytes) : await res.text();
     opts.validate?.(body);
     // Write-then-rename: a crash mid-write never leaves a truncated copy in place of the good one.
     const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;

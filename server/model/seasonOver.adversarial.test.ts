@@ -50,7 +50,6 @@ test("baseline: a stale ESPN 'IR, back Feb 2027' entry on an active, playing WR 
 
 test(
   "owner 'Not out' on an ACTIVE, playing player whose only flag is a stale ESPN entry restores his full value",
-  { todo: "DEFECT: availKind treats any overruled auto finding as absence 'reserve' (return unconfirmed: 0 every week), so the owner cannot undo a lagging ESPN/Sleeper call on a healthy player" },
   () => {
     const clean = value(healthy());
     const marked = value(healthy({ espnInjury: { status: "Injured Reserve", returnDate: "2027-02-15" } }), { star: false });
@@ -62,7 +61,6 @@ test(
 
 test(
   "owner 'Not out' on an ACTIVE, playing player with a stale Sleeper ACL listing restores his full value",
-  { todo: "DEFECT: same root cause as the ESPN case (season.auto && !season.over → absence 'reserve')" },
   () => {
     const clean = value(healthy());
     const marked = value(healthy({ sleeperInjury: { status: "IR", bodyPart: "Knee - ACL", rosterStatus: "Inactive" } }), { star: false });
@@ -120,9 +118,26 @@ test("ESPN date edges: final game day itself, the day after, Questionable with a
 
 test(
   "ESPN date edges: an impossible calendar day ('2027-02-30', '2027-01-00') is a bad date, never a decision",
-  { todo: "DEFECT: dayText checks the month only; Feb 30 / day 00 pass ISO_DAY and decide 'out for the season' (DESIGN: bad date ⇒ no decision)" },
   () => {
     assert.equal(espnSeasonOverWhy({ status: "Injured Reserve", returnDate: "2027-02-30" }, END), null);
     assert.equal(espnSeasonOverWhy({ status: "Injured Reserve", returnDate: "2027-01-00" }, "2026-12-28"), null);
   },
 );
+
+test("owner 'Not out' with BOTH a stale ESPN IR / 2027 entry and a stale Sleeper ACL listing: healthy value, no absence (decision 2026-10-31)", () => {
+  const clean = value(healthy());
+  const stale = { espnInjury: { status: "Injured Reserve", returnDate: "2027-02-15" }, sleeperInjury: { status: "IR", bodyPart: "Knee - ACL", rosterStatus: "Inactive" } };
+  assert.equal(value(healthy(stale)).value, 0, "automatic call: out for the season");
+  const marked = value(healthy(stale), { star: false });
+  assert.equal(marked.seasonStatus?.over, false);
+  assert.equal(marked.seasonStatus?.auto?.source, "sleeper");
+  assert.equal(marked.ret?.absent, undefined, JSON.stringify(marked.ret));
+  assert.deepEqual(marked.weekly, clean.weekly);
+  assert.equal(marked.value, clean.value);
+});
+
+test("ESPN dates: a leap day is a real day; an impossible final-week end never decides", () => {
+  assert.ok(espnSeasonOverWhy({ status: "Injured Reserve", returnDate: "2028-02-29" }, END));
+  assert.equal(espnSeasonOverWhy({ status: "Injured Reserve", returnDate: "2027-02-29" }, END), null);
+  assert.equal(espnSeasonOverWhy({ status: "Injured Reserve", returnDate: "2027-02-15" }, "2027-01-32"), null);
+});

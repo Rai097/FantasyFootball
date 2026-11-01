@@ -79,7 +79,10 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 /** "2027-02-15" → "Feb 15, 2027"; undefined when not a date. */
 export function dayText(iso: string | undefined): string | undefined {
   const m = ISO_DAY.exec(iso?.trim() ?? "");
-  if (!m || +m[2] < 1 || +m[2] > 12) return undefined;
+  if (!m) return undefined;
+  // A real calendar day only: "2027-02-30", "2027-01-00" and month 13 do not survive the UTC round trip.
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  if (d.getUTCFullYear() !== +m[1] || d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3]) return undefined;
   return `${MONTHS[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
 }
 
@@ -89,7 +92,7 @@ export function espnSeasonOverWhy(e: EspnInjury | undefined, finalWeekEnd: strin
   if (ESPN_SEASON_OVER.notAbsent.includes(e.status.trim().toLowerCase())) return null;
   const ret = ISO_DAY.exec(e.returnDate.trim());
   const end = ISO_DAY.exec(finalWeekEnd.trim());
-  if (!ret || !end || !dayText(e.returnDate)) return null;
+  if (!ret || !end || !dayText(e.returnDate) || !dayText(finalWeekEnd)) return null;
   return ret[0] > end[0] ? `ESPN: return ${dayText(e.returnDate)}, after the final week` : null;
 }
 

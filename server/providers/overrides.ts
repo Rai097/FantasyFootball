@@ -60,24 +60,32 @@ function clean(raw: unknown): OverridesFile {
   return out;
 }
 
-/**
- * The league's marks. No file = no marks. An unreadable / corrupt file THROWS: the owner's marks are unknown, and
- * serving "automatic" instead would silently undo them (fail closed; the league route shows the error).
- */
-export async function readOverrides(id: string): Promise<OverridesFile> {
+/** The marks file, and why it is corrupt (unparsable JSON) when it is. No file = no marks. */
+async function readRaw(id: string): Promise<{ file: OverridesFile; corrupt?: string }> {
   if (!VALID_ID.test(id)) throw new OverridesError(400, `Bad import id "${id}"`);
   let text: string;
   try {
     text = await fs.readFile(filePath(id), "utf8");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return empty();
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { file: empty() };
     throw err;
   }
   try {
-    return clean(JSON.parse(text));
+    return { file: clean(JSON.parse(text)) };
   } catch (err) {
-    throw new OverridesError(500, `The owner's season marks for "${id}" are unreadable (${(err as Error).message}); fix or remove ${fileName(id)}.json`);
+    return { file: empty(), corrupt: (err as Error).message };
   }
+}
+
+/**
+ * The league's marks. No file = no marks. A corrupt file fails closed for the MARKS only (owner, 2026-10-31): one
+ * `[overrides] corrupt file` warning, no marks (every player automatic), and every league route keeps serving; the
+ * owner's next toggle sets the file aside (`.corrupt-<ts>`, kept) and writes a fresh one.
+ */
+export async function readOverrides(id: string): Promise<OverridesFile> {
+  const { file, corrupt } = await readRaw(id);
+  if (corrupt) console.warn(`[overrides] corrupt file league=${id} file=${fileName(id)}.json error="${corrupt.slice(0, 120)}" marks=none`);
+  return file;
 }
 
 /** player id → mark, for League.seasonMarks (undefined when the league has none). */
@@ -97,7 +105,13 @@ export function setSeasonMark(id: string, playerId: string, value: boolean | nul
   if (!VALID_ID.test(id)) return Promise.reject(new OverridesError(400, `Bad import id "${id}"`));
   if (!isValidPlayerId(playerId)) return Promise.reject(new OverridesError(400, `Bad player id "${playerId}"`));
   return withLock(`overrides:${id}`, async () => {
-    const cur = await readOverrides(id);
+    const { file: cur, corrupt } = await readRaw(id);
+    if (corrupt) {
+      // Keep the unreadable file for the owner (never deleted), then start a fresh one with this change.
+      const aside = `${filePath(id)}.corrupt-${Date.now()}`;
+      await fs.rename(filePath(id), aside);
+      console.warn(`[overrides] corrupt file league=${id} movedTo=${path.basename(aside)} error="${corrupt.slice(0, 120)}"`);
+    }
     if (value === null) {
       if (!(playerId in cur.players)) return cur;
       delete cur.players[playerId];

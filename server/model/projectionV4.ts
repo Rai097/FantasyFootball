@@ -247,14 +247,14 @@ function availKind(p: Player, sig: PlayerSignals | null, finalWeekEnd: string | 
   // The owner's "out for season" mark beats every report (a suspension included).
   if (season?.over && season.source === "owner") return { kind: "absent", absence: "seasonOver", ...s };
   if (st === "SUSP" || st === "SUSPENDED") return { kind: "absent", absence: "suspended", ...s };
-  // Report / Sleeper / ESPN say out for the season (designated to return already applied in seasonStatusOf); the
-  // owner's "not out" mark falls through to the reserve-list call below.
+  // Report / Sleeper / ESPN say out for the season (designated to return already applied in seasonStatusOf). The
+  // owner's "not out" mark falls through: from here only the non-season-over signals decide (game status, reserve list).
   if (season?.over) return { kind: "absent", absence: "seasonOver", ...s };
   // Designated to return (Yahoo IR-R or roster code R48) beats the reserve list (he is RES until activated).
   if (k === "return" || (sig?.rosterStatus === "RES" && sig.rosterCode === "R48")) return { kind: "absent", absence: "dtr", ...s };
   // IR / PUP / NFI / NA / long-term detail, or nflverse roster RES even with a game last week (freshly placed on IR).
-  // An automatic season-over finding the owner overruled ("not out") is still an absence: return unconfirmed.
-  if (k === "long" || sig?.rosterStatus === "RES" || (season?.auto && !season.over)) return { kind: "absent", absence: "reserve", ...s };
+  // An automatic season-over finding the owner overruled ("not out") implies no absence of its own (owner, 2026-10-31).
+  if (k === "long" || sig?.rosterStatus === "RES") return { kind: "absent", absence: "reserve", ...s };
   if (k === "out") return { kind: "absent", absence: "out", ...s };
   if (k === "doubtful") return { kind: "doubtful", ...s };
   if (isQuestionable(p.injury)) return { kind: "questionable", ...s };

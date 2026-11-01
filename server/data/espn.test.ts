@@ -7,7 +7,7 @@ import http from "node:http";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { cacheFileOf, fetchCachedMeta } from "./cache.js";
-import { ESPN_MIN_ENTRIES, ESPN_MIN_TEAMS, ESPN_TIMEOUT_MS, ESPN_TTL_HOURS, attachEspnInjuries, parseEspnInjuries, validateEspnBody } from "./espn.js";
+import { ESPN_MAX_AGE_HOURS, ESPN_MAX_BYTES, ESPN_MIN_ENTRIES, ESPN_MIN_TEAMS, ESPN_TIMEOUT_MS, ESPN_TTL_HOURS, attachEspnInjuries, loadEspnInjuries, parseEspnInjuries, validateEspnBody } from "./espn.js";
 import type { SleeperIndex } from "./sleeper.js";
 import { normName } from "./names.js";
 import { sources } from "./sources.js";
@@ -177,4 +177,77 @@ test("a failed refresh keeps the previous copy: a hung server times out, a broke
     await ok.close();
     await fsp.rm(f3, { force: true });
   }
+});
+
+test("size cap: a declared or streamed body over maxBytes is aborted and the previous copy kept", async () => {
+  const big = "x".repeat(4096);
+  // Declared Content-Length over the cap.
+  const declared = await serve((_q, res) => (res.writeHead(200, { "content-length": String(big.length) }), res.end(big)));
+  // Chunked (no Content-Length): counted while streaming.
+  const streamed = await serve((_q, res) => {
+    res.writeHead(200);
+    for (let i = 0; i < 8; i++) res.write(big);
+    res.end();
+  });
+  const files: string[] = [];
+  try {
+    for (const s of [declared, streamed]) {
+      const f = await seedStale(s.url, BODY, 30);
+      files.push(f);
+      const r = await fetchCachedMeta(s.url, ESPN_TTL_HOURS, { timeoutMs: 5000, maxBytes: 1024 });
+      assert.equal(r.source, "stale");
+      assert.match(r.error ?? "", /too large/);
+      assert.equal(fs.readFileSync(f, "utf8"), BODY, "the good copy is untouched");
+    }
+    // Under the cap: read in full.
+    const ok = await serve((_q, res) => (res.writeHead(200), res.end(BODY)));
+    try {
+      const r = await fetchCachedMeta(ok.url, ESPN_TTL_HOURS, { maxBytes: BODY.length });
+      assert.equal(r.source, "network");
+      assert.equal(r.body, BODY);
+      files.push(cacheFileOf(ok.url));
+    } finally {
+      await ok.close();
+    }
+  } finally {
+    await declared.close();
+    await streamed.close();
+    for (const f of files) await fsp.rm(f, { force: true });
+  }
+  assert.ok(ESPN_MAX_BYTES >= 16 * 1024 * 1024 && ESPN_MAX_BYTES <= 64 * 1024 * 1024);
+});
+
+test("a copy older than ESPN_MAX_AGE_HOURS is never season-over evidence (warned, unused); a younger stale copy still is", async () => {
+  const valid = {
+    injuries: Array.from({ length: ESPN_MIN_TEAMS }, (_, t) => ({
+      injuries: Array.from({ length: Math.ceil(ESPN_MIN_ENTRIES / ESPN_MIN_TEAMS) }, (_, i) =>
+        t === 0 && i === 0
+          ? entry({ espnId: "9100001", name: "Wes Torn", pos: "WR", team: "WSH", status: "Injured Reserve", returnDate: "2027-02-15" })
+          : entry({ name: `P${t}-${i}`, pos: "WR", team: "KC", status: "Active" }),
+      ),
+    })),
+  };
+  const down = await serve((_q, res) => (res.writeHead(503), res.end()));
+  const warn = console.warn;
+  const log = console.log;
+  const lines: string[] = [];
+  console.warn = console.log = (m: string) => void lines.push(m);
+  let f = "";
+  try {
+    f = await seedStale(down.url, JSON.stringify(valid), ESPN_MAX_AGE_HOURS + 2);
+    const old = pl("00-1", "Wes Torn", "WR", "WAS", { espn: "9100001" });
+    await loadEspnInjuries(index([old]), down.url);
+    assert.equal(old.espnInjury, undefined, "too old: no ESPN entry (unknown)");
+    assert.ok(lines.some((l) => l.startsWith("[espn] copy too old")), lines.join("\n"));
+    f = await seedStale(down.url, JSON.stringify(valid), 30);
+    const young = pl("00-1", "Wes Torn", "WR", "WAS", { espn: "9100001" });
+    await loadEspnInjuries(index([young]), down.url);
+    assert.equal(young.espnInjury?.returnDate, "2027-02-15", "a 30 h stale copy is still used");
+  } finally {
+    console.warn = warn;
+    console.log = log;
+    await down.close();
+    if (f) await fsp.rm(f, { force: true });
+  }
+  assert.equal(ESPN_MAX_AGE_HOURS, 72);
 });

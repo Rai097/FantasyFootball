@@ -4,7 +4,8 @@
 // injuries[].injuries[] with status, details.returnDate, athlete.links[].href carrying the ESPN id).
 // Evidence only: a return date after the league's final week marks the season over (returns.ts espnSeasonOverWhy);
 // a missing entry or date never clears anything. Cached on disk for ESPN_TTL_HOURS; a failed, timed-out or invalid
-// fetch keeps the previous copy, and with no copy every player's ESPN entry stays unknown (never fabricated).
+// fetch (or one over ESPN_MAX_BYTES) keeps the previous copy; with no copy, or one older than ESPN_MAX_AGE_HOURS,
+// every player's ESPN entry stays unknown (never fabricated).
 import { fetchCachedMeta } from "./cache.js";
 import { normPos, normTeam } from "./names.js";
 import { sources } from "./sources.js";
@@ -18,6 +19,10 @@ export const ESPN_TIMEOUT_MS = 60_000;
 /** A real feed lists every team (32) and hundreds of entries; less is a broken body, never written over the good copy. */
 export const ESPN_MIN_TEAMS = 20;
 export const ESPN_MIN_ENTRIES = 100;
+/** A body past this (real ≈ 8.7 MB) is aborted mid-download and the previous copy kept. */
+export const ESPN_MAX_BYTES = 32 * 1024 * 1024;
+/** A copy older than this (ESPN failing for days) is not season-over evidence: the rule then has no ESPN input. */
+export const ESPN_MAX_AGE_HOURS = 72;
 
 const FANTASY = new Set(["QB", "RB", "WR", "TE", "K"]);
 
@@ -116,10 +121,14 @@ export function attachEspnInjuries(entries: EspnEntry[], ix: SleeperIndex): numb
  * Load ESPN's feed into the player db (called once per db build). Never throws: on any failure the players keep no
  * ESPN entry (unknown). Logs one structured line per call.
  */
-export async function loadEspnInjuries(ix: SleeperIndex): Promise<void> {
+export async function loadEspnInjuries(ix: SleeperIndex, url = sources.espnInjuries): Promise<void> {
   const t0 = Date.now();
   try {
-    const got = await fetchCachedMeta(sources.espnInjuries, ESPN_TTL_HOURS, { validate: validateEspnBody, timeoutMs: ESPN_TIMEOUT_MS });
+    const got = await fetchCachedMeta(url, ESPN_TTL_HOURS, { validate: validateEspnBody, timeoutMs: ESPN_TIMEOUT_MS, maxBytes: ESPN_MAX_BYTES });
+    if (got.ageH > ESPN_MAX_AGE_HOURS) {
+      console.warn(`[espn] copy too old source=${got.source} ageH=${got.ageH.toFixed(1)} maxAgeH=${ESPN_MAX_AGE_HOURS} entries=unused${got.error ? ` error="${got.error}"` : ""}`);
+      return;
+    }
     const { total, entries } = parseEspnInjuries(got.body);
     const matched = attachEspnInjuries(entries, ix);
     const dated = entries.filter((e) => e.injury.returnDate).length;

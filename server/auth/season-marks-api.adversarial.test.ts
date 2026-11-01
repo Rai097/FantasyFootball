@@ -246,18 +246,47 @@ describe("season marks API (adversarial)", { timeout: 300_000 }, () => {
     assert.equal((await valueRow("yY", starId)).value, v0.value);
   });
 
-  test("a corrupt marks file is never overwritten by a toggle (fail closed) and is removed with the league", async () => {
+  test("a toggle over a corrupt marks file sets it aside (kept as .corrupt-<ts>, never deleted) and writes the new mark", async () => {
+    // Expectation changed by the owner decision 2026-10-31 (was: the PUT fails and leaves the file in place).
     fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(marksFile("yZ"), '{"version":1,"players":{');
+    const bad = '{"version":1,"players":{';
+    fs.writeFileSync(marksFile("yZ"), bad);
+    const before = new Set(dataFiles());
     const r = await call(admin, "PUT", `/api/league/import/yZ/overrides/${starId}`, { seasonOver: true });
-    assert.ok(r.status >= 500 || r.status === 409, `PUT over a corrupt file → ${r.status}`);
-    assert.equal(fs.readFileSync(marksFile("yZ"), "utf8"), '{"version":1,"players":{', "the unreadable file is left for the owner, never replaced");
+    assert.equal(r.status, 200, `PUT over a corrupt file → ${r.status} ${JSON.stringify(r.json)}`);
+    const aside = dataFiles().filter((f) => f.startsWith("overrides-yZ.json.corrupt-") && !before.has(f));
+    assert.equal(aside.length, 1, dataFiles().join(","));
+    assert.equal(fs.readFileSync(path.join(dataDir, aside[0]), "utf8"), bad, "the unreadable copy is kept byte for byte");
+    assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(marksFile("yZ"), "utf8")).players), [starId]);
+    assert.equal((await valueRow("yZ", starId)).value, 0, "the new mark applies");
+    assert.equal((await call(admin, "DELETE", `/api/league/import/yZ/overrides/${starId}`)).status, 200);
     fs.writeFileSync(marksFile("yZ"), JSON.stringify({ version: 1, players: {} }));
+  });
+
+  test("a mark PUT and the league DELETE share one lock: a PUT queued behind a league delete never resurrects its marks", async () => {
+    const { withLock } = await import("../providers/lock.js");
+    const { IMPORT_LOCK } = await import("../api.js");
+    const imp = await call(admin, "POST", "/api/import", { ...yLeague("yQ"), leagueId: "557" });
+    assert.equal(imp.status, 200);
+    assert.equal(imp.json.id, "yQ");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const held = withLock(IMPORT_LOCK, () => gate);
+    // Both start while the lock is held; the league DELETE is queued first, then the mark PUT.
+    const del = call(admin, "DELETE", "/api/import/yQ");
+    await new Promise((r) => setTimeout(r, 50));
+    const put = call(admin, "PUT", `/api/league/import/yQ/overrides/${starId}`, { seasonOver: true });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(fs.existsSync(marksFile("yQ")), false, "nothing written while the lock is held");
+    release();
+    await held;
+    assert.equal((await del).status, 200);
+    assert.equal((await put).status, 404, "the league is gone: the mark is refused");
+    assert.equal(fs.existsSync(marksFile("yQ")), false, "no orphan marks file");
   });
 
   test(
     "a corrupt marks file must not take the whole league down: values / analysis / waivers still served, marks unknown",
-    { todo: "DEFECT: loadLeague awaits readOverrides, which throws on bad JSON, so every league route returns 500 (values, analysis, waivers; real-data copy too) and the toggle cannot repair it; brief: fail closed for the mark, keep serving values (DESIGN chose 'throws': owner decision needed)" },
     async () => {
       fs.writeFileSync(marksFile("yZ"), "{not json");
       try {

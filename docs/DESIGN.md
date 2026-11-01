@@ -1578,8 +1578,10 @@ Owner decision (2026-10-31): BOTH an automatic ESPN return-date rule and an owne
 nothing overwrites and that always wins.
 
 **One call, one place** (`projectionV4.ts` `seasonStatusOf` → `ValuedPlayer.seasonStatus`, absence `seasonOver`):
-1. The league owner's mark (both ways): "Out for season" ⇒ out; "Not out" ⇒ every automatic source is overruled (still
-   absent if a source listed him: return unconfirmed). Beats a suspension and "designated to return" too.
+1. The league owner's mark (both ways): "Out for season" ⇒ out; "Not out" ⇒ the owner says he is available: every
+   automatic source is overruled AND implies no absence of its own (fix round 1, owner 2026-10-31); his weekly
+   availability then follows the non-season-over signals only (game status, Out / Doubtful, IR / reserve list, the
+   returns rules). Beats a suspension and "designated to return" too.
 2. Else the automatic sources, evidence only (`returns.ts` `autoSeasonOver`, first match): the injury report detail says
    "season"; Sleeper's ACL / Achilles on IR (`SEASON_ENDING`, unchanged); ESPN's return date after the final week.
    Designated to return (Yahoo IR-R / roster R48) beats Sleeper and ESPN (their daily copies can lag an activation),
@@ -1597,7 +1599,10 @@ nothing overwrites and that always wins.
 id in `athlete.links[].href` (headshot URL fallback).
 * Cache `.cache/<sha1>-injuries`, TTL 24 h (`ESPN_TTL_HOURS`), fetch aborted after 60 s (`ESPN_TIMEOUT_MS`, new
   `fetchCachedMeta` `timeoutMs`), validated before writing (`validateEspnBody`: ≥ 20 teams, ≥ 100 entries); any failure
-  serves the previous copy untouched, no copy = every ESPN entry unknown. Loaded beside Sleeper on every player-DB
+  serves the previous copy untouched, no copy = every ESPN entry unknown. A body over 32 MB (`ESPN_MAX_BYTES`,
+  `fetchCachedMeta` `maxBytes`: declared Content-Length or streamed count) is aborted, previous copy kept. A copy older
+  than 72 h (`ESPN_MAX_AGE_HOURS`, ESPN failing for days) is not used at all: warning `[espn] copy too old`, the rule
+  simply has no ESPN evidence. Loaded beside Sleeper on every player-DB
   build (6-hourly): at most 1 request a day, ≤ 4 attempts a day while ESPN fails. Quota: one 8.7 MB GET per day per
   running copy; no key. Log: `[espn] refresh source ageH entries fantasy dated matched bytes ms [error]`.
 * Matching: the one matcher shared with Sleeper (`sleeper.ts` `matchListed`): Sleeper id, ESPN id (our id map), GSIS,
@@ -1605,13 +1610,18 @@ id in `athlete.links[].href` (headshot URL fallback).
 * **Rule** (`returns.ts` `espnSeasonOverWhy`): `returnDate` strictly after the day of the last game of the league's
   final week (games.csv gameday, `ProjectionTables.weekEnds`) ⇒ out for the season, why "ESPN: return Feb 15, 2027,
   after the final week". Active / Questionable / Probable / Day-To-Day never count (82 Questionable rows carry dates);
-  a return on the final game day can still play; unknown final week or bad date ⇒ no decision. A date before that is
+  a return on the final game day can still play; unknown final week or bad date (incl. an impossible calendar day such
+  as 2027-02-30 or 2027-01-00) ⇒ no decision. A date before that is
   an evidence bullet only ("ESPN return: Nov 25, 2026 (ESPN estimate)"), never the return week.
 
 **Owner toggle** (`server/providers/overrides.ts`): `.data/overrides-<importId>.json`
 `{ version: 1, players: { <playerId>: { seasonOver: true | false, setAt, setBy } } }`, written only by the toggle under
 `withLock("overrides:<id>")`, never read-merge-written by imports, auto-import or the loaders; deleted with the league;
-≤ 500 marks; a corrupt file throws (the marks are unknown, never silently "automatic"). Loaded with the import league
+≤ 500 marks. The toggle and the league DELETE also run under the one import lock (order: import, then overrides), so a
+mark never outlives its league. A corrupt file fails closed for the MARKS only (owner, 2026-10-31): one
+`[overrides] corrupt file` warning, no marks (every player automatic), every league route keeps serving; the next
+PUT / DELETE first renames it to `overrides-<id>.json.corrupt-<ts>` (kept, never deleted, also not by the league
+delete) and then writes the new mark. Loaded with the import league
 as `League.seasonMarks` and applied by id to every copy of the player (rostered, free agent).
 * API: `PUT /api/league/import/:id/overrides/:playerId` `{ seasonOver: boolean }` → `{ playerId, mark }`;
   `DELETE` same path → back to automatic. League owner only: the guard classifies every write under

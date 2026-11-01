@@ -797,7 +797,11 @@ async function seasonMarkRoute(req: Request, value: boolean | null): Promise<{ p
   if (!isValidPlayerId(playerId)) throw new HttpError(400, `Bad player id "${playerId}"`);
   await mustReadImport(id);
   if (value !== null && !(await getPlayerDb()).players.has(playerId)) throw new HttpError(404, `Unknown player "${playerId}"`);
-  await setSeasonMark(id, playerId, value, importerName(scopeOf(req)));
+  // Under the import lock, like the league DELETE: a mark can never be written after (and outlive) its league.
+  await importLock(async () => {
+    await mustReadImport(id);
+    await setSeasonMark(id, playerId, value, importerName(scopeOf(req)));
+  });
   invalidateLeague("import", id);
   console.log(`[overrides] event=${value === null ? "cleared" : "set"} league=${id} player=${playerId} seasonOver=${value === null ? "auto" : value}`);
   return { playerId, mark: value };
@@ -885,7 +889,7 @@ export class PartialImportError extends Error {}
  * history snapshot runs under this ONE in-process lock, so two writers never lose each other's write. One key for all
  * leagues: imports are rare and the locked part is only local disk I/O (validation and the NFL calendar run before).
  */
-const IMPORT_LOCK = "import";
+export const IMPORT_LOCK = "import";
 const importLock = <T>(fn: () => Promise<T>) => withLock(IMPORT_LOCK, fn);
 
 /** The bookmarklet / collector payload as a stored import, merged over the same Yahoo league when present, and saved. */
@@ -1093,10 +1097,11 @@ apiRouter.delete(
     await importLock(async () => {
       if (!isValidId(req.params.id) || !(await deleteImport(req.params.id))) throw new HttpError(404, `No imported league "${req.params.id}"`);
       await deleteHistory(req.params.id);
+      // Same lock as the season-mark PUT / DELETE (lock order: import, then overrides — never the reverse).
+      await deleteOverrides(req.params.id);
     });
     await deleteProjLog(req.params.id);
     await deleteMatchLog(req.params.id);
-    await deleteOverrides(req.params.id);
     invalidateLeague("import", req.params.id);
     res.json({ ok: true });
   }),

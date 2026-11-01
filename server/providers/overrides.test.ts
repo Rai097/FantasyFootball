@@ -55,11 +55,34 @@ test("bad ids are refused; prototype keys never become marks; the per-league cap
   await setSeasonMark("yE", "m1", false); // changing an existing mark is fine
 });
 
-test("a corrupt file fails closed (the owner's marks are unknown, never silently 'automatic'); delete removes the file", async () => {
+test("a corrupt file: no marks + one warning on read; a toggle sets it aside (kept) and writes fresh; delete removes the file", async () => {
+  // Owner decision 2026-10-31: fail closed for the MARKS only (was: throw, which took every league route down).
   fs.writeFileSync(file("yF"), "{not json");
-  await assert.rejects(readOverrides("yF"), /unreadable/);
-  await assert.rejects(setSeasonMark("yF", "p", true), /unreadable/);
-  assert.equal(fs.readFileSync(file("yF"), "utf8"), "{not json", "never overwritten");
+  const warn = console.warn;
+  const warned: string[] = [];
+  console.warn = (m: string) => void warned.push(m);
+  try {
+    assert.equal(marksOf(await readOverrides("yF")), undefined, "corrupt: no marks");
+    assert.equal(warned.filter((w) => w.startsWith("[overrides] corrupt file league=yF")).length, 1, warned.join("\n"));
+    assert.equal(fs.readFileSync(file("yF"), "utf8"), "{not json", "a read never touches the file");
+    await setSeasonMark("yF", "p", true);
+  } finally {
+    console.warn = warn;
+  }
+  const aside = fs.readdirSync(path.join(work, ".data")).filter((f) => f.startsWith("overrides-yF.json.corrupt-"));
+  assert.equal(aside.length, 1, "set aside, never deleted");
+  assert.equal(fs.readFileSync(path.join(work, ".data", aside[0]), "utf8"), "{not json");
+  assert.deepEqual({ ...marksOf(await readOverrides("yF")) }, { p: true });
+  // A clear on a corrupt file sets it aside too and leaves no marks file.
+  fs.writeFileSync(file("yG"), "{not json");
+  console.warn = () => undefined;
+  try {
+    await setSeasonMark("yG", "p", null);
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(fs.existsSync(file("yG")), false);
+  assert.equal(fs.readdirSync(path.join(work, ".data")).filter((f) => f.startsWith("overrides-yG.json.corrupt-")).length, 1);
   await deleteOverrides("yF");
   assert.equal(fs.existsSync(file("yF")), false);
   await deleteOverrides("../nope"); // invalid id: nothing happens
