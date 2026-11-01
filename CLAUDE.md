@@ -51,7 +51,8 @@ Open work and "Resume here" live in TASKS.md.
   (pre-approved; refuses anything outside /private/tmp/claude-501/) as its own command, never `rm` (the global
   settings force a prompt on every `rm -rf`/`rm -f`, which stalls the build). Worktrees: `git worktree remove`/`prune`
   and `git branch -d` of merged agent branches. Never `.data/`, backups (`*.bak-*`), ~/FantasyFootball-run or the
-  Yahoo Chrome profile.
+  Yahoo Chrome profile. Agents write scratch files ONLY inside their session scratchpad
+  (/private/tmp/claude-501/<project>/<session>/scratchpad), never the /private/tmp/claude-501/ root, where clean-scratch refuses.
 - Yahoo API access is pending Yahoo's approval (since July 2026 apps need it); until then
   the `import` provider is the real-league path. Yahoo code must stay defensive and
   log the raw response on parse failure.
