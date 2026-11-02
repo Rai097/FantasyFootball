@@ -98,6 +98,10 @@ SEASON-ENDING INJURIES + BYE K/DEF (2026-10-28, DESIGN "Season-ending injuries +
    this week", chip "bye", gain "—", sorted below K/DEF who play. Data copy: 8 season-ending, Stash watch 4 → 3.
    Deploy note: the first start on the Mac fetches Sleeper once (then daily). Unverified: chip at 390 px.
 NEXT (backlog, highest value first):
+- RISER OVERWEIGHT (owner, 2026-11-01, case: a rookie TE): 4 of 7 games flagged "odd" (×0.25) although his snap share
+  was 79–92% every week, so the rate rests on the last 2 games (12 and 7 targets): ours 15.3/g vs actual 8.9/g, Yahoo
+  ~11.1/g, ECR 12.6/g. Check why the odd-game rule fires (backup QB? blowout?) for a full-snap player and cap how far 2
+  games can move a rate. Ties to the 2-game riser sensitivity item. Measure on /accuracy.
 - WEEKLY START/SIT MISSES (owner, 2026-11-01, week 8): the weekly projection ignores this week's injury news on
   both sides. (1) A back returning from a high-ankle sprain into a 3-RB committee kept his full pre-injury share
   (Love: ours 13.4 vs Yahoo 11.3). (2) Teammates' targets aren't moved when two WRs are ruled out (Lemon: ours 9.7 vs
