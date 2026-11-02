@@ -2141,7 +2141,7 @@ never set or move a lock (projLog / matchLog rules).
 
 ## Live projections on the Matchup tab (2026-11-02)
 
-The owner's question "what does Yahoo (live) mean, Yahoo says 165.54" found a mislabel: the module's and the matchup
+The owner's question "what does Yahoo (live) mean, Yahoo says 165.54" found a mislabel: the matchup
 page's "Proj" total is Yahoo's **Orig Proj** (Σ starters' projections, never moves with points), not its Live Proj.
 * The field is renamed `yahooOrig`, labelled "Yahoo proj".
 * Matchup page parse (my matchup only): the header's "Live Proj" row → `PageSide.liveProj`, taken only when the
@@ -2149,7 +2149,11 @@ page's "Proj" total is Yahoo's **Orig Proj** (Σ starters' projections, never mo
   diag note. Each row gets `game`: "Final …" → final, "Mon 8:15 pm …" → pre, a score text with points → live, else
   absent. Markup verified on the live week-8 page 2026-11-02. Both fields are optional in `cleanMatchups`; a bad value
   is dropped alone, never the side.
-* `yahooLive` = the page's Live Proj. `oursLive` = Σ starters: final → Yahoo points, not played → ours, in progress →
+* The league home page's per-team number (module `yahooProj`) is Yahoo's **Live Proj** while the week is in progress
+  (verified 2026-11-02: 165.54 / 120.04 = the matchup page's Live Proj) and its Orig Proj before kickoff and once final
+  (week-7 fixture: 123.86 against 165.78 points). The model fills `yahooOrig` from it only for pre / final weeks and
+  `yahooLive` only for live weeks; an unknown status fills neither. The lock (pre-game / final captures) is unaffected.
+* `yahooLive` = the matchup page's Live Proj, else the module's number in a live week. `oursLive` = Σ starters: final → Yahoo points, not played → ours, in progress →
   max(points, ours); null when any starter lacks the number it needs or no row has a game state (other pairings,
   captures before this change). Never a partial sum.
 * UI: "Ours live" and "Yahoo live" rows under "Ours" / "Yahoo proj", shown only while the week is not final and a

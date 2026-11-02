@@ -106,7 +106,8 @@ export interface MatchupSideView {
   yahoo: number | null;
   /** Yahoo's "Proj" total from its pages as of the latest capture (Orig Proj: Σ starters' projections, no live points). */
   yahooOrig: number | null;
-  /** Yahoo's "Live Proj" from its matchup page (points so far + what is left); null = not captured. */
+  /** Yahoo's "Live Proj" (points so far + what is left): the matchup page's header, else the league page's number
+   *  while the week is in progress; null = not captured. */
   yahooLive: number | null;
   /** Ours, live: finished games at their points, unplayed at our projection, in progress at the higher of the two;
    *  null when any starter lacks a number or the page has no game states (only my own matchup's page is read). */
@@ -309,8 +310,11 @@ function sideView(ctx: MatchupContext, wk: MatchWeek | undefined, teamId: string
     oursIncomplete: missing,
     oursPartial: partial,
     yahoo: wk?.yahooLock[teamId]?.proj ?? null,
-    yahooOrig: page?.totalProj ?? mod?.yahooProj ?? null,
-    yahooLive: page?.liveProj ?? null,
+    // The league page's per-team number is Yahoo's Live Proj while the week is in progress (2026-11-02: 165.54 =
+    // the matchup page's Live Proj) and its Orig Proj before kickoff / once final (week 7 fixture): it fills the
+    // field it matches, never the other; an unknown status fills neither.
+    yahooOrig: page?.totalProj ?? (wk?.status === "pre" || wk?.status === "final" ? (mod?.yahooProj ?? null) : null),
+    yahooLive: page?.liveProj ?? (wk?.status === "live" ? (mod?.yahooProj ?? null) : null),
     oursLive: lu?.source === "page" && !lu.unseen ? liveTotal(lu.starters.map((s) => s.cell)) : null,
     points: mod?.points ?? page?.totalPts ?? null,
     winPct: null,

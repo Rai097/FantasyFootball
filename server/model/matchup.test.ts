@@ -253,7 +253,7 @@ test("others: the same rows / bench as mine (one pairingView), from the latest i
   const full = r.others.find((o) => !o.sides.some((s) => s.teamId === "5"))!;
   assert.deepEqual(full.sides.map((s) => [s.ours, s.oursIncomplete, s.oursPartial]), [[20, 0, 20], [20, 0, 20]]);
   assert.equal(full.sides[0].winPct, 0.5);
-  assert.ok(full.sides.every((s) => s.yahooOrig !== null), "Yahoo's Proj total from the module");
+  assert.ok(full.sides.every((s) => s.yahooLive !== null && s.yahooOrig === null), "a live week: the league page's number is Yahoo's Live Proj, never shown as its Orig Proj");
 });
 
 test("partial totals (display only): partial sum + count, win % null; the record stays strict", () => {
@@ -273,13 +273,18 @@ test("partial totals (display only): partial sum + count, win % null; the record
   assert.deepEqual([me.ours, me.oursIncomplete, me.oursPartial], [null, 1, 120]);
 });
 
-test("Yahoo: no pre-game lock (week first captured after Thursday) → yahoo null, Yahoo's Proj total kept in yahooOrig for every pairing", () => {
+test("Yahoo: no pre-game lock (week first captured after Thursday) → yahoo null; my page's Orig Proj, the others' Live Proj from the league page", () => {
   const r = buildMatchup(ctxOf(8, { lineups: lineupsAll() }), (w) => ctxOf(w));
   for (const p of [r.mine!, ...r.others])
     for (const s of p.sides) {
       assert.equal(s.yahoo, null, `lock ${s.teamId}`);
-      assert.equal(typeof s.yahooOrig, "number", `live ${s.teamId}`);
+      if (p === r.mine) assert.equal(typeof s.yahooOrig, "number", `orig ${s.teamId}: the matchup page's Total row`);
+      else assert.deepEqual([s.yahooOrig, typeof s.yahooLive], [null, "number"], `live ${s.teamId}: the league page while in progress`);
     }
+  // A final week: the league page shows Orig Proj (week 7 fixture: 123.86 against 165.78 points), never Live.
+  const f = buildMatchup(ctxOf(7), (w) => ctxOf(w));
+  assert.ok(f.others.length > 0);
+  for (const p of f.others) for (const s of p.sides) assert.equal(s.yahooLive, null, `final ${s.teamId}`);
 });
 
 test("ours live: final = points, not started = ours, in progress = the higher; any unknown → null; no game states → null", () => {
