@@ -10,7 +10,7 @@
 // `createAuth` wires sessions + access list + guard + these routes; index.ts mounts guard first, then the router.
 import express, { type NextFunction, type Request, type Response } from "express";
 import { listImports, readImport } from "../providers/import.js";
-import { AccessFile, DISCORD_ID, NOTE_MAX, type AccessList, type AccessUser, roleOf } from "./access.js";
+import { AccessFile, DISCORD_ID, NOTE_MAX, TEAM_ID, type AccessList, type AccessUser, roleOf } from "./access.js";
 import { authorizeUrl, avatarUrl, discordClient, type DiscordClient } from "./discord.js";
 import { createGuard, parseCookies, scopeOf, SESSION_COOKIE, STATE_COOKIE, AuthError, errors, type Scope } from "./guard.js";
 import { safeEqual, SESSION_TTL_MS, SessionStore, signSessionId, signState, STATE_TTL_MS, verifySessionCookie, verifyState } from "./sessions.js";
@@ -288,15 +288,17 @@ export function createAuth(o: AuthOptions) {
       const imp = await readImport(b.leagueId);
       if (!imp) return bad(res, "unknown_league", "That league isn't imported.");
       if (!imp.teams.some((t) => t.id === b.teamId)) return bad(res, "unknown_team", "That team isn't in the league.");
+      if (!TEAM_ID.test(b.teamId)) return bad(res, "unsupported_team_id", "This team's id can't be used for sign-in (letters, digits, - and _ only).");
       if (!access.editUsers) return void res.status(503).json({ error: "The access list can't be edited on this server.", code: "readonly" });
       const before = await access.get();
       if (before?.admins.includes(id)) return bad(res, "is_admin", "That account is the league owner (admin) already.");
-      const note = typeof b.note === "string" ? b.note.trim().slice(0, NOTE_MAX) : "";
+      // note: text sets it, "" clears it, omitted keeps the current one.
+      const note = typeof b.note === "string" ? b.note.trim().slice(0, NOTE_MAX) : undefined;
       const row: AccessUser = { discordId: id, leagueId: b.leagueId, teamId: b.teamId, ...(note ? { note } : {}) };
       const after = await edit((users, list) => {
         if (list.admins.includes(id)) throw new AuthError(400, "is_admin", "That account is the league owner (admin) already.");
         const i = users.findIndex((u) => u.discordId === id);
-        if (i >= 0) users[i] = { ...row, ...(!note && users[i].note ? { note: users[i].note } : {}) };
+        if (i >= 0) users[i] = { ...row, ...(note === undefined && users[i].note ? { note: users[i].note } : {}) };
         else users.push(row);
         return users;
       });

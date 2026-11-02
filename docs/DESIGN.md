@@ -2121,14 +2121,19 @@ bounds managers to 12 extra reads a day on top of the schedule. Locked projectio
 never set or move a lock (projLog / matchLog rules).
 
 **Access editing** (Connect → "Who can sign in", owner only = `realAdmin`, Origin + CSRF like every write):
-* `PUT /api/access/users/:discordId {leagueId, teamId, note?}` adds the account or moves it to another team (an omitted
-  note keeps the old one). 400 for a malformed id, an unknown league / team, or an admin's id (`is_admin`).
+* `PUT /api/access/users/:discordId {leagueId, teamId, note?}` adds the account or moves it to another team (note: text
+  sets it, "" clears it, omitted keeps it). 400 for a malformed id, an unknown league / team, a team id the access list
+  can't hold (`unsupported_team_id`), or an admin's id (`is_admin`).
 * `DELETE /api/access/users/:discordId` removes it (404 when not listed); the next request of that session is 403.
-* `AccessFile.editUsers` re-reads the file, replaces `users` only and writes every other key (admins included) back as
-  read; serialized; atomic (`writeFileAtomic`, mode 600); the written list is cached at once. A missing or invalid
+* `AccessFile.editUsers` re-reads the file and rewrites only the rows of the account an edit touches
+  (`mergeUserRows`: that account's duplicates go too, so a removed account can't return through a shadowed row); every
+  other row (hand typos the parser ignores, extra per-row keys) and every other key (admins included) is written back
+  as read; serialized; atomic (`writeFileAtomic`, mode 600); the written list is cached at once. A missing or invalid
   file is never rewritten. Admins change only by hand on the server, so the app can't lock the owner out.
 * `GET /api/access` also returns `requests`: sign-ins refused as "not on the list" in the last 7 days (in memory, max
   20, one per account, Discord display name), minus accounts now listed. The card shows them first with a team
-  picker and Allow; then the teams (collapsed) with each person's name and a remove button; then "Add by Discord ID".
+  picker and Allow; then the league (a picker when several are imported), the teams (collapsed) with each person's name
+  and a remove button, plus every listed account on another league or a team no longer imported (removable, never
+  hidden); then "Add by Discord ID".
 * Every edit is one log line (`[auth] event=access_set|access_remove uid=… target=…`).
 

@@ -15,8 +15,9 @@ export function AccessSection({ leagueId }: { leagueId?: string }) {
   const [data, setData] = useState<AccessOverview>();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ApiError>();
+  const [picked, setPicked] = useState<string>();
   const o = data ?? res.data;
-  const v = o ? accessView(o, leagueId) : null;
+  const v = o ? accessView(o, picked ?? leagueId) : null;
 
   /** true when saved (the form clears only then). */
   const run = async (fn: () => Promise<AccessOverview>): Promise<boolean> => {
@@ -40,6 +41,19 @@ export function AccessSection({ leagueId }: { leagueId?: string }) {
         <h2 className="no-margin">Who can sign in</h2>
         {v && <span className="muted small">{v.summary}</span>}
       </div>
+      {o && v && o.leagues.length > 1 && (
+        <label className="field">
+          <span>League</span>
+          <select value={v.leagueId} onChange={(e) => setPicked(e.target.value)}>
+            {o.leagues.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {o && v && o.leagues.length === 1 && <div className="muted small">League: {v.leagueName}</div>}
       {res.loading && !o && <Loading label="Loading the access list…" />}
       {res.error && !o && <ErrorBox error={res.error} onRetry={res.reload} />}
       {o && !v && <p className="muted small no-margin">Import the league first, then assign each team.</p>}
@@ -55,12 +69,8 @@ export function AccessSection({ leagueId }: { leagueId?: string }) {
               </ul>
             </div>
           )}
-          {v.stale.length > 0 && (
-            <div className="notice warn">
-              {v.stale.length} listed account{v.stale.length > 1 ? "s point" : " points"} to a team that isn't in the league any more: remove or reassign below.
-            </div>
-          )}
-          <Disclosure title={`Teams (${v.rows.length})`}>
+          {v.others.some((x) => x.gone) && <div className="notice warn">A listed account points to a team that isn't imported any more: remove or reassign it below.</div>}
+          <Disclosure title={`Teams (${v.rows.length})${v.others.length ? ` + ${v.others.length} other` : ""}`}>
             <ul className="access-list">
               {v.rows.map((r) => (
                 <li key={r.teamId} className="access-row">
@@ -76,12 +86,12 @@ export function AccessSection({ leagueId }: { leagueId?: string }) {
                   </span>
                 </li>
               ))}
-              {v.stale.map((u) => (
+              {v.others.map(({ user: u, label }) => (
                 <li key={u.discordId} className="access-row">
-                  <span className="strong access-team">Team {u.teamId} (gone)</span>
+                  <span className="strong access-team">{label}</span>
                   <span className="pill access-person" title={`Discord ID ${u.discordId}`}>
                     {personLabel(u)}
-                    <RemoveButton label={personLabel(u)} team={`team ${u.teamId}`} busy={busy} onRemove={() => void run(() => api.accessRemove(u.discordId))} />
+                    <RemoveButton label={personLabel(u)} team={label} busy={busy} onRemove={() => void run(() => api.accessRemove(u.discordId))} />
                   </span>
                 </li>
               ))}

@@ -93,7 +93,10 @@ export class AccessFile {
   private queue: Promise<unknown> = Promise.resolve();
 
   /**
-   * Replace the `users` rows with `change(current users)`; every other key (admins included) is written back as read.
+   * Edit the `users` rows: `change(current users)` returns the new list. Only rows whose account the edit touches
+   * (added, moved, renamed, removed) are rewritten; every other row is written back exactly as it was in the file
+   * (hand-written rows the parser ignores and extra per-row keys included), as is every other key (admins too).
+   * A touched account's duplicate rows are dropped so a removed account can't come back through a shadowed row.
    * Edits run one at a time. A missing or invalid file is never rewritten (it stays "nobody allowed" until fixed by
    * hand). The written list is cached at once: a same-size rewrite within one mtime tick would fool the stat cache.
    */
@@ -107,9 +110,11 @@ export class AccessFile {
       }
       const list = parseAccess(raw, this.warn);
       if (!list) throw new Error("access list invalid");
-      const users = change(list.users.map((u) => ({ ...u })), list);
+      const result = change(list.users.map((u) => ({ ...u })), list);
+      const users = mergeUserRows(Array.isArray(raw.users) ? raw.users : [], list.users, result);
       const next = parseAccess({ ...raw, users }, this.warn);
-      if (!next || next.users.length !== users.length) throw new Error("edited access list would be invalid");
+      const ok = next && result.every((r) => next.users.some((u) => u.discordId === r.discordId && u.leagueId === r.leagueId && u.teamId === r.teamId));
+      if (!next || !ok || next.users.length !== result.length) throw new Error("edited access list would be invalid");
       await writeFileAtomic(this.file, `${JSON.stringify({ ...raw, users }, null, 2)}\n`, 0o600);
       const st = await fs.stat(this.file);
       this.cache = { mtimeMs: st.mtimeMs, size: st.size, list: next };
@@ -118,4 +123,28 @@ export class AccessFile {
     this.queue = run.catch(() => undefined);
     return run;
   }
+}
+
+/** The file's `users` rows after an edit: untouched rows verbatim; a touched account's rows → its one new row (or none). */
+export function mergeUserRows(rawRows: unknown[], before: AccessUser[], after: AccessUser[]): unknown[] {
+  const key = (u?: AccessUser) => (u ? JSON.stringify([u.leagueId, u.teamId, u.note ?? null]) : "");
+  const was = new Map(before.map((u) => [u.discordId, u]));
+  const now = new Map(after.map((u) => [u.discordId, u]));
+  const touched = new Set([...was.keys(), ...now.keys()].filter((id) => key(was.get(id)) !== key(now.get(id))));
+  const placed = new Set<string>();
+  const out: unknown[] = [];
+  for (const r of rawRows) {
+    const id = r && typeof r === "object" && !Array.isArray(r) ? (r as Record<string, unknown>).discordId : undefined;
+    if (typeof id !== "string" || !touched.has(id)) {
+      out.push(r);
+      continue;
+    }
+    const row = now.get(id);
+    if (!row || placed.has(id)) continue;
+    const { note: _old, ...rest } = r as Record<string, unknown>;
+    out.push({ ...rest, ...row });
+    placed.add(id);
+  }
+  for (const row of after) if (touched.has(row.discordId) && !placed.has(row.discordId)) out.push({ ...row });
+  return out;
 }

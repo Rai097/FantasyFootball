@@ -303,7 +303,7 @@ test("PUT body confusion: wrong types, arrays, prototype keys → 400 and nothin
   writeAccess();
 });
 
-test("BUG: an edit silently drops hand-written user rows the parser ignores and per-row extra keys", { todo: "BUG: AccessFile.editUsers rewrites users from parseAccess output (access.ts editUsers: change(list.users) then {...raw, users}): any hand-entered row with a typo, a duplicate, or an extra key is deleted/stripped by the next unrelated PUT/DELETE" }, async () => {
+test("an edit keeps hand-written user rows the parser ignores and per-row extra keys (fix round 1)", async () => {
   const typo = { discordId: "880000000000000088", leagueId: "y 1405188", teamId: "3", note: "fix the league id later" };
   const users = [...baseUsers(), typo, { discordId: "990000000000000099", leagueId: "yY", teamId: "1", note: "B", since: "2026-10-01" }];
   writeAccess({}, users);
@@ -318,11 +318,11 @@ test("BUG: an edit silently drops hand-written user rows the parser ignores and 
   }
 });
 
-test("BUG: assigning a team whose imported id isn't a valid access-list team id → misleading 503 'check access.json'", { todo: "BUG: PUT checks teamId only against the import's teams (routes.ts PUT), but imports accept ids like 'a b' / '1.5' (import.ts validateImport str(t.id,20)) that parseAccess TEAM_ID rejects → editUsers length check throws → 503 access_file for a valid UI pick" }, async () => {
+test("a team whose imported id isn't a valid access-list team id → 400 unsupported_team_id, not 503 (fix round 1)", async () => {
   writeAccess();
   const r = await call(admin, "PUT", `/api/access/users/${STRANGER}`, { leagueId: "yOdd", teamId: "1.5" });
-  assert.notEqual(r.json.code, "access_file", `got ${r.status} ${JSON.stringify(r.json)}`);
-  assert.ok(r.status === 200 || r.status === 400);
+  assert.equal(r.status, 400, JSON.stringify(r.json));
+  assert.equal(r.json.code, "unsupported_team_id");
 });
 
 // ---------------------------------------------------------------- concurrency and the cache

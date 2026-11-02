@@ -19,8 +19,13 @@ test("one row per team in league order; co-managers share a row; summary counts 
   assert.equal(v.summary, "1 of 3 teams can sign in");
 });
 
-test("an account whose team is gone is listed as stale, never dropped silently", () => {
-  assert.deepEqual(accessView(o)!.stale.map((u) => u.discordId), ["3333333333"]);
+test("accounts not on a row (team gone, or another imported league) are listed, never dropped silently", () => {
+  assert.deepEqual(accessView(o)!.others.map((x) => [x.user.discordId, x.label, x.gone]), [["3333333333", "Team 9 (gone)", true]]);
+  const two: AccessOverview = { ...o, leagues: [...o.leagues, { id: "yM", name: "Other", teams: [{ id: "1", name: "M1" }] }], users: [...o.users, { discordId: "4444444444", leagueId: "yM", teamId: "1" }] };
+  const v = accessView(two, "yL")!;
+  assert.deepEqual(v.others.map((x) => [x.user.discordId, x.label, x.gone]), [["3333333333", "Team 9 (gone)", true], ["4444444444", "Other · M1", false]]);
+  assert.equal(accessView(two, "yM")!.leagueName, "Other");
+  assert.equal(accessView(two, "nope")!.leagueId, "yL", "an unknown league (e.g. the demo) falls back to the first import");
 });
 
 test("no imported league: nothing to assign", () => {
