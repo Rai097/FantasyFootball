@@ -4,11 +4,13 @@
 //   POST /auth/logout             → revoke server-side, clear cookie
 //   GET  /api/auth/me             → { id, name, avatarUrl, role, csrf, scope, actingAs, dev? }
 //   POST /api/auth/act-as         → admin "view as" { discordId | null }
-//   GET  /api/access              → admin: users + imported leagues/teams for the picker
+//   GET  /api/access              → admin: users + imported leagues/teams for the picker + recent refused sign-ins
+//   PUT  /api/access/users/:id    → admin: { leagueId, teamId, note? } gives that Discord account one team (add or move)
+//   DELETE /api/access/users/:id  → admin: removes that account (locked out on its next request)
 // `createAuth` wires sessions + access list + guard + these routes; index.ts mounts guard first, then the router.
 import express, { type NextFunction, type Request, type Response } from "express";
 import { listImports, readImport } from "../providers/import.js";
-import { AccessFile, type AccessList, roleOf } from "./access.js";
+import { AccessFile, DISCORD_ID, NOTE_MAX, type AccessList, type AccessUser, roleOf } from "./access.js";
 import { authorizeUrl, avatarUrl, discordClient, type DiscordClient } from "./discord.js";
 import { createGuard, parseCookies, scopeOf, SESSION_COOKIE, STATE_COOKIE, AuthError, errors, type Scope } from "./guard.js";
 import { safeEqual, SESSION_TTL_MS, SessionStore, signSessionId, signState, STATE_TTL_MS, verifySessionCookie, verifyState } from "./sessions.js";
@@ -22,7 +24,7 @@ export interface AuthOptions {
   publicUrl?: string;
   discord?: DiscordClient;
   sessions?: SessionStore;
-  access?: { get(): Promise<AccessList | null> };
+  access?: { get(): Promise<AccessList | null>; editUsers?: AccessFile["editUsers"] };
   log?: (line: string) => void;
   now?: () => number;
 }
@@ -75,6 +77,28 @@ export function signInLimiter(now: () => number = Date.now) {
   };
 }
 
+// ---------------------------------------------------------------- refused sign-ins (for the owner to assign)
+export const REFUSED_MAX = 20;
+export const REFUSED_TTL_MS = 7 * 24 * 3600_000;
+export interface RefusedSignIn {
+  discordId: string;
+  name: string;
+  at: string;
+}
+
+/** Recent sign-ins refused as "not on the list", newest first: in memory only, one row per account, bounded. */
+export function refusedLog(now: () => number = Date.now) {
+  let rows: RefusedSignIn[] = [];
+  const fresh = () => (rows = rows.filter((r) => now() - Date.parse(r.at) < REFUSED_TTL_MS));
+  return {
+    add(discordId: string, name: string) {
+      if (!DISCORD_ID.test(discordId)) return;
+      rows = [{ discordId, name: name.slice(0, 64), at: new Date(now()).toISOString() }, ...rows.filter((r) => r.discordId !== discordId)].slice(0, REFUSED_MAX);
+    },
+    list: (): RefusedSignIn[] => fresh().slice(),
+  };
+}
+
 // ---------------------------------------------------------------- factory
 export function createAuth(o: AuthOptions) {
   const log = o.log ?? ((l: string) => console.log(l));
@@ -91,6 +115,7 @@ export function createAuth(o: AuthOptions) {
   const access = o.access ?? new AccessFile();
   const guard = createGuard({ mode: o.mode, secret, publicOrigin, sessions, access, log });
   const allow = signInLimiter(now);
+  const refused = refusedLog(now);
 
   const cookieOpts = (maxAgeMs: number, sameSite: "strict" | "lax") => ({ httpOnly: true, secure, sameSite, path: "/", maxAge: maxAgeMs });
   const clearCookie = (res: Response, name: string) => res.clearCookie(name, { httpOnly: true, secure, path: "/" });
@@ -134,6 +159,7 @@ export function createAuth(o: AuthOptions) {
       const role = roleOf(await access.get(), user.id);
       if (!role) {
         log(`[auth] event=login uid=${user.id} result=refused reason=not_allowed`);
+        refused.add(user.id, String(user.global_name || user.username || ""));
         clearCookie(res, STATE_COOKIE);
         clearCookie(res, SESSION_COOKIE);
         return void res.redirect(302, "/?error=not_allowed");
@@ -219,17 +245,76 @@ export function createAuth(o: AuthOptions) {
     })().catch(next);
   });
 
+  const overview = async (list: AccessList | null) => {
+    const leagues: { id: string; name: string; teams: { id: string; name: string }[] }[] = [];
+    for (const x of await listImports()) {
+      const imp = await readImport(x.id);
+      if (imp) leagues.push({ id: imp.id, name: imp.name, teams: imp.teams.map((t) => ({ id: t.id, name: t.name })) });
+    }
+    const listed = new Set([...(list?.admins ?? []), ...(list?.users ?? []).map((u) => u.discordId)]);
+    return { users: list?.users ?? [], leagues, requests: refused.list().filter((r) => !listed.has(r.discordId)) };
+  };
+  const bad = (res: Response, code: string, error: string) => void res.status(400).set("Cache-Control", "no-store").json({ error, code });
+  const realAdmin = (req: Request) => {
+    const s = scopeOf(req);
+    if (s.realRole !== "admin") throw errors.adminOnly();
+    return s;
+  };
+
+  /** An unreadable / invalid access file is never rewritten: 503 (fix it by hand), not a 500. */
+  const edit: AccessFile["editUsers"] = (change) =>
+    access.editUsers!(change).catch((e) => {
+      if (e instanceof AuthError) throw e;
+      log(`[auth] event=access_edit result=error error=${String((e as Error)?.message ?? e).replace(/\s+/g, "_").slice(0, 60)}`);
+      throw new AuthError(503, "access_file", "The access list couldn't be saved.", "Check .data/access.json on the server.");
+    });
+
   router.get("/api/access", (req, res, next) => {
     (async () => {
-      const s = scopeOf(req);
-      if (s.realRole !== "admin") throw errors.adminOnly();
-      const list = await access.get();
-      const leagues: { id: string; name: string; teams: { id: string; name: string }[] }[] = [];
-      for (const x of await listImports()) {
-        const imp = await readImport(x.id);
-        if (imp) leagues.push({ id: imp.id, name: imp.name, teams: imp.teams.map((t) => ({ id: t.id, name: t.name })) });
-      }
-      res.set("Cache-Control", "no-store").json({ users: list?.users ?? [], leagues });
+      realAdmin(req);
+      res.set("Cache-Control", "no-store").json(await overview(await access.get()));
+    })().catch(next);
+  });
+
+  // Owner: give a Discord account one team (add, or move to another team); the guard already checked Origin + CSRF.
+  router.put("/api/access/users/:discordId", (req, res, next) => {
+    (async () => {
+      const s = realAdmin(req);
+      const id = req.params.discordId;
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      if (!DISCORD_ID.test(id)) return bad(res, "bad_discord_id", "A Discord user ID is 5–25 digits.");
+      if (typeof b.leagueId !== "string" || typeof b.teamId !== "string") return bad(res, "bad_request", "Send { leagueId, teamId, note? }.");
+      if (b.note !== undefined && b.note !== null && typeof b.note !== "string") return bad(res, "bad_request", "note must be text.");
+      const imp = await readImport(b.leagueId);
+      if (!imp) return bad(res, "unknown_league", "That league isn't imported.");
+      if (!imp.teams.some((t) => t.id === b.teamId)) return bad(res, "unknown_team", "That team isn't in the league.");
+      if (!access.editUsers) return void res.status(503).json({ error: "The access list can't be edited on this server.", code: "readonly" });
+      const before = await access.get();
+      if (before?.admins.includes(id)) return bad(res, "is_admin", "That account is the league owner (admin) already.");
+      const note = typeof b.note === "string" ? b.note.trim().slice(0, NOTE_MAX) : "";
+      const row: AccessUser = { discordId: id, leagueId: b.leagueId, teamId: b.teamId, ...(note ? { note } : {}) };
+      const after = await edit((users, list) => {
+        if (list.admins.includes(id)) throw new AuthError(400, "is_admin", "That account is the league owner (admin) already.");
+        const i = users.findIndex((u) => u.discordId === id);
+        if (i >= 0) users[i] = { ...row, ...(!note && users[i].note ? { note: users[i].note } : {}) };
+        else users.push(row);
+        return users;
+      });
+      log(`[auth] event=access_set uid=${s.uid} target=${id} league=${row.leagueId} team=${row.teamId} result=ok`);
+      res.set("Cache-Control", "no-store").json(await overview(after));
+    })().catch(next);
+  });
+
+  router.delete("/api/access/users/:discordId", (req, res, next) => {
+    (async () => {
+      const s = realAdmin(req);
+      const id = req.params.discordId;
+      if (!DISCORD_ID.test(id)) return bad(res, "bad_discord_id", "A Discord user ID is 5–25 digits.");
+      if (!access.editUsers) return void res.status(503).json({ error: "The access list can't be edited on this server.", code: "readonly" });
+      if (!(await access.get())?.users.some((u) => u.discordId === id)) return void res.status(404).json({ error: "That account isn't on the list.", code: "unknown_user" });
+      const after = await edit((users) => users.filter((u) => u.discordId !== id));
+      log(`[auth] event=access_remove uid=${s.uid} target=${id} result=ok`);
+      res.set("Cache-Control", "no-store").json(await overview(after));
     })().catch(next);
   });
 

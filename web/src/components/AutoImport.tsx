@@ -1,6 +1,7 @@
 // Auto-import status (stopgap until the Yahoo API; docs/DESIGN.md "Auto-import (stopgap until Yahoo API)"):
 // one short line ("Auto-import: last 2:00 PM · next 6:00 PM" or the paused warning) with the reasoning behind a tap,
-// and the admin's "Refresh from Yahoo now" button. Status is fetched once; it is polled only while a run is in progress.
+// and the "Refresh from Yahoo now" button (owner any time; managers with a server-side cooldown and daily cap).
+// Status is fetched once; it is polled only while a run is in progress.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type AutoImportStatus } from "../api";
 import { autoImportLine } from "../lib/autoImport";
@@ -44,7 +45,7 @@ export function AutoImportLine({ status, pill }: { status: AutoImportStatus | nu
   return pill ? <span className={`pill ${line.warn ? "warn" : "muted"}`}>{body}</span> : <div className={line.warn ? "notice warn" : "muted small"}>{body}</div>;
 }
 
-/** "Refresh from Yahoo now" (admin; the server allows one per 2 minutes and one run at a time). */
+/** "Refresh from Yahoo now": one run at a time and one per 2 minutes; managers also have a cooldown and a daily cap. */
 export function AutoImportRefresh({ handle }: { handle: AutoImportHandle }) {
   const [msg, setMsg] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -63,7 +64,7 @@ export function AutoImportRefresh({ handle }: { handle: AutoImportHandle }) {
             handle.markRunning();
           } catch (e) {
             const err = toApiError(e);
-            setMsg(err.status === 429 ? "Refreshed less than 2 minutes ago: try again shortly." : err.message);
+            setMsg(err.message);
           } finally {
             setBusy(false);
             void handle.reload();

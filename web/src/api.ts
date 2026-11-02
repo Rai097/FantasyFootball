@@ -191,9 +191,17 @@ export interface Me {
   dev?: boolean;
 }
 
+export interface AccessUser {
+  discordId: string;
+  leagueId: string;
+  teamId: string;
+  note?: string;
+}
 export interface AccessOverview {
-  users: { discordId: string; leagueId: string; teamId: string; note?: string }[];
+  users: AccessUser[];
   leagues: { id: string; name: string; teams: { id: string; name: string }[] }[];
+  /** Recent sign-ins refused as "not on the list" (newest first; in server memory, last 7 days). */
+  requests: { discordId: string; name: string; at: string }[];
 }
 
 /** Why the API refused this browser: no/expired session, or the Discord account is no longer on the list. */
@@ -268,6 +276,9 @@ export const api = {
   me: () => request<Me>("GET", "/api/auth/me", undefined, { quietAuth: true }),
   actAs: (discordId: string | null) => request<Me>("POST", "/api/auth/act-as", { discordId }),
   access: () => request<AccessOverview>("GET", "/api/access"),
+  accessSet: (discordId: string, body: { leagueId: string; teamId: string; note?: string }) =>
+    request<AccessOverview>("PUT", `/api/access/users/${encodeURIComponent(discordId)}`, body),
+  accessRemove: (discordId: string) => request<AccessOverview>("DELETE", `/api/access/users/${encodeURIComponent(discordId)}`),
   logout: () => request<{ ok: true }>("POST", "/auth/logout"),
 
   state: () => request<AppState>("GET", "/api/state"),

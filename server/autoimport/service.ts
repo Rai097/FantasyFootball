@@ -14,6 +14,10 @@ import { nextFire, scheduleFromEnv, type ScheduleConfig } from "./schedule.js";
 export const STATE_FILE = "autoimport-state";
 /** Manual "Refresh from Yahoo now": at most one accepted request per 2 minutes. */
 export const MANUAL_MIN_GAP_MS = 2 * 60_000;
+/** Invited managers (not the owner) share the owner's Yahoo sign-in: one refresh per 15 minutes each, and at most
+ * 12 accepted manager refreshes per rolling 24 h in total (in memory; a restart resets them). */
+export const USER_MIN_GAP_MS = 15 * 60_000;
+export const USER_DAILY_MAX = 12;
 export const RUN_TIMEOUT_MS = 3 * 60_000;
 /** Hard cap on a whole run, retry included (fix round 1). */
 export const RUN_DEADLINE_MS = MAX_RUN_MS;
@@ -72,7 +76,7 @@ export interface AutoImportStatus {
 
 export type RefreshResult =
   | { ok: true; status: "running"; runId: string }
-  | { ok: false; code: "disabled" | "busy" | "rate_limited"; retryAfterSec?: number };
+  | { ok: false; code: "disabled" | "busy" | "rate_limited" | "user_cooldown" | "daily_cap"; retryAfterSec?: number };
 
 export interface ServiceDeps {
   collect: (signal: AbortSignal) => Promise<CollectResult>;
@@ -96,6 +100,8 @@ export class AutoImportService {
   readonly runner: AutoImportRunner | null;
   private jobs: Cron[] = [];
   private lastManual = -Infinity;
+  /** Accepted manager refreshes in the last 24 h (oldest first). */
+  private userRuns: { uid: string; at: number }[] = [];
   private readonly now: () => Date;
 
   private constructor(
@@ -149,16 +155,27 @@ export class AutoImportService {
     return { ...base, ...this.runner.state(), nextRunAt: this.nextRunAt(), timezone: this.cfg.schedule?.timezone };
   }
 
-  /** "Refresh from Yahoo now": rate-limited (accepted requests only), rejected while a run is in progress. */
-  refreshNow(): RefreshResult {
+  /**
+   * "Refresh from Yahoo now": one run at a time and one accepted request per 2 minutes for everyone; a manager
+   * (`by` set; the owner passes nothing) also has a per-account gap and the shared daily cap.
+   */
+  refreshNow(by?: { uid: string }): RefreshResult {
     if (!this.runner) return { ok: false, code: "disabled" };
     if (this.runner.isRunning()) return { ok: false, code: "busy" };
     const t = this.now().getTime();
     const wait = this.lastManual + MANUAL_MIN_GAP_MS - t;
     if (wait > 0) return { ok: false, code: "rate_limited", retryAfterSec: Math.ceil(wait / 1000) };
+    if (by) {
+      this.userRuns = this.userRuns.filter((r) => t - r.at < 24 * 3600_000);
+      const mine = this.userRuns.filter((r) => r.uid === by.uid).reduce((m, r) => Math.max(m, r.at), -Infinity);
+      const gap = mine + USER_MIN_GAP_MS - t;
+      if (gap > 0) return { ok: false, code: "user_cooldown", retryAfterSec: Math.ceil(gap / 1000) };
+      if (this.userRuns.length >= USER_DAILY_MAX) return { ok: false, code: "daily_cap", retryAfterSec: Math.ceil((this.userRuns[0].at + 24 * 3600_000 - t) / 1000) };
+    }
     const r = this.runner.trigger("manual");
     if (!r.started) return { ok: false, code: "busy" };
     this.lastManual = t;
+    if (by) this.userRuns.push({ uid: by.uid, at: t });
     return { ok: true, status: "running", runId: r.runId };
   }
 

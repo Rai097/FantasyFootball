@@ -292,15 +292,20 @@ test("crash mid-write: a stray tmp file never replaces the import (readers see t
 });
 
 // ------------------------------------------------------------------ auth and the route
-test("refresh: case / trailing-slash variants are still admin-only; act-as (admin viewing as a member) is refused", async () => {
-  await service(async () => ({ ok: false, reason: "error", detail: "x" }));
+test("refresh: a manager's case / trailing-slash variants can't dodge the cooldown; act-as runs under the owner's rules", async () => {
+  // Managers may refresh their own (auto-imported) league since 2026-11-02, once per cooldown.
+  const { s } = await service(async () => ({ ok: false, reason: "error", detail: "x" }));
+  assert.equal((await call("POST", "/api/autoimport/refresh", "user")).status, 202);
+  while (s.status().running) await new Promise((r) => setTimeout(r, 5));
   for (const p of ["/api/autoimport/refresh", "/API/AutoImport/Refresh", "/api/autoimport/refresh/", "/api//autoimport/refresh"]) {
     const r = await call("POST", p, "user");
-    assert.ok(r.status === 403 || r.status === 404, `${p}: ${r.status}`);
+    assert.ok([403, 404, 429].includes(r.status), `${p}: ${r.status}`);
     assert.notEqual(r.status, 202, p);
   }
+  // The owner viewing as the member is still the owner: the 2-minute gap, not the manager cooldown.
   const a = await call("POST", "/api/autoimport/refresh", "actas");
-  assert.equal(a.status, 403, `act-as: ${a.status} ${a.text}`);
+  assert.equal(a.status, 429, `act-as: ${a.status} ${a.text}`);
+  assert.match(a.text, /rate_limited/);
   // Origin variants an attacker might try.
   for (const origin of ["https://ff.example.evil.com", "http://ff.example", "null", "https://FF.EXAMPLE.evil"]) {
     const r = await call("POST", "/api/autoimport/refresh", "admin", { origin });

@@ -90,8 +90,8 @@ A hosted server signs people in with Discord (scope `identify`). Production refu
 `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `SESSION_SECRET` (≥ 32 random characters, e.g. `openssl rand -hex 32`) and
 `PUBLIC_URL` (the site's address; the Discord redirect URI is `PUBLIC_URL/auth/callback`). Who may sign in is
 `.data/access.json` (never committed): `{ "admins": ["<discord id>"], "users": [{ "discordId": "…", "leagueId": "y1405188",
-"teamId": "4", "note": "…" }] }`. Admins see everything and can "View as" a user; a user sees only their team in their
-league and may re-import it. Missing file = nobody can sign in. Without Discord config, `npm run dev` runs in dev mode
+"teamId": "4", "note": "…" }] }`. Admins see everything, can "View as" a user and assign managers to teams in Connect → "Who can sign in"; a user
+sees only their team in their league and may refresh it early (cooldown and daily cap). Missing file = nobody can sign in. Without Discord config, `npm run dev` runs in dev mode
 (you are the admin). Details: docs/DESIGN.md "Discord sign-in, multi-tenant".
 
 ## Troubleshooting

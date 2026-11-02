@@ -28,10 +28,14 @@ describe("classify", () => {
     assert.equal(c("POST", "/api/docs/import").kind, "signed");
     assert.equal(c("GET", "/api/state").kind, "signed");
     assert.equal(c("GET", "/api/nope").kind, "signed");
-    // Auto-import: status for any signed-in account; refresh (and any other write, any case / trailing slash) admin.
+    // Auto-import: status and "Refresh now" for any signed-in account (the handler limits managers to their own league
+    // and caps them); every other write (any case / trailing slash) admin.
     assert.equal(c("GET", "/api/autoimport").kind, "signed");
-    assert.equal(c("POST", "/api/autoimport/refresh").kind, "admin");
-    assert.equal(c("POST", "/api/AutoImport/refresh/").kind, "admin");
+    assert.equal(c("POST", "/api/autoimport/refresh").kind, "signed");
+    assert.equal(c("POST", "/api/AutoImport/refresh/").kind, "signed");
+    assert.equal(c("PUT", "/api/autoimport/refresh").kind, "admin");
+    assert.equal(c("POST", "/api/autoimport/refresh/x").kind, "admin");
+    assert.equal(c("POST", "/api/autoimport").kind, "admin");
     assert.equal(c("DELETE", "/api/autoimport").kind, "admin");
     assert.equal(c("GET", "/api").kind, "signed");
   });

@@ -1018,7 +1018,7 @@ apiRouter.post(
 );
 
 // ---------------------------------------------------------------- auto-import (stopgap until the Yahoo API)
-// docs/DESIGN.md "Auto-import (stopgap until Yahoo API)". Status for any signed-in account; refresh = admin (guard).
+// docs/DESIGN.md "Auto-import (stopgap until Yahoo API)". Status for any signed-in account; refresh: see below.
 apiRouter.get(
   "/api/autoimport",
   h(async (_req, res) => {
@@ -1027,15 +1027,29 @@ apiRouter.get(
   }),
 );
 
+// Refresh: the owner any time (one run at a time, 2-minute gap); a manager only for the league the auto-import reads,
+// with a per-account cooldown and a shared daily cap (they spend the owner's Yahoo sign-in).
 apiRouter.post(
   "/api/autoimport/refresh",
-  h(async (_req, res) => {
+  h(async (req, res) => {
+    const scope = scopeOf(req);
     const s = getAutoImport();
-    const r = s ? s.refreshNow() : ({ ok: false, code: "disabled" } as const);
+    const manager = scope.realRole !== "admin";
+    if (manager && s && s.status().importId !== scope.leagueId) {
+      return void res.status(403).json({ error: "Auto-import doesn't read your league.", code: "league" });
+    }
+    const r = s ? s.refreshNow(manager ? { uid: scope.uid } : undefined) : ({ ok: false, code: "disabled" } as const);
     if (r.ok) return void res.status(202).json({ status: r.status, runId: r.runId });
-    if (r.code === "rate_limited") {
+    if (r.code === "rate_limited" || r.code === "user_cooldown" || r.code === "daily_cap") {
+      const mins = Math.max(1, Math.ceil((r.retryAfterSec ?? 120) / 60));
+      const error =
+        r.code === "rate_limited"
+          ? "Refreshed less than 2 minutes ago."
+          : r.code === "user_cooldown"
+            ? `You refreshed recently: try again in ${mins} min.`
+            : "Today's early-refresh limit is used up; the schedule still updates the league.";
       res.set("Retry-After", String(r.retryAfterSec ?? 120));
-      return void res.status(429).json({ error: "Refreshed less than 2 minutes ago.", code: r.code, retryAfterSec: r.retryAfterSec });
+      return void res.status(429).json({ error, code: r.code, retryAfterSec: r.retryAfterSec });
     }
     if (r.code === "busy") return void res.status(409).json({ error: "An auto-import is already running.", code: r.code });
     res.status(409).json({ error: "Auto-import is off on this server.", code: r.code, hint: s?.status().disabledReason });

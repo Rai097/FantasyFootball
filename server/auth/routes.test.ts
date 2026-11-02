@@ -375,6 +375,71 @@ describe("scoped API", () => {
     assert.deepEqual(acc.json.leagues.map((l: { id: string }) => l.id), ["yY"]);
   });
 
+  test("owner edits the access list: add / move / remove a manager; admins untouched; refused sign-ins listed until added", async () => {
+    const raw = { admins: [ADMIN], users: [{ discordId: A, leagueId: "yY", teamId: "4", note: "Alice" }, { discordId: B, leagueId: "yY", teamId: "7", note: "Bob" }], keep: "me" };
+    fs.writeFileSync(accessFile, JSON.stringify(raw));
+    // The stranger's refused sign-in (Discord callback test) waits for the owner, with their Discord name.
+    const before = await call(admin, "GET", "/api/access");
+    assert.deepEqual(before.json.requests.map((r: { discordId: string; name: string }) => [r.discordId, r.name]), [[STRANGER, "user40"]]);
+    const put = (who: Who, id: string, body: unknown, opts = {}) => call(who, "PUT", `/api/access/users/${id}`, body, opts);
+    assert.equal((await put(a, STRANGER, { leagueId: "yY", teamId: "1" })).json.code, "admin_only");
+    assert.equal((await put(admin, STRANGER, { leagueId: "yY", teamId: "1" }, { csrf: "nope" })).json.code, "csrf");
+    assert.equal((await put(admin, STRANGER, { leagueId: "yY", teamId: "1" }, { origin: "https://evil.example" })).json.code, "bad_origin");
+    assert.equal((await put(admin, "12ab", { leagueId: "yY", teamId: "1" })).json.code, "bad_discord_id");
+    assert.equal((await put(admin, STRANGER, { leagueId: "yQ", teamId: "1" })).json.code, "unknown_league");
+    assert.equal((await put(admin, STRANGER, { leagueId: "yY", teamId: "99" })).json.code, "unknown_team");
+    assert.equal((await put(admin, STRANGER, { leagueId: "yY" })).json.code, "bad_request");
+    assert.equal((await put(admin, ADMIN, { leagueId: "yY", teamId: "1" })).json.code, "is_admin", "the owner can't demote themselves");
+    assert.deepEqual(JSON.parse(fs.readFileSync(accessFile, "utf8")), raw, "refused edits write nothing");
+
+    const ok = await put(admin, STRANGER, { leagueId: "yY", teamId: "1", note: "  Sam  " });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    assert.deepEqual(ok.json.users.at(-1), { discordId: STRANGER, leagueId: "yY", teamId: "1", note: "Sam" });
+    assert.deepEqual(ok.json.requests, []);
+    const file = JSON.parse(fs.readFileSync(accessFile, "utf8"));
+    assert.deepEqual(file.admins, [ADMIN]);
+    assert.equal(file.keep, "me", "other keys carried through");
+    assert.equal(fs.statSync(accessFile).mode & 0o777, 0o600);
+    assert.ok(logs.some((l) => l.includes(`event=access_set uid=${ADMIN} target=${STRANGER} league=yY team=1 result=ok`)));
+
+    const s = await signIn(STRANGER);
+    assert.deepEqual((await call(s, "GET", "/api/auth/me")).json.scope, { leagueId: "yY", teamId: "1" });
+    // Move to team 4 (same file size, same mtime tick possible): the very next request sees it; the note is kept.
+    const moved = await put(admin, STRANGER, { leagueId: "yY", teamId: "4" });
+    assert.equal(moved.json.users.at(-1).note, "Sam");
+    assert.deepEqual((await call(s, "GET", "/api/auth/me")).json.scope, { leagueId: "yY", teamId: "4" });
+    assert.equal((await call(s, "GET", "/api/league/import/yY/waivers?team=1")).json.code, "team");
+
+    assert.equal((await call(a, "DELETE", `/api/access/users/${STRANGER}`)).json.code, "admin_only");
+    assert.equal((await call(admin, "DELETE", `/api/access/users/${STRANGER}`)).status, 200);
+    assert.equal((await call(s, "GET", "/api/auth/me")).json.code, "not_allowed", "removed = locked out on the next request");
+    assert.equal((await call(admin, "DELETE", `/api/access/users/${STRANGER}`)).status, 404);
+    assert.equal((await call(admin, "DELETE", `/api/access/users/${ADMIN}`)).status, 404, "admins can't be removed here");
+    assert.deepEqual(JSON.parse(fs.readFileSync(accessFile, "utf8")).admins, [ADMIN]);
+
+    // A broken file is never rewritten: the guard already fails closed (nobody allowed, the owner included), and
+    // the bytes stay as they were (fix by hand; editUsers' own refusal is covered below).
+    fs.writeFileSync(accessFile, "{ not json");
+    const t = new Date(Date.now() + 200_000);
+    fs.utimesSync(accessFile, t, t);
+    const broken = await put(admin, B, { leagueId: "yY", teamId: "1" });
+    assert.equal(broken.json.code, "not_allowed");
+    assert.equal(fs.readFileSync(accessFile, "utf8"), "{ not json");
+    writeAccess();
+  });
+
+  test("editUsers: a missing or invalid file throws and writes nothing; edits are serialized", async () => {
+    const f = path.join(work, "access-edit.json");
+    const af = new AccessFile(f, () => undefined);
+    await assert.rejects(af.editUsers((u) => u));
+    assert.equal(fs.existsSync(f), false);
+    fs.writeFileSync(f, JSON.stringify({ admins: [ADMIN], users: [] }));
+    await Promise.all(["11111", "22222", "33333"].map((id) => af.editUsers((u) => [...u, { discordId: id, leagueId: "yY", teamId: "1" }])));
+    assert.deepEqual((await af.get())!.users.map((u) => u.discordId).sort(), ["11111", "22222", "33333"]);
+    await assert.rejects(af.editUsers((u) => [...u, { discordId: "bad", leagueId: "yY", teamId: "1" }]), /invalid/);
+    assert.equal(JSON.parse(fs.readFileSync(f, "utf8")).users.length, 3);
+  });
+
   test("removing an id from access.json locks out the existing session on the next request", async () => {
     const c = await signIn(B);
     assert.equal((await call(c, "GET", "/api/import")).status, 200);

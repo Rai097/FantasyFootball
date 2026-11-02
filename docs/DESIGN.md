@@ -541,7 +541,7 @@ callback requires both equal (timingSafeEqual) and a valid signature. `next` mus
 
 **UI**: no session → a sign-in screen ("Sign in with Discord"); `?error=not_allowed` → "This Discord account isn't on
 the list yet — ask the league owner." Header shows avatar + name + Sign out. Users: the team picker is hidden and the
-Connect tab shows only their league (re-import allowed; delete/settings hidden). Admin: a "View as" picker (Admin /
+Connect tab shows only their league (amended 2026-11-02, see "Managers' Connect tab and access editing"). Admin: a "View as" picker (Admin /
 each user) in the header; a banner "Viewing as <user>" while acting. API client sends X-CSRF-Token on writes and
 shows the sign-in screen on any 401.
 
@@ -552,7 +552,7 @@ shows the sign-in screen on any 401.
   through the guard's scope. A non-admin re-import never writes `myTeamId`. Test: user B re-imports league Y → user A's
   team and the stored `myTeamId` are unchanged.
 * **Sessions** load once at start into an in-memory Map (single process) and write through on change with
-  `writeJson` (atomic); never read-modify-write the file per request. access.json is read-only with an mtime cache.
+  `writeJson` (atomic); never read-modify-write the file per request. access.json is read with an mtime cache; since 2026-11-02 the owner edits `users` from the Connect tab (below).
 * **Deliberate omissions** (unlike perp): no sudo re-auth (nothing here moves money or places orders) and no per-user
   write budget beyond the sign-in limiter. Writes are import / delete / settings / act-as only.
 * **Direct localhost writes fail Origin/Host** in production by design (Origin must be PUBLIC_URL). Smoke checks run
@@ -1892,7 +1892,7 @@ STOPGAP: retire it when the Yahoo API app is approved. Read-only toward Yahoo (t
   `{ status: "running", runId }`, 409 `busy` / `disabled`, 429 `rate_limited` (1 accepted per 2 min, Retry-After).
 - **UI.** Header pill and Connect → Import line: "Auto-import: last 2:00 PM · next 6:00 PM" (tap: last good import,
   next try, what it is). Paused: one-line banner "Auto-import paused: Yahoo signed out — use the bookmark" (tap: why,
-  detail, last try, fix). Admin button "Refresh from Yahoo now" (44 px). Status polls every 3 s only while running.
+  detail, last try, fix). Button "Refresh from Yahoo now" (44 px; managers too since 2026-11-02, with limits). Status polls every 3 s only while running.
 - **Deploy.** The plist gained `AUTO_IMPORT=1` and `AUTO_IMPORT_LEAGUE_ID`: an env change, so `launchctl unload` +
   copy the template + `launchctl load` (kickstart keeps the old environment). `npm ci` in the release worktree
   (new deps playwright-core, croner; no browser download). The owner runs `npm run yahoo:login` there once first.
@@ -2100,3 +2100,35 @@ present). Measured: 6.8 KB on the fixture-built league (weeks 8 + 7).
 - UI: the Other matchups row stays one line (teams, our totals, score); a tap opens the same totals block and the same
   mirrored lineup table + bench as my matchup, with a one-line note "Player points: only for your matchup" (+ "?") when
   no cell has points.
+
+## Managers' Connect tab and access editing (2026-11-02)
+
+Owner ask: invited managers see only what they need on Connect, and the owner assigns each Discord account a team in
+the app instead of on the server.
+
+**Manager view** (a user scope, or the owner viewing as one): only the league card (league name, chips, their team,
+Open My Team) plus the auto-import line and "Refresh from Yahoo now" when the auto-import reads their league. Hidden:
+demo, Yahoo API, bookmarklet, paste, the imported-leagues list, delete, settings and the season chips. The API still
+accepts a manager's own-league `POST /api/import` (unchanged rules); the UI no longer offers it.
+
+**Refresh for managers**: guard classifies `POST /api/autoimport/refresh` as `signed`; every other auto-import write
+stays admin. The handler refuses a manager whose `leagueId` isn't the auto-import's `importId` (403 `league`). Limits
+(in memory; a restart resets them): one run at a time and one accepted refresh per 2 minutes for everyone; a manager
+also waits 15 minutes between their own refreshes (`user_cooldown`) and managers share 12 accepted refreshes per
+rolling 24 h (`daily_cap`). The owner (real admin, also while viewing as) is never held by the manager limits. Cost:
+each accepted refresh is one full headless read of the league on the owner's Yahoo sign-in (~30–60 s), so the cap
+bounds managers to 12 extra reads a day on top of the schedule. Locked projections are safe: captures after kickoff
+never set or move a lock (projLog / matchLog rules).
+
+**Access editing** (Connect → "Who can sign in", owner only = `realAdmin`, Origin + CSRF like every write):
+* `PUT /api/access/users/:discordId {leagueId, teamId, note?}` adds the account or moves it to another team (an omitted
+  note keeps the old one). 400 for a malformed id, an unknown league / team, or an admin's id (`is_admin`).
+* `DELETE /api/access/users/:discordId` removes it (404 when not listed); the next request of that session is 403.
+* `AccessFile.editUsers` re-reads the file, replaces `users` only and writes every other key (admins included) back as
+  read; serialized; atomic (`writeFileAtomic`, mode 600); the written list is cached at once. A missing or invalid
+  file is never rewritten. Admins change only by hand on the server, so the app can't lock the owner out.
+* `GET /api/access` also returns `requests`: sign-ins refused as "not on the list" in the last 7 days (in memory, max
+  20, one per account, Discord display name), minus accounts now listed. The card shows them first with a team
+  picker and Allow; then the teams (collapsed) with each person's name and a remove button; then "Add by Discord ID".
+* Every edit is one log line (`[auth] event=access_set|access_remove uid=… target=…`).
+

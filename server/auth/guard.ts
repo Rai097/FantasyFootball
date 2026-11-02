@@ -155,8 +155,10 @@ export function classify(method: string, path: string, query: Record<string, unk
       return { kind: "league", provider: q("provider", "demo"), id: q("id", "42") };
     }
     case "autoimport":
-      // Status: any signed-in account. "Refresh from Yahoo now" (any write): the league owner only.
-      return method === "GET" || method === "HEAD" ? { kind: "signed" } : { kind: "admin" };
+      // Status: any signed-in account. "Refresh from Yahoo now" (POST /refresh): any signed-in account; the handler
+      // limits a manager to their own league plus the cooldown and daily cap. Any other write: the league owner only.
+      if (method === "GET" || method === "HEAD") return { kind: "signed" };
+      return method === "POST" && l.length === 3 && l[2] === "refresh" ? { kind: "signed" } : { kind: "admin" };
     case "import":
       if (segs.length <= 2) return { kind: "signed" }; // list (filtered) / POST (checked in the handler)
       if (method === "DELETE" && segs.length === 3) return { kind: "admin" };

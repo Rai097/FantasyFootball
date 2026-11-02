@@ -6,7 +6,8 @@ import { ago, record, stamp } from "../lib/format";
 import { Disclosure } from "../components/ExpandableRow";
 import { toApiError, useAsync, type AsyncState } from "../lib/useAsync";
 import { ImportSection } from "./ImportSection";
-import type { AutoImportHandle } from "../components/AutoImport";
+import { AccessSection } from "./AccessSection";
+import { AutoImportLine, AutoImportRefresh, type AutoImportHandle } from "../components/AutoImport";
 
 interface Props {
   me: Me;
@@ -23,14 +24,16 @@ interface Props {
 }
 
 export function ConnectTab({ me, state, active, analysis, justConnected, onChoose, onGo, onImported, autoImport }: Props) {
-  // A user (or an admin viewing as one) sees only their own league: re-import yes; demo, Yahoo, delete, settings no.
+  // A manager (or the owner viewing as one) sees only their league card: auto-import status and "Refresh from Yahoo
+  // now"; no demo, Yahoo API, bookmarklet, paste, import list, delete or settings (owner, 2026-11-02).
   const isUser = !!me.scope;
   return (
     <div className="stack">
       {justConnected && <div className="notice good">Yahoo connected. Pick your league below.</div>}
       {state.error && <ErrorBox error={state.error} onRetry={state.reload} />}
 
-      {active && <CurrentLeague active={active} analysis={analysis} onChoose={onChoose} onGo={onGo} pinned={isUser} />}
+      {active && <CurrentLeague active={active} analysis={analysis} onChoose={onChoose} onGo={onGo} pinned={isUser} autoImport={isUser ? autoImport : undefined} />}
+      {isUser && !active && <p className="muted">Your league isn't available yet: ask the league owner.</p>}
 
       {!isUser && (
         <div className="grid-2">
@@ -60,17 +63,21 @@ export function ConnectTab({ me, state, active, analysis, justConnected, onChoos
         </div>
       )}
 
-      <ImportSection
-        key={analysis.data?.league.fetchedAt ?? ""}
-        active={active}
-        canManage={!isUser}
-        onChoose={onChoose}
-        onImported={onImported}
-        onSettingsSaved={analysis.reload}
-        autoImport={autoImport}
-      />
+      {!isUser && (
+        <ImportSection
+          key={analysis.data?.league.fetchedAt ?? ""}
+          active={active}
+          canManage
+          onChoose={onChoose}
+          onImported={onImported}
+          onSettingsSaved={analysis.reload}
+          autoImport={autoImport}
+        />
+      )}
 
-      {state.data && (
+      {!isUser && me.role === "admin" && <AccessSection leagueId={active?.provider === "import" ? active.id : undefined} />}
+
+      {!isUser && state.data && (
         <div className="imp-chips">
           <span className="tag">Season {state.data.season}</span>
           <span className="tag">Week {state.data.currentWeek}</span>
@@ -89,6 +96,7 @@ function CurrentLeague({
   onChoose,
   onGo,
   pinned,
+  autoImport,
 }: {
   active: Active;
   analysis: AsyncState<Analysis>;
@@ -96,6 +104,8 @@ function CurrentLeague({
   onGo: () => void;
   /** User scope: the team is fixed by the access list, so no team picker and no Clear. */
   pinned: boolean;
+  /** Manager view: the auto-import line and "Refresh from Yahoo now" live on this card (only for the league it reads). */
+  autoImport?: AutoImportHandle;
 }) {
   // The team list comes from the League itself so the picker works even when analysis fails.
   // fetchedAt dep: reload after an imported league is restored from the browser backup (App.tsx).
@@ -161,6 +171,12 @@ function CurrentLeague({
       {pinned && teams.length > 0 && (
         <div className="muted small">
           Your team: <b>{teams.find((t) => t.id === team)?.name ?? team}</b>
+        </div>
+      )}
+      {autoImport?.status?.enabled && autoImport.status.importId === active.id && (
+        <div className="row gap wrap">
+          <AutoImportLine status={autoImport.status} />
+          <AutoImportRefresh handle={autoImport} />
         </div>
       )}
       {!pinned && teams.length > 0 && (

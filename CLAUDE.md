@@ -68,7 +68,8 @@ Open work and "Resume here" live in TASKS.md.
   running the release worktree ~/FantasyFootball-run (detached at the release commit; template
   scripts/com.fantasy.tradedesk.plist). Data persists in ~/FantasyFootball-run/.data; log ~/FantasyFootball-run/server.log.
   Sign-in: Discord (server/auth); its .env needs DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, SESSION_SECRET, PUBLIC_URL,
-  and who may sign in is ~/FantasyFootball-run/.data/access.json (missing = nobody). Smoke checks go through
+  and who may sign in is ~/FantasyFootball-run/.data/access.json (missing = nobody; the owner assigns managers to teams
+  in Connect → "Who can sign in"; admins only by hand). Smoke checks go through
   https://ff.raibot.us (writes from localhost fail the Origin check by design).
 - Mac deploy: `git -C ~/FantasyFootball-run checkout --detach <commit>` (+ `npm ci && npm run build` there when
   dependencies or web/ changed), then `launchctl kickstart -k gui/$(id -u)/com.fantasy.tradedesk` (when the plist

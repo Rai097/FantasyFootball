@@ -20,17 +20,18 @@ const { AccessFile } = await import("../auth/access.js");
 const { SessionStore, signSessionId } = await import("../auth/sessions.js");
 const { SESSION_COOKIE } = await import("../auth/guard.js");
 const { apiRouter, errorMiddleware, importPayload, PartialImportError } = await import("../api.js");
-const { AutoImportService, autoImportConfig, setAutoImport } = await import("./service.js");
+const { AutoImportService, autoImportConfig, setAutoImport, USER_DAILY_MAX, USER_MIN_GAP_MS, MANUAL_MIN_GAP_MS } = await import("./service.js");
 type CollectResult = import("./collector.js").CollectResult;
 
 const PUBLIC_URL = "https://ff.example";
 const SECRET = "autoimport-test-secret-0123456789-abcdef";
 const ADMIN = "100000000000000001";
 const USER = "200000000000000002";
+const OTHER = "300000000000000003";
 const LEAGUE = "1405188";
 const FILE = path.join(work, ".data", `import-y${LEAGUE}.json`);
 
-fs.writeFileSync(path.join(work, "access.json"), JSON.stringify({ admins: [ADMIN], users: [{ discordId: USER, leagueId: `y${LEAGUE}`, teamId: "1" }] }));
+fs.writeFileSync(path.join(work, "access.json"), JSON.stringify({ admins: [ADMIN], users: [{ discordId: USER, leagueId: `y${LEAGUE}`, teamId: "1" }, { discordId: OTHER, leagueId: "y999", teamId: "1" }] }));
 const sessions = new SessionStore({ read: async () => null, write: async () => undefined });
 const auth = createAuth({
   mode: "discord",
@@ -53,11 +54,12 @@ app.use(errorMiddleware);
 let base = "";
 let server: http.Server;
 const cookies: Record<string, { cookie: string; csrf: string }> = {};
+type Who = "admin" | "user" | "other";
 before(async () => {
   server = http.createServer(app);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  for (const [k, uid] of [["admin", ADMIN], ["user", USER]] as const) {
+  for (const [k, uid] of [["admin", ADMIN], ["user", USER], ["other", OTHER]] as const) {
     const { id, session } = await sessions.create({ uid, name: k, avatar: null });
     cookies[k] = { cookie: `${SESSION_COOKIE}=${encodeURIComponent(signSessionId(id, SECRET))}`, csrf: session.csrf };
   }
@@ -87,7 +89,7 @@ function payload(teams: number): Record<string, unknown> {
   };
 }
 
-async function call(method: string, p: string, who?: "admin" | "user", opts: { origin?: string | null; csrf?: string | null } = {}) {
+async function call(method: string, p: string, who?: Who, opts: { origin?: string | null; csrf?: string | null } = {}) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (who) headers.cookie = cookies[who].cookie;
   const origin = opts.origin === undefined ? PUBLIC_URL : opts.origin;
@@ -99,7 +101,7 @@ async function call(method: string, p: string, who?: "admin" | "user", opts: { o
 }
 
 /** A service whose collector returns the queued results; apply = the real server-side import. */
-async function service(results: CollectResult[], hold?: Promise<void>) {
+async function service(results: CollectResult[], hold?: Promise<void>, now?: () => Date) {
   let i = 0;
   const logs: string[] = [];
   const s = await AutoImportService.create(
@@ -114,6 +116,7 @@ async function service(results: CollectResult[], hold?: Promise<void>) {
       log: (l) => logs.push(l),
       noTimers: true,
       retryDelayMs: 0,
+      ...(now ? { now } : {}),
       loadState: async () => null,
       saveState: async () => undefined,
     },
@@ -123,13 +126,24 @@ async function service(results: CollectResult[], hold?: Promise<void>) {
 }
 const ok = (n: number): CollectResult => ({ ok: true, payload: payload(n), teams: n });
 
-test("auth: status and refresh need a session (401); refresh is admin-only (403) with Origin + CSRF", async () => {
-  await service([ok(3)]);
+test("auth: status and refresh need a session (401); a manager may refresh only the auto-imported league; Origin + CSRF", async () => {
+  const { s } = await service([ok(3)]);
   assert.equal((await call("GET", "/api/autoimport")).status, 401);
   assert.equal((await call("POST", "/api/autoimport/refresh")).status, 401);
+  // Another league's manager: 403, and nothing starts.
+  const o = await call("POST", "/api/autoimport/refresh", "other");
+  assert.equal(o.status, 403);
+  assert.equal(o.body?.code, "league");
+  assert.equal(s.status().running, false);
+  // A manager without Origin / CSRF: refused before anything runs.
+  assert.equal((await call("POST", "/api/autoimport/refresh", "user", { origin: null })).body?.code, "bad_origin");
+  assert.equal((await call("POST", "/api/autoimport/refresh", "user", { csrf: null })).body?.code, "csrf");
+  assert.equal(s.status().running, false);
+  // Other auto-import writes stay owner-only.
+  assert.equal((await call("DELETE", "/api/autoimport", "user")).body?.code, "admin_only");
   const u = await call("POST", "/api/autoimport/refresh", "user");
-  assert.equal(u.status, 403);
-  assert.equal(u.body?.code, "admin_only");
+  assert.equal(u.status, 202);
+  while (s.status().running) await new Promise((r) => setTimeout(r, 10));
   assert.equal((await call("POST", "/api/autoimport/refresh", "admin", { origin: null })).body?.code, "bad_origin");
   assert.equal((await call("POST", "/api/autoimport/refresh", "admin", { origin: "https://evil.example" })).status, 403);
   assert.equal((await call("POST", "/api/autoimport/refresh", "admin", { csrf: null })).body?.code, "csrf");
@@ -212,4 +226,52 @@ test("config: needs AUTO_IMPORT=1, a numeric league id and an existing profile d
   assert.equal(autoImportConfig({ AUTO_IMPORT: "true", AUTO_IMPORT_LEAGUE_ID: LEAGUE }, yes).enabled, false);
   assert.equal(autoImportConfig({ AUTO_IMPORT: "1", AUTO_IMPORT_LEAGUE_ID: LEAGUE, AUTO_IMPORT_CRON: "bad" }, yes).enabled, false);
   assert.match(autoImportConfig({}).profileDir, /\.data\/yahoo-chrome-profile$/);
+});
+
+test("manager limits: per-account cooldown, shared daily cap; the owner is never capped, only the 2-minute gap and one run at a time", async () => {
+  let t = Date.parse("2026-11-08T18:00:00Z");
+  const { s } = await service([ok(3)], undefined, () => new Date(t));
+  const settle = async () => {
+    while (s.status().running) await new Promise((r) => setTimeout(r, 5));
+  };
+  assert.equal(s.refreshNow({ uid: "a" }).ok, true);
+  await settle();
+  t += MANUAL_MIN_GAP_MS;
+  const cd = s.refreshNow({ uid: "a" });
+  assert.equal(cd.ok, false);
+  assert.equal(!cd.ok && cd.code, "user_cooldown");
+  assert.ok(!cd.ok && cd.retryAfterSec! > 0 && cd.retryAfterSec! <= USER_MIN_GAP_MS / 1000);
+  // The owner is not held by a manager's cooldown.
+  assert.equal(s.refreshNow().ok, true);
+  await settle();
+  // Fill the daily cap with other accounts (each 2 minutes apart).
+  for (let i = 1; i < USER_DAILY_MAX; i++) {
+    t += MANUAL_MIN_GAP_MS;
+    assert.equal(s.refreshNow({ uid: `u${i}` }).ok, true, `manager refresh ${i}`);
+    await settle();
+  }
+  t += MANUAL_MIN_GAP_MS;
+  const cap = s.refreshNow({ uid: "fresh" });
+  assert.equal(!cap.ok && cap.code, "daily_cap");
+  assert.equal(s.refreshNow().ok, true, "the owner still refreshes after the cap");
+  await settle();
+  // 24 h after the first manager refresh one slot frees up.
+  t = Date.parse("2026-11-09T18:00:01Z");
+  assert.equal(s.refreshNow({ uid: "fresh" }).ok, true);
+  await settle();
+});
+
+test("manager refresh over HTTP: 429 with the cooldown message, owner unaffected", async () => {
+  let t = Date.parse("2026-11-08T18:00:00Z");
+  const { s } = await service([ok(3)], undefined, () => new Date(t));
+  assert.equal((await call("POST", "/api/autoimport/refresh", "user")).status, 202);
+  while (s.status().running) await new Promise((r) => setTimeout(r, 5));
+  t += MANUAL_MIN_GAP_MS;
+  const r = await call("POST", "/api/autoimport/refresh", "user");
+  assert.equal(r.status, 429);
+  assert.equal(r.body?.code, "user_cooldown");
+  assert.match(String(r.body?.error), /try again in \d+ min/);
+  assert.ok(Number(r.retryAfter) > 0);
+  assert.equal((await call("POST", "/api/autoimport/refresh", "admin")).status, 202);
+  while (s.status().running) await new Promise((r) => setTimeout(r, 5));
 });

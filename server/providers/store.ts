@@ -34,10 +34,14 @@ let tmpSeq = 0;
  */
 export async function writeJson(name: string, data: unknown, opts: { secret?: boolean; compact?: boolean } = {}): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true });
-  const file = fileFor(name);
+  await writeFileAtomic(fileFor(name), opts.compact ? JSON.stringify(data) : JSON.stringify(data, null, 2), opts.secret ? 0o600 : 0o644);
+}
+
+/** The tmp-file + rename write behind `writeJson`, for a caller that owns an explicit path (e.g. the access list). */
+export async function writeFileAtomic(file: string, text: string, mode: number): Promise<void> {
   const tmp = `${file}.${process.pid}.${++tmpSeq}.${randomBytes(4).toString("hex")}.tmp`;
   try {
-    await fs.writeFile(tmp, opts.compact ? JSON.stringify(data) : JSON.stringify(data, null, 2), { mode: opts.secret ? 0o600 : 0o644 });
+    await fs.writeFile(tmp, text, { mode });
     await fs.rename(tmp, file);
   } catch (e) {
     await fs.rm(tmp, { force: true }).catch(() => undefined);
