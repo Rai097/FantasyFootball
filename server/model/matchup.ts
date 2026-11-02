@@ -3,7 +3,7 @@
 // projection makes the total incomplete, never a 0), Yahoo's locked total, Yahoo's points, the pre-game win chance and
 // the track record (winner calls, MAE and bias over the SAME team-weeks). I/O (league, logs, calendar) lives in api.ts.
 // The web app imports MatchupResponse from here (GET /api/league/import/:id/matchup?week=W).
-import type { MatchLog, MatchRow, MatchStatus, MatchWeek } from "./matchLog.js";
+import type { GameState, MatchLog, MatchRow, MatchStatus, MatchWeek } from "./matchLog.js";
 import type { ProjEntry } from "./projLog.js";
 import type { SlotKind } from "./types.js";
 
@@ -88,6 +88,8 @@ export interface MatchupCell {
   status: StatusChip | null;
   /** His game has started: `ours` is the value captured before kickoff. */
   locked: boolean;
+  /** His NFL game per Yahoo's matchup page; absent = not read (other pairings, older captures). */
+  game?: GameState;
 }
 export interface MatchupSideView {
   teamId: string;
@@ -103,7 +105,12 @@ export interface MatchupSideView {
   /** Yahoo's pre-game projected total (locked); null = none captured. */
   yahoo: number | null;
   /** Yahoo's "Proj" total from its pages as of the latest capture (Orig Proj: Σ starters' projections, no live points). */
+  yahooOrig: number | null;
+  /** Yahoo's "Live Proj" from its matchup page (points so far + what is left); null = not captured. */
   yahooLive: number | null;
+  /** Ours, live: finished games at their points, unplayed at our projection, in progress at the higher of the two;
+   *  null when any starter lacks a number or the page has no game states (only my own matchup's page is read). */
+  oursLive: number | null;
   /** Yahoo's points (live or final); null = not captured. */
   points: number | null;
   /** Pre-game win chance from our projections (0–1); null when either total is unknown. */
@@ -214,10 +221,24 @@ export function teamTotal(cells: (MatchupCell | null)[]): { ours: number | null;
   return { ours: missing ? null : r1(sum), partial: projected || !missing ? r1(sum) : null, missing };
 }
 
-function cellOf(ctx: MatchupContext, p: PlayerRef | undefined, fallbackName: string | undefined, yahoo: number | null, points: number | null, status?: string): MatchupCell | null {
-  if (!p) return fallbackName ? { id: null, name: fallbackName, pos: null, nflTeam: null, ours: null, yahoo, points, status: chip(status), locked: false } : null;
+/** Ours, live (see `MatchupSideView.oursLive`); null = unknown, never a partial sum. */
+export function liveTotal(cells: (MatchupCell | null)[]): number | null {
+  if (!cells.some((c) => c?.game)) return null;
+  let sum = 0;
+  for (const c of cells) {
+    if (!c) continue;
+    const v = c.game === "final" ? c.points : c.points === null ? c.ours : c.ours === null ? null : Math.max(c.points, c.ours);
+    if (v === null) return null;
+    sum += v;
+  }
+  return r1(sum);
+}
+
+function cellOf(ctx: MatchupContext, p: PlayerRef | undefined, fallbackName: string | undefined, yahoo: number | null, points: number | null, status?: string, game?: GameState): MatchupCell | null {
+  const g = game ? { game } : {};
+  if (!p) return fallbackName ? { id: null, name: fallbackName, pos: null, nflTeam: null, ours: null, yahoo, points, status: chip(status), locked: false, ...g } : null;
   const pr = starterProjection(ctx, p);
-  return { id: p.id, name: p.name, pos: p.pos, nflTeam: p.nflTeam, ours: pr.ours === null ? null : r1(pr.ours), yahoo, points, status: chip(status ?? p.status), locked: pr.locked };
+  return { id: p.id, name: p.name, pos: p.pos, nflTeam: p.nflTeam, ours: pr.ours === null ? null : r1(pr.ours), yahoo, points, status: chip(status ?? p.status), locked: pr.locked, ...g };
 }
 
 const isBench = (slot: string) => /^(BN|IR|IL)$/i.test(slot);
@@ -237,7 +258,7 @@ function lineupOf(ctx: MatchupContext, wk: MatchWeek | undefined, teamId: string
     if (!side) continue;
     const out: TeamLineup = { source: "page", starters: [], bench: [] };
     for (const r of side.rows) {
-      const cell = cellOf(ctx, r.name || r.yahooId ? ctx.resolveRow(r) : undefined, r.name, r.yahooProj, r.points, r.status);
+      const cell = cellOf(ctx, r.name || r.yahooId ? ctx.resolveRow(r) : undefined, r.name, r.yahooProj, r.points, r.status, r.game);
       (isBench(r.slot) ? out.bench : out.starters).push({ slot: r.slot, cell });
     }
     return out;
@@ -288,7 +309,9 @@ function sideView(ctx: MatchupContext, wk: MatchWeek | undefined, teamId: string
     oursIncomplete: missing,
     oursPartial: partial,
     yahoo: wk?.yahooLock[teamId]?.proj ?? null,
-    yahooLive: page?.totalProj ?? mod?.yahooProj ?? null,
+    yahooOrig: page?.totalProj ?? mod?.yahooProj ?? null,
+    yahooLive: page?.liveProj ?? null,
+    oursLive: lu?.source === "page" && !lu.unseen ? liveTotal(lu.starters.map((s) => s.cell)) : null,
     points: mod?.points ?? page?.totalPts ?? null,
     winPct: null,
   };

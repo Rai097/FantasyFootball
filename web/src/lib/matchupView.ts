@@ -98,12 +98,12 @@ export type YahooKind = "lock" | "live" | "none";
 /** Yahoo's column for a pairing: the pre-game lock when both sides have it, else the "Proj" total from Yahoo's pages for
  *  both sides (Orig Proj: the starters' pre-game projections, not Yahoo's Live Proj; one source per row), else unknown. A final week shows Yahoo's page totals. */
 export function yahooColumn(
-  a: Pick<MatchupSideView, "yahoo" | "yahooLive">,
-  b: Pick<MatchupSideView, "yahoo" | "yahooLive">,
+  a: Pick<MatchupSideView, "yahoo" | "yahooOrig">,
+  b: Pick<MatchupSideView, "yahoo" | "yahooOrig">,
   final: boolean,
 ): { label: string; kind: YahooKind; a: number | null; b: number | null } {
   if (a.yahoo != null && b.yahoo != null) return { label: final ? "Yahoo (page)" : "Yahoo", kind: "lock", a: a.yahoo, b: b.yahoo };
-  if (a.yahooLive != null || b.yahooLive != null) return { label: final ? "Yahoo (page)" : "Yahoo proj", kind: "live", a: a.yahooLive, b: b.yahooLive };
+  if (a.yahooOrig != null || b.yahooOrig != null) return { label: final ? "Yahoo (page)" : "Yahoo proj", kind: "live", a: a.yahooOrig, b: b.yahooOrig };
   return { label: "Yahoo", kind: "none", a: null, b: null };
 }
 

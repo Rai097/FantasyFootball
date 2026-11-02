@@ -1956,7 +1956,7 @@ from capture to the report. DEF identity: the same resolved player id the model 
 404; cached under `import:<id>:matchup:<W>`, invalidated by import and matchlog writes). Returns { week, currentWeek,
 weeks (selectable: recorded weeks + current), status, asOf, teams, mine: Pairing | null, others: Pairing[], record:
 { weeks [...], summary } }. Pairing (one shape, one builder `pairingView`, owner 2026-11-01): { sides[2] {teamId, name,
-record, ours, oursIncomplete, oursPartial, yahoo, yahooLive, points, winPct}, lineupSource (page / import / log | null),
+record, ours, oursIncomplete, oursPartial, yahoo, yahooOrig, yahooLive, oursLive, points, winPct}, lineupSource (page / import / log | null),
 rows [{slot, a, b}], bench [{slot, a, b}] }. Player cell: { id, name, pos, nflTeam, ours | null, yahoo | null,
 points | null, status chip (Q / D / O / IR), locked (game started) }. ≤ 48 KB (was 30 KB before others carried rows;
 measured 30.7 KB raw / 4.8 KB gzip on the 12-team fixture league, others 24.5 KB; 48 KB leaves room for 16 teams).
@@ -2035,7 +2035,7 @@ it and the handler re-checks ownership; the request team = the pinned user's tea
 { week, currentWeek, weeks: number[], status: "final"|"live"|"pre"|"unknown", asOf: ISO|null,
   teams: { [teamId]: name },
   mine: null | { lineupSource: "page"|"import"|"log",
-    sides: [{ teamId, name, record|null, ours|null, oursIncomplete, yahoo|null, yahooLive|null, points|null,
+    sides: [{ teamId, name, record|null, ours|null, oursIncomplete, yahoo|null, yahooOrig|null, yahooLive|null, oursLive|null, points|null,
               winPct|null }] x2,                     // side a = the request team
     rows:  [{ slot, a: Cell|null, b: Cell|null }],   // starters, Yahoo slot order
     bench: [{ slot, a: Cell|null, b: Cell|null }] },
@@ -2051,7 +2051,8 @@ with `oursIncomplete` = n when any starter is unprojected (an unmatched Yahoo na
 "(Empty)" slot as nothing). Starters: the owner's matchup page when read (`page`); else the latest import's Yahoo
 slots when the import is for week W and W is not final (`import`); else the projlog's captured starters of the week
 (`log`: "lineup as of the last capture", cannot see an unprojected starter). `yahoo` = the locked pre-game total,
-`yahooLive` = the latest capture's total (blends live points; never used for the record). `winPct` = Φ((ours_a −
+`yahooOrig` = the latest capture's "Proj" total (Yahoo's Orig Proj: Σ starters' projections, no live points; never
+used for the record); `yahooLive` / `oursLive`: see "Live projections" below. `winPct` = Φ((ours_a −
 ours_b) / `MATCHUP.marginSd` 35), pre-game estimate, null unless both totals are complete. Record over final weeks:
 a call = the projected winner won (tie projection = no call); `games` / calls count only games with complete
 projections from BOTH sources and a decided final; MAE / bias over the same team-weeks (ours, Yahoo's and points all
@@ -2094,8 +2095,8 @@ present). Measured: 6.8 KB on the fixture-built league (weeks 8 + 7).
 - Display totals (mine and others, never the record): `oursPartial` = Σ the projected starters; the UI shows
   "98.2 + 3 not projected" (collapsed row: "98.2 (+3)"), "—" when nothing is projected. `ours` stays null when
   incomplete and win % stays null when either side is incomplete.
-- Yahoo column: the pre-game lock when both sides have one ("Yahoo"); else Yahoo's current projected total
-  (`yahooLive`, module / page) for both sides, labelled "Yahoo (live)" with its own tooltip; a final week keeps
+- Yahoo column: the pre-game lock when both sides have one ("Yahoo"); else Yahoo's "Proj" total
+  (`yahooOrig`, module / page: Orig Proj) for both sides, labelled "Yahoo proj" with its own tooltip; a final week keeps
   "Yahoo (page)".
 - UI: the Other matchups row stays one line (teams, our totals, score); a tap opens the same totals block and the same
   mirrored lineup table + bench as my matchup, with a one-line note "Player points: only for your matchup" (+ "?") when
@@ -2137,3 +2138,19 @@ never set or move a lock (projLog / matchLog rules).
   hidden); then "Add by Discord ID".
 * Every edit is one log line (`[auth] event=access_set|access_remove uid=… target=…`).
 
+
+## Live projections on the Matchup tab (2026-11-02)
+
+The owner's question "what does Yahoo (live) mean, Yahoo says 165.54" found a mislabel: the module's and the matchup
+page's "Proj" total is Yahoo's **Orig Proj** (Σ starters' projections, never moves with points), not its Live Proj.
+* The field is renamed `yahooOrig`, labelled "Yahoo proj".
+* Matchup page parse (my matchup only): the header's "Live Proj" row → `PageSide.liveProj`, taken only when the
+  "Orig Proj" row beside it equals the starters' Total row within 0.015 (proves left = mid1); otherwise dropped with a
+  diag note. Each row gets `game`: "Final …" → final, "Mon 8:15 pm …" → pre, a score text with points → live, else
+  absent. Markup verified on the live week-8 page 2026-11-02. Both fields are optional in `cleanMatchups`; a bad value
+  is dropped alone, never the side.
+* `yahooLive` = the page's Live Proj. `oursLive` = Σ starters: final → Yahoo points, not played → ours, in progress →
+  max(points, ours); null when any starter lacks the number it needs or no row has a game state (other pairings,
+  captures before this change). Never a partial sum.
+* UI: "Ours live" and "Yahoo live" rows under "Ours" / "Yahoo proj", shown only while the week is not final and a
+  value exists. The pre-game win chance is unchanged.

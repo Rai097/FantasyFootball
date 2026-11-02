@@ -44,7 +44,7 @@ test("full run: W from the home page's week picker, W and W−1 pairings, the ow
   assert.deepEqual([w7.week, w7.status, w7.pairings.length, w7.pages.length], [7, "final", 6, 1]);
   const p7 = w7.pages[0];
   assert.deepEqual([p7.mid1, p7.mid2, p7.sides[0].teamId, p7.sides[0].totalProj, p7.sides[0].totalPts], ["4", "3", "4", 123.86, 165.78]);
-  assert.deepEqual(p7.sides[0].rows[0], { slot: "QB", yahooId: "32671", name: "Joe Burrow", pos: "QB", team: "CIN", yahooProj: 18.86, points: 28.88 });
+  assert.deepEqual(p7.sides[0].rows[0], { slot: "QB", yahooId: "32671", name: "Joe Burrow", pos: "QB", team: "CIN", yahooProj: 18.86, points: 28.88, game: "final" });
   assert.equal(w8.pages[0].sides[0].rows[0].points, null, "not played yet: null, never 0");
   // Wire size: what one import adds to the payload.
   assert.ok(JSON.stringify(r.matchups).length < 30_000, `${JSON.stringify(r.matchups).length} bytes`);

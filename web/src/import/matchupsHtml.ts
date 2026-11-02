@@ -7,6 +7,8 @@
 import { decodeEntities, htmlToText, parsePosTeam, stripMarkupAttrs } from "./yahooHtml";
 
 export type MatchupStatus = "final" | "live" | "pre" | "unknown";
+/** A player's NFL game as his matchup-page cell shows it: kickoff time (pre), "Final …" (final), else in progress. */
+export type GameState = "pre" | "live" | "final";
 
 export interface ModuleSide {
   teamId: string;
@@ -49,12 +51,16 @@ export interface PageRow {
   yahooProj: number | null;
   /** Yahoo's fantasy points; null = "–" (not played yet) or empty. */
   points: number | null;
+  /** His game's state; absent = not shown (empty slot, bye, an unread cell). */
+  game?: GameState;
 }
 export interface PageSide {
   teamId: string;
-  /** Starters' Total row: Yahoo's projected total and points. */
+  /** Starters' Total row: Yahoo's projected total ("Orig Proj": Σ starters' projections) and points. */
   totalProj: number | null;
   totalPts: number | null;
+  /** Yahoo's "Live Proj" from the page header (points so far + what is left); absent = not shown / not trusted. */
+  liveProj?: number;
   /** Starters then bench / IR, in page order; an "(Empty)" slot has no player. */
   rows: PageRow[];
 }
@@ -245,10 +251,41 @@ export function parseMatchupPage(rawHtml: string, ids: { mid1: string; mid2: str
       diag.rows++;
       for (const k of [0, 1] as const) {
         const cell = cs[cols.player[k]]?.html ?? "";
-        sides[k].rows.push({ slot: slot.slice(0, 12), ...playerOf(cell), yahooProj: cellNumber(cs[cols.proj[k]]?.html), points: cellNumber(cs[cols.pts[k]]?.html) });
+        const points = cellNumber(cs[cols.pts[k]]?.html);
+        const game = gameOf(cell, points);
+        sides[k].rows.push({ slot: slot.slice(0, 12), ...playerOf(cell), yahooProj: cellNumber(cs[cols.proj[k]]?.html), points, ...(game ? { game } : {}) });
       }
     }
     starters = false;
   }
-  return anyCols ? { sides, diag } : { sides: undefined, diag };
+  if (!anyCols) return { sides: undefined, diag };
+  const live = headerProj(stripMarkupAttrs(rawHtml), [sides[0].totalProj, sides[1].totalProj]);
+  if (live === "untrusted") diag.note ??= "Live Proj not used: the header's Orig Proj does not match the starters' totals";
+  else if (live) for (const k of [0, 1] as const) sides[k].liveProj = live[k];
+  return { sides, diag };
+}
+
+/** The game text in a player cell: "Final W 43-36 vs Ten" → final, "Mon 8:15 pm vs Chi" → pre, a score with points → in progress. */
+export function gameOf(cellHtml: string, points: number | null): GameState | undefined {
+  const t = text1(cellHtml);
+  if (/\bFinal\b/i.test(t)) return "final";
+  if (/\b(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+\d{1,2}:\d{2}\s*[ap]m\b/i.test(t)) return "pre";
+  return points !== null && /\b(?:vs|@)\b/i.test(t) ? "live" : undefined;
+}
+
+/**
+ * The page header's two "Live Proj" numbers (left = mid1), taken only when the "Orig Proj" row beside them matches the
+ * starters' Total row: that proves the header's side order. undefined = no Live Proj on the page.
+ */
+function headerProj(html: string, totals: [number | null, number | null]): [number, number] | "untrusted" | undefined {
+  const row = (label: string) => {
+    const m = new RegExp(`<td\\b[^>]*>([^<]*)</td>\\s*<th\\b[^>]*>\\s*${label}\\s*</th>\\s*<td\\b[^>]*>([^<]*)</td>`, "i").exec(html);
+    return m ? ([cellNumber(m[1]), cellNumber(m[2])] as const) : undefined;
+  };
+  const live = row("Live Proj");
+  if (!live || live[0] === null || live[1] === null) return undefined;
+  const orig = row("Orig Proj");
+  const same = (a: number | null, b: number | null) => a !== null && b !== null && Math.abs(a - b) < 0.015;
+  if (!orig || !same(orig[0], totals[0]) || !same(orig[1], totals[1])) return "untrusted";
+  return [live[0], live[1]];
 }

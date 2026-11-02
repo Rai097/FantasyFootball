@@ -14,7 +14,9 @@ import { useAsync } from "../lib/useAsync";
 const TIP = {
   ours: "Our projection: the sum of the starters' projections this week. Once a player's game has started his number is the one captured before kickoff.",
   yahoo: "Yahoo's own projection, taken before the week's first kickoff so it stays comparable with the final score.",
-  yahooLive: "Yahoo's projected total (\"Orig Proj\" on its matchup page): the starters' own projections added up; it does not move with live points.",
+  yahooOrig: "Yahoo's projected total (\"Orig Proj\" on its matchup page): the starters' own projections added up; it does not move with live points.",
+  oursLive: "Our projection updated with the games played: finished games count their real points, games not started our projection, games in progress the higher of the two.",
+  yahooLive: "Yahoo's \"Live Proj\" from its matchup page: points so far plus Yahoo's projection for what is left.",
   score: "Yahoo's points so far (final once the week is over); stat corrections can still move it until Thursday.",
   yahooPage: "Yahoo's own projected total from its matchup page; the track record uses each starter's pre-kickoff Yahoo projection instead.",
   pts: "Yahoo's fantasy points for this player; a dash means he has not played yet.",
@@ -33,7 +35,7 @@ const TIP = {
 
 const SOURCE_LABEL = { page: "Lineup from Yahoo's matchup page", import: "Lineup as of the last import", log: "Lineup as of the last capture" } as const;
 const STATUS_LABEL = { final: "Final", live: "In progress", pre: "Not started", unknown: "Status unknown" } as const;
-const yahooTip = (kind: YahooKind, final: boolean) => (final ? TIP.yahooPage : kind === "live" ? TIP.yahooLive : TIP.yahoo);
+const yahooTip = (kind: YahooKind, final: boolean) => (final ? TIP.yahooPage : kind === "live" ? TIP.yahooOrig : TIP.yahoo);
 
 export function MatchupTab({ active }: { active: Active & { team: string } }) {
   const isImport = active.provider === "import";
@@ -105,7 +107,9 @@ function PairingTotals({ m, p }: { m: MatchupResponse; p: MatchupPairing }) {
         ))}
       </div>
       <TotalRow label="Ours" tip={TIP.ours} a={oa.value} b={ob.value} notes={[oa.note, ob.note]} />
+      {!final && (a.oursLive != null || b.oursLive != null) && <TotalRow label="Ours live" tip={TIP.oursLive} a={f1(a.oursLive)} b={f1(b.oursLive)} />}
       <TotalRow label={y.label} tip={yahooTip(y.kind, final)} a={f1(y.a)} b={f1(y.b)} />
+      {!final && (a.yahooLive != null || b.yahooLive != null) && <TotalRow label="Yahoo live" tip={TIP.yahooLive} a={f1(a.yahooLive)} b={f1(b.yahooLive)} />}
       <TotalRow label="Score" sub={asOf} tip={TIP.score} a={f1(a.points)} b={f1(b.points)} />
       <div className="mu-chips row gap wrap">
         {wins ? (

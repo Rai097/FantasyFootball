@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectMatchups } from "../../web/src/import/matchups.js";
 import { cleanMatchups, mergeMatchCapture, type MatchLog, type MatchRow } from "./matchLog.js";
-import { buildMatchup, MATCHUP, normCdf, starterProjection, teamTotal, trackRecord, winChance, type MatchupCell, type MatchupContext, type PlayerRef } from "./matchup.js";
+import { buildMatchup, liveTotal, MATCHUP, normCdf, starterProjection, teamTotal, trackRecord, winChance, type MatchupCell, type MatchupContext, type PlayerRef } from "./matchup.js";
 import type { ProjEntry } from "./projLog.js";
 
 test("win chance: Φ(margin / 35), a named calibration constant; even = 50%", () => {
@@ -181,7 +181,7 @@ test("week 8 (live, Saturday): Thursday starters locked from the log, Sunday sta
   assert.equal(r.mine!.rows[0].a!.points, null, "not played on the page: null");
   assert.equal(me.ours, r1(20.4 + 8 * 10));
   assert.equal(me.yahoo, null, "first captured after the week's first kickoff: no pre-game lock");
-  assert.equal(me.yahooLive, 131.79);
+  assert.equal(me.yahooOrig, 131.79);
   assert.equal(me.points, 0);
   assert.ok(me.winPct! > 0.5);
   assert.deepEqual(r.weeks, [7, 8]);
@@ -253,7 +253,7 @@ test("others: the same rows / bench as mine (one pairingView), from the latest i
   const full = r.others.find((o) => !o.sides.some((s) => s.teamId === "5"))!;
   assert.deepEqual(full.sides.map((s) => [s.ours, s.oursIncomplete, s.oursPartial]), [[20, 0, 20], [20, 0, 20]]);
   assert.equal(full.sides[0].winPct, 0.5);
-  assert.ok(full.sides.every((s) => s.yahooLive !== null), "Yahoo's current total from the module");
+  assert.ok(full.sides.every((s) => s.yahooOrig !== null), "Yahoo's Proj total from the module");
 });
 
 test("partial totals (display only): partial sum + count, win % null; the record stays strict", () => {
@@ -273,11 +273,20 @@ test("partial totals (display only): partial sum + count, win % null; the record
   assert.deepEqual([me.ours, me.oursIncomplete, me.oursPartial], [null, 1, 120]);
 });
 
-test("Yahoo: no pre-game lock (week first captured after Thursday) → yahoo null, Yahoo's live total kept in yahooLive for every pairing", () => {
+test("Yahoo: no pre-game lock (week first captured after Thursday) → yahoo null, Yahoo's Proj total kept in yahooOrig for every pairing", () => {
   const r = buildMatchup(ctxOf(8, { lineups: lineupsAll() }), (w) => ctxOf(w));
   for (const p of [r.mine!, ...r.others])
     for (const s of p.sides) {
       assert.equal(s.yahoo, null, `lock ${s.teamId}`);
-      assert.equal(typeof s.yahooLive, "number", `live ${s.teamId}`);
+      assert.equal(typeof s.yahooOrig, "number", `live ${s.teamId}`);
     }
+});
+
+test("ours live: final = points, not started = ours, in progress = the higher; any unknown → null; no game states → null", () => {
+  const c = (game: MatchupCell["game"], ours: number | null, points: number | null) => ({ ours, points, ...(game ? { game } : {}) }) as MatchupCell;
+  assert.equal(liveTotal([c("final", 22, 42.48), c("pre", 25.66, null), c("live", 10, 6), c("live", 5, 9), null]), 87.1, "42.48 + 25.66 + max(6, 10) + max(9, 5)");
+  assert.equal(liveTotal([c("final", 12.4, 6.9), c(undefined, 0, null)]), 6.9, "a final game counts its real points even below ours; a bye counts ours (0)");
+  assert.equal(liveTotal([c("final", 12, null)]), null, "final without points: unknown, never 0");
+  assert.equal(liveTotal([c("pre", null, null), c("final", 1, 2)]), null, "an unprojected starter: unknown");
+  assert.equal(liveTotal([c(undefined, 10, 20), c(undefined, 5, null)]), null, "older captures without game states: unknown");
 });

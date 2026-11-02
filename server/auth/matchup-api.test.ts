@@ -244,7 +244,7 @@ describe("matchups log (import v9)", { timeout: 300_000 }, () => {
     assert.ok(j.weeks.includes(W) && j.weeks.includes(W - 1));
     assert.equal(j.mine.lineupSource, "page");
     assert.deepEqual(j.mine.sides.map((s: any) => s.teamId), ["4", "7"]);
-    assert.equal(j.mine.sides[0].yahooLive, 131.79);
+    assert.equal(j.mine.sides[0].yahooOrig, 131.79);
     assert.equal(j.mine.rows[0].a.name, "Joe Burrow");
     assert.equal(j.mine.rows[0].a.points, null, "'–' on Yahoo's page: null, never 0");
     for (const s of j.mine.sides) assert.ok(s.ours === null ? s.oursIncomplete > 0 : s.oursIncomplete === 0, JSON.stringify(s));

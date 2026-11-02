@@ -33,11 +33,18 @@ export interface MatchRow {
   status?: string;
   yahooProj: number | null;
   points: number | null;
+  /** His NFL game: not started / in progress / final; absent = not shown (captures before 2026-11-02 have none). */
+  game?: GameState;
 }
+export type GameState = "pre" | "live" | "final";
+const GAMES: readonly string[] = ["pre", "live", "final"];
 export interface MatchPageSide {
   teamId: string;
+  /** Yahoo's "Orig Proj": Σ starters' projections. */
   totalProj: number | null;
   totalPts: number | null;
+  /** Yahoo's "Live Proj" (points so far + what is left); absent = not captured. */
+  liveProj?: number;
   rows: MatchRow[];
 }
 export interface MatchPage {
@@ -167,6 +174,7 @@ function cleanRow(v: unknown): MatchRow | undefined {
   if (team && /^[A-Za-z]{2,4}$/.test(team)) row.team = team.toUpperCase();
   const status = s(o.status, 8);
   if (status && /^[A-Za-z0-9-]{1,8}$/.test(status)) row.status = status.toUpperCase();
+  if (typeof o.game === "string" && GAMES.includes(o.game)) row.game = o.game as GameState;
   return row;
 }
 
@@ -183,7 +191,9 @@ function cleanPageSide(v: unknown): MatchPageSide | undefined {
     if (!c) return undefined; // one unreadable row = the side is not trusted
     rows.push(c);
   }
-  return { teamId, totalProj, totalPts, rows };
+  // Optional and newer than the rest: an unreadable Live Proj is dropped alone, never the side.
+  const liveProj = num(o.liveProj, TEAM_PTS);
+  return { teamId, totalProj, totalPts, ...(typeof liveProj === "number" ? { liveProj } : {}), rows };
 }
 
 /**

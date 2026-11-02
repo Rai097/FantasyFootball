@@ -135,3 +135,16 @@ test("merge: pages replace by pairing, a page not re-fetched is kept; an older c
   assert.deepEqual(Object.keys(fresh.weeks), ["8"]);
   assert.equal(fresh.weeks["8"].pages["4-7"].fetchedAt, "2027-09-10T12:00:00.000Z");
 });
+
+test("cleanMatchups: a row's game state and a side's Live Proj pass through; bad ones are dropped alone, never the side", () => {
+  const good = payload();
+  const pg = (good.matchups.weeks[0].pages[0] as ReturnType<typeof page>).sides;
+  Object.assign(pg[0], { liveProj: 165.54 });
+  Object.assign(pg[0].rows[0], { game: "final" });
+  Object.assign(pg[1], { liveProj: "lots" });
+  Object.assign(pg[1].rows[0], { game: "halftime" });
+  const c = cleanMatchups(good);
+  const [a, b] = c.weeks[0].pages[0].sides;
+  assert.deepEqual([a.liveProj, a.rows[0].game], [165.54, "final"]);
+  assert.deepEqual(["liveProj" in b, "game" in b.rows[0], b.rows.length], [false, false, 1]);
+});

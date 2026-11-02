@@ -42,7 +42,7 @@ export function mockMatchup(week?: number): MatchupResponse {
   const oursA = sum(A.map((r) => r[3]));
   const oursB = sum(B.map((r) => r[3]));
   const side = (teamId: string, name: string, record: string, ours: number, yahoo: number, points: number | null, winPct: number) => ({
-    teamId, name, record, ours, oursIncomplete: 0, oursPartial: ours, yahoo, yahooLive: yahoo, points: live ? points : points == null ? null : points + 52.3, winPct,
+    teamId, name, record, ours, oursIncomplete: 0, oursPartial: ours, yahoo, yahooOrig: yahoo, yahooLive: live ? yahoo + 21.6 : null, oursLive: live ? ours + 18.2 : null, points: live ? points : points == null ? null : points + 52.3, winPct,
   });
   const rows = A.map((a, i) => ({ slot: a[0], a: cell(a[1], a[0], a[2], a[3], a[4], live ? a[5] : null, a[6]), b: cell(B[i][1], B[i][0], B[i][2], B[i][3], B[i][4], live ? B[i][5] : null, B[i][6]) }));
   const bench = [
@@ -67,7 +67,7 @@ export function mockMatchup(week?: number): MatchupResponse {
     const tb = total(xb);
     const win = ta.ours != null && tb.ours != null ? (ta.ours > tb.ours ? 0.55 : 0.45) : null;
     const sideO = (teamId: string, name: string, t: typeof ta, yahoo: number, pts: number, winPct: number | null) => ({
-      teamId, name, record: "4-3", ...t, yahoo: locked ? yahoo : null, yahooLive: yahoo + 3.1, points: live ? pts : pts + 70, winPct,
+      teamId, name, record: "4-3", ...t, yahoo: locked ? yahoo : null, yahooOrig: yahoo + 3.1, yahooLive: null, oursLive: null, points: live ? pts : pts + 70, winPct,
     });
     return {
       sides: [sideO(id1, n1, ta, 118.4, 31.2, win), sideO(id2, n2, tb, 112.9, 27.8, win == null ? null : 1 - win)],
