@@ -2116,7 +2116,7 @@ stays admin. The handler refuses a manager whose `leagueId` isn't the auto-impor
 (in memory; a restart resets them): one run at a time and one accepted refresh per 2 minutes for everyone; a manager
 also waits 15 minutes between their own refreshes (`user_cooldown`) and managers share 12 accepted refreshes per
 rolling 24 h (`daily_cap`). The owner (real admin, also while viewing as) is never held by the manager limits. Cost:
-each accepted refresh is one full headless read of the league on the owner's Yahoo sign-in (~30–60 s), so the cap
+each accepted refresh is one full headless read of the league on the owner's Yahoo sign-in (~85–125 s on real runs), so the cap
 bounds managers to 12 extra reads a day on top of the schedule. Locked projections are safe: captures after kickoff
 never set or move a lock (projLog / matchLog rules).
 
