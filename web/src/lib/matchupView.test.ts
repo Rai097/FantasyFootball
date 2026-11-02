@@ -15,7 +15,7 @@ test("display totals: full sum; partial sum + 'n not projected' (never silent, n
 
 test("Yahoo column: the pre-game lock, else Yahoo's live total labelled live (both sides one source), else unknown", () => {
   assert.deepEqual(yahooColumn({ yahoo: 120, yahooLive: 131 }, { yahoo: 110, yahooLive: 100 }, false), { label: "Yahoo", kind: "lock", a: 120, b: 110 });
-  assert.deepEqual(yahooColumn({ yahoo: null, yahooLive: 131.8 }, { yahoo: 110, yahooLive: 100 }, false), { label: "Yahoo (live)", kind: "live", a: 131.8, b: 100 });
+  assert.deepEqual(yahooColumn({ yahoo: null, yahooLive: 131.8 }, { yahoo: 110, yahooLive: 100 }, false), { label: "Yahoo proj", kind: "live", a: 131.8, b: 100 });
   assert.deepEqual(yahooColumn({ yahoo: null, yahooLive: 123.9 }, { yahoo: null, yahooLive: 135 }, true), { label: "Yahoo (page)", kind: "live", a: 123.9, b: 135 });
   assert.deepEqual(yahooColumn({ yahoo: 123.9, yahooLive: 1 }, { yahoo: 135, yahooLive: 2 }, true).label, "Yahoo (page)");
   assert.deepEqual(yahooColumn({ yahoo: null, yahooLive: null }, { yahoo: null, yahooLive: null }, false), { label: "Yahoo", kind: "none", a: null, b: null });

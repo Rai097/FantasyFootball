@@ -14,7 +14,7 @@ import { useAsync } from "../lib/useAsync";
 const TIP = {
   ours: "Our projection: the sum of the starters' projections this week. Once a player's game has started his number is the one captured before kickoff.",
   yahoo: "Yahoo's own projection, taken before the week's first kickoff so it stays comparable with the final score.",
-  yahooLive: "Yahoo's current projected total from its league page: no pre-game number was captured this week, and it moves with live points during games.",
+  yahooLive: "Yahoo's projected total (\"Orig Proj\" on its matchup page): the starters' own projections added up; it does not move with live points.",
   score: "Yahoo's points so far (final once the week is over); stat corrections can still move it until Thursday.",
   yahooPage: "Yahoo's own projected total from its matchup page; the track record uses each starter's pre-kickoff Yahoo projection instead.",
   pts: "Yahoo's fantasy points for this player; a dash means he has not played yet.",

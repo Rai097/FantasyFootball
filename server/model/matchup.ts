@@ -102,7 +102,7 @@ export interface MatchupSideView {
   oursPartial: number | null;
   /** Yahoo's pre-game projected total (locked); null = none captured. */
   yahoo: number | null;
-  /** Yahoo's projected total as of the latest capture (blends live points while in progress). */
+  /** Yahoo's "Proj" total from its pages as of the latest capture (Orig Proj: Σ starters' projections, no live points). */
   yahooLive: number | null;
   /** Yahoo's points (live or final); null = not captured. */
   points: number | null;
